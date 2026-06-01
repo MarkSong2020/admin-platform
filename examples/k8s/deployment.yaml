@@ -1,0 +1,237 @@
+# ============================================================================
+# Reference K8s Deployment for services built from python-web-service-template
+# ----------------------------------------------------------------------------
+# Replace these placeholders before applying (use envsubst / kustomize / helm):
+#   ${SERVICE_NAME}    — the service prefix (e.g. payment, ledger). Must match
+#                        APP_SERVICE_ID and the ADR §3/§5/§8/§10 prefix
+#                        registered in service-prefix-registry.md.
+#   ${IMAGE}           — full image ref with digest, e.g.
+#                        registry.internal/ledger:sha-abc1234
+#   ${REPLICAS}        — start with 2 (HPA will scale); never set lower
+#                        than 2 for production (rolling update needs spare).
+#
+# Topology assumptions (must match doc/operations/DEPLOYMENT.md):
+#   - uvicorn single-worker per pod (NOT --workers N). Scale = pod count.
+#   - PostgreSQL + Redis are managed services with secrets injected.
+#   - Idempotency requires Redis single-node OR primary-replica with sync
+#     replication; see doc/tech-debt/KNOWN_DEVIATIONS.md #12 for the
+#     Cluster failover caveat.
+#
+# Three probes — three different jobs (see ADR §6 / api/v1/health.py):
+#   /healthz   liveness   — process alive, no deps. Restart on fail.
+#   /readyz    readiness  — real SELECT 1 + Redis ping. Drop from Service
+#                            on fail (don't restart — flapping dep).
+#   /startupz  startup    — lifespan completion gate. Liveness/readiness
+#                            stay disabled until this succeeds.
+# ============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${SERVICE_NAME}
+
+---
+# Non-secret config. Mirrors .env.example structure; tighten per env.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${SERVICE_NAME}-config
+  namespace: ${SERVICE_NAME}
+data:
+  APP_APP_NAME: "${SERVICE_NAME}"
+  APP_SERVICE_ID: "${SERVICE_NAME}"
+  APP_LOG_LEVEL: "INFO"
+  APP_DEBUG: "false"
+  APP_REQUEST_ID_HEADER: "X-Request-ID"
+  APP_CORS_ALLOW_ORIGINS: "[]"
+  APP_CORS_ALLOW_CREDENTIALS: "true"
+  APP_DB_POOL_SIZE: "10"
+  APP_DB_MAX_OVERFLOW: "20"
+  APP_IDEMPOTENCY_ENABLED: "true"
+  APP_IDEMPOTENCY_TTL_SECONDS: "86400"
+  APP_IDEMPOTENCY_LOCK_TTL_SECONDS: "30"
+  # CRITICAL for production: lifespan eager-probes DB + Redis at startup.
+  # Pod won't get past startupProbe if a dep is unreachable, K8s restarts.
+  APP_STARTUP_EAGER_CONNECT: "true"
+
+---
+# Secret — DATABASE_URL and REDIS_URL must be injected from your secret store
+# (External Secrets Operator / Vault Agent / cloud KMS). Do NOT commit values
+# here; this file is a structural template only.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${SERVICE_NAME}-secrets
+  namespace: ${SERVICE_NAME}
+type: Opaque
+stringData:
+  APP_DATABASE_URL: "postgresql+asyncpg://USER:PASS@HOST:5432/DB"
+  APP_REDIS_URL: "redis://HOST:6379/0"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${SERVICE_NAME}
+spec:
+  selector:
+    app: ${SERVICE_NAME}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${SERVICE_NAME}
+  labels:
+    app: ${SERVICE_NAME}
+spec:
+  replicas: ${REPLICAS}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: ${SERVICE_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE_NAME}
+      annotations:
+        # Trigger pod restart on ConfigMap change (manage via controller, not pod template).
+        configmap.reloader.stakater.com/reload: "${SERVICE_NAME}-config"
+        secret.reloader.stakater.com/reload: "${SERVICE_NAME}-secrets"
+    spec:
+      # SIGTERM → uvicorn drain. Give in-flight requests time to finish.
+      # Should exceed (slowest handler timeout) + safety margin.
+      terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ${SERVICE_NAME}-config
+            - secretRef:
+                name: ${SERVICE_NAME}-secrets
+          resources:
+            requests:
+              # Single-worker async uvicorn — CPU is bursty around request
+              # serialisation. Memory floor for SQLAlchemy + asyncpg pools.
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          # Startup probe runs FIRST. Liveness/readiness suspended until this
+          # succeeds. failureThreshold * periodSeconds = max startup budget.
+          # Tune for cold-start: lifespan eager_probe + DB migrations + uvicorn
+          # worker boot. 30 * 2 = 60s headroom.
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 2
+          # Liveness: process-only. NO dep checks. If the process is stuck
+          # (deadlock / OOM-near-miss), K8s restarts. Don't restart on dep
+          # flaps — that's what readiness is for.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Readiness: real SELECT 1 + Redis ping. Drop from Service endpoints
+          # on fail — traffic shifts to healthy pods until deps recover.
+          # Don't auto-restart (would cascade-kill all pods on DB blip).
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              exec:
+                # Give the load balancer time to drain before SIGTERM hits.
+                # Service endpoints update is async — 10s covers most CNIs.
+                command: ["/bin/sh", "-c", "sleep 10"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # uvicorn / starlette write tempfiles; alembic stages SQL — keep
+            # rootfs read-only, only /tmp writable.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${SERVICE_NAME}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ${SERVICE_NAME}
+  minReplicas: ${REPLICAS}
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 30
+
+---
+# PodDisruptionBudget — guarantees at least 1 pod stays during voluntary
+# disruptions (node drain / cluster upgrade). Pair with replicas >= 2.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${SERVICE_NAME}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ${SERVICE_NAME}

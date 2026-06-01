@@ -1,0 +1,41 @@
+# VCS / IDE / agent settings
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+
+# Tool caches and venv
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.uv-cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Python runtime
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+
+# Tests and docs (not needed in runtime image)
+tests/
+docs/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

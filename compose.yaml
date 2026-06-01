@@ -1,0 +1,41 @@
+name: python-web-service-template
+
+# Local dev only. Production must run Postgres via managed RDS (or equivalent)
+# with secrets injected from K8s/Vault, never docker-compose. The password
+# variables read from the developer's .env or fall back to "app" — strictly
+# fine for an isolated dev DB; an explicit env var is provided so a developer
+# with stricter security policies can override without editing this file.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Errata #5 — Redis is opt-in. Bring it up with: docker compose --profile cache up -d
+  redis:
+    image: redis:7-alpine
+    profiles: ["cache"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_data:
