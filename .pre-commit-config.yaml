@@ -1,0 +1,38 @@
+# Pre-commit hooks (v0.4.14+) — fast local guardrails before pushing to CI.
+#
+# Setup once per clone:
+#   uv run pre-commit install
+# Or with pipx:
+#   pipx install pre-commit && pre-commit install
+#
+# Mirrors a strict subset of `make check` so failures show up at commit time,
+# not after pushing. Pyright is intentionally NOT here — it's slow and CI
+# catches the same issues; keep pre-commit under a second so it doesn't
+# become friction.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.3
+    hooks:
+      - id: ruff-format
+        name: ruff-format
+      - id: ruff-check
+        name: ruff-check
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        # v0.4.21: K8s manifests (examples/k8s/deployment.yaml) bundle multiple
+        # resources (Namespace + ConfigMap + Service + Deployment + ...) with
+        # `---` document separators — that's the standard K8s convention and
+        # not negotiable. Without this flag check-yaml fails on the first `---`.
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key

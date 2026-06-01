@@ -1,0 +1,148 @@
+# ============================================================================
+# 本文件是 GitHub Actions **参考资产**（可直接 fork 跑），不代表团队 CI 平台已定。
+# 模板不指定真实 CI 平台 —— 业务团队按 ADR 决议自选（阿里云效 / Jenkins / GitLab CI 等）。
+# Makefile 的 make check / audit / migrate / test-integration / check-db 在不同平台间完全 portable。
+# 详见 doc/operations/CI_MIGRATION.md。
+# ============================================================================
+
+name: CI (reference only)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.9.30"
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  fast:
+    name: fast lane (lint + type + unit + audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --all-extras --dev --frozen
+
+      - name: Quality gate (ruff + pyright + pytest -m "not integration")
+        run: make check
+
+      # v0.4.21: also run the `.pre-commit-config.yaml` hooks against the full
+      # tree — `make check` covers ruff/pyright/pytest but not the standalone
+      # pre-commit-hooks (check-yaml / check-toml / end-of-file-fixer /
+      # trailing-whitespace / detect-private-key). Without this, hook config
+      # drift goes silent in CI and only surfaces when a new joiner installs
+      # the hook locally and gets confused by failed first commits.
+      - name: pre-commit hooks (config drift guard)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      # v0.4.12: audit must BLOCK on known CVEs. Pre-v0.4.12 this step used
+      # `continue-on-error: true` which silently masked vulnerabilities in
+      # transitive deps — a textbook way for security regressions to land.
+      # If a transient false positive blocks an urgent fix, add a targeted
+      # `--ignore-vuln <PYSEC-XXXX>` in the Makefile with an inline TODO +
+      # owner; never re-introduce `continue-on-error` here.
+      - name: Dependency audit (blocking)
+        run: make audit
+
+      # v0.5.0+: reference path test — generator end-to-end smoke. unit tests
+      # (test_new_module.py) cover the generator's *component* contracts but
+      # not the *composition* failure modes. v0.5.0 self-review actually
+      # surfaced 3 real bugs only via local `make smoke-generator`:
+      #   - multi-patch alembic env.py triggered ruff I001 (commit 5657730)
+      #   - env.py needed `# isort: skip_file` (commit 3209cfc)
+      #   - `Enum.create(checkfirst=True)` failed under async DDL (76e2dda)
+      # All shipped in v0.5.0 release before being caught. Running smoke in
+      # CI on every PR closes that gap.
+      #
+      # smoke runs `make new-module` + `make check` + auto-cleanup; it does
+      # NOT need Postgres / Redis (no DB ops in the generator path), so it
+      # belongs in fast lane.
+      - name: Generator end-to-end smoke
+        run: make smoke-generator
+
+  db:
+    name: db lane (migrations + drift + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        # v0.4.12: provisioned so future idempotency-redis integration tests
+        # (see tests/integration/test_idempotency_redis.py) can run without
+        # extra setup. Baseline integration tests opt out of idempotency via
+        # the autouse fixture in tests/integration/conftest.py, so this
+        # service is currently only needed for the Redis-marked subset.
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+      APP_REDIS_URL: redis://localhost:6379/0
+      # v0.4.20: redis_integration tests skip on Redis-unavailable by default
+      # so local devs can run without docker; in CI we provisioned Redis above,
+      # so skipping would silently hide failures. STRICT_REDIS_INTEGRATION=1
+      # converts the skip into a hard fail.
+      STRICT_REDIS_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --all-extras --dev --frozen
+
+      - name: Apply migrations
+        run: make migrate
+
+      # v0.4.12: drift check moved BEFORE integration tests — if models
+      # diverged from the migration chain, callers should learn that
+      # immediately, not after the slower integration suite runs.
+      - name: Alembic drift check
+        run: make check-db
+
+      - name: Integration tests
+        run: make test-integration
+
+      - name: Redis-backed integration tests (strict — Redis must be up)
+        run: uv run pytest -m redis_integration
