@@ -277,7 +277,7 @@ TEMPLATE_API_INMEM = dedent('''\
 
     from {service}.core.errors import ProblemDetail
     from {service}.core.idempotency import idempotent
-    from {service}.domains.{name}.repository import {Name}Repository
+    from {service}.domains.{name}.deps import get_{name}_service
     from {service}.domains.{name}.schemas import (
         {Name}Create,
         {Name}Page,
@@ -288,14 +288,7 @@ TEMPLATE_API_INMEM = dedent('''\
 
     router = APIRouter(prefix="/api/v1/{plural}", tags=["{plural}"])
 
-
-    # 注意：等 repository 接到 AsyncSession 后，把这段内存版 DI 替换为真实的
-    # ``Depends(get_session)``（来自 ``{service}.db.session``）。
-    async def _get_service() -> {Name}Service:
-        return {Name}Service({Name}Repository())
-
-
-    ServiceDep = Annotated[{Name}Service, Depends(_get_service)]
+    ServiceDep = Annotated[{Name}Service, Depends(get_{name}_service)]
     PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
     SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
     NOT_FOUND_RESPONSE: dict[int | str, dict[str, object]] = {{404: {{"model": ProblemDetail}}}}
@@ -389,12 +382,10 @@ TEMPLATE_API_DB = dedent('''\
     from typing import Annotated
 
     from fastapi import APIRouter, Depends, Query, status
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from {service}.core.errors import ProblemDetail
     from {service}.core.idempotency import idempotent
-    from {service}.db.session import get_session
-    from {service}.domains.{name}.repository import {Name}Repository
+    from {service}.domains.{name}.deps import get_{name}_service
     from {service}.domains.{name}.schemas import (
         {Name}Create,
         {Name}Page,
@@ -405,14 +396,7 @@ TEMPLATE_API_DB = dedent('''\
 
     router = APIRouter(prefix="/api/v1/{plural}", tags=["{plural}"])
 
-
-    async def _get_service(
-        session: Annotated[AsyncSession, Depends(get_session)],
-    ) -> {Name}Service:
-        return {Name}Service({Name}Repository(session))
-
-
-    ServiceDep = Annotated[{Name}Service, Depends(_get_service)]
+    ServiceDep = Annotated[{Name}Service, Depends(get_{name}_service)]
     PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
     SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
     NOT_FOUND_RESPONSE: dict[int | str, dict[str, object]] = {{404: {{"model": ProblemDetail}}}}
@@ -495,6 +479,46 @@ TEMPLATE_API_DB = dedent('''\
     )
     async def delete_{name}(item_id: int, svc: ServiceDep) -> None:
         await svc.delete(item_id)
+''')
+
+
+TEMPLATE_DEPS_DB = dedent('''\
+    """{Name} 组合根（Composition Root）。
+
+    在此组装 {Name}Service 的具体依赖，使 api.py 只依赖 service、不直接
+    import repository（分层契约：``*.api`` 禁 import ``*.repository``）。
+    """
+
+    from __future__ import annotations
+
+    from typing import Annotated
+
+    from fastapi import Depends
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from {service}.db.session import get_session
+    from {service}.domains.{name}.repository import {Name}Repository
+    from {service}.domains.{name}.service import {Name}Service
+
+
+    async def get_{name}_service(
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> {Name}Service:
+        return {Name}Service({Name}Repository(session))
+''')
+
+
+TEMPLATE_DEPS_INMEM = dedent('''\
+    """{Name} 组合根（Composition Root，内存版）。"""
+
+    from __future__ import annotations
+
+    from {service}.domains.{name}.repository import {Name}Repository
+    from {service}.domains.{name}.service import {Name}Service
+
+
+    async def get_{name}_service() -> {Name}Service:
+        return {Name}Service({Name}Repository())
 ''')
 
 
@@ -819,12 +843,14 @@ def _target_paths(ctx: Context) -> dict[Path, str]:
     if ctx.with_model:
         files[domain_dir / "models.py"] = TEMPLATE_MODELS.format(**fmt)
         files[domain_dir / "repository.py"] = TEMPLATE_REPOSITORY_DB.format(**fmt)
+        files[domain_dir / "deps.py"] = TEMPLATE_DEPS_DB.format(**fmt)
         files[domain_dir / "api.py"] = TEMPLATE_API_DB.format(**fmt)
         files[REPO_ROOT / "tests" / "api" / f"test_{ctx.name}_api.py"] = (
             TEMPLATE_TEST_API_DB.format(**fmt)
         )
     else:
         files[domain_dir / "repository.py"] = TEMPLATE_REPOSITORY_INMEM.format(**fmt)
+        files[domain_dir / "deps.py"] = TEMPLATE_DEPS_INMEM.format(**fmt)
         files[domain_dir / "api.py"] = TEMPLATE_API_INMEM.format(**fmt)
         files[REPO_ROOT / "tests" / "api" / f"test_{ctx.name}_api.py"] = (
             TEMPLATE_TEST_API_INMEM.format(**fmt)

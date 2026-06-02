@@ -1,0 +1,87 @@
+# 分层 import 契约（机检 LAYERED_DESIGN 的结构约束）。
+#
+# include_external_packages：C3/C4/C6/C7 forbid 外部包（fastapi/sqlalchemy/
+#   pydantic），import-linter 2.11 要求顶层开此开关，否则启动即报错。
+#
+# allow_indirect_imports = True（所有 forbidden 契约）：只查【直接】import，
+#   不查传递链。本意就是禁【直接】跨层耦合（api 不得直接 import repository、
+#   service 不得直接 import fastapi…）。传递链是合法的——core/errors.py 是共享
+#   基础设施，自身 import fastapi+pydantic（ProblemDetail/异常处理），被
+#   service/models 间接依赖；deps.py（D5-C 组合根）合法 import repository。
+#   直接违规仍被拦截（已变异验证 C2/C3/C5：注入直接 import 即 BROKEN）。
+#   ⚠️ 勿删此开关：删后这些合法传递链会误报 broken。
+#
+# C1（domain-layers）：admin-platform 当前业务域 tenant/user 仅有 models.py，
+#   尚未长出 api/service/repository 三层 —— layers 契约会因模块缺失报
+#   "module not found"。故 C1 暂注释，待任一业务域长出完整 api/service/
+#   repository 三层后，把该域填入 containers 再启用。C2–C7 用 wildcard
+#   (`admin_platform.domains.*.api` 等)，空匹配不报错，C7 已真查 tenant/user
+#   models。
+
+[importlinter]
+root_package = admin_platform
+include_external_packages = True
+
+# [importlinter:contract:domain-layers]
+# name = C1 domain layers (api > service > repository, 禁反向)
+# type = layers
+# layers =
+#     api
+#     service
+#     repository
+# containers =
+#     admin_platform.domains.<domain>
+
+[importlinter:contract:api-not-repository]
+name = C2 api must not import repository (composition root lives in deps.py)
+type = forbidden
+source_modules =
+    admin_platform.domains.*.api
+forbidden_modules =
+    admin_platform.domains.*.repository
+allow_indirect_imports = True
+
+[importlinter:contract:service-not-fastapi]
+name = C3 service must not import fastapi
+type = forbidden
+source_modules =
+    admin_platform.domains.*.service
+forbidden_modules =
+    fastapi
+allow_indirect_imports = True
+
+[importlinter:contract:repository-not-fastapi]
+name = C4 repository must not import fastapi
+type = forbidden
+source_modules =
+    admin_platform.domains.*.repository
+forbidden_modules =
+    fastapi
+allow_indirect_imports = True
+
+[importlinter:contract:schemas-not-models]
+name = C5 schemas must not import models (shared enums live in enums.py)
+type = forbidden
+source_modules =
+    admin_platform.domains.*.schemas
+forbidden_modules =
+    admin_platform.domains.*.models
+allow_indirect_imports = True
+
+[importlinter:contract:schemas-not-sqlalchemy]
+name = C6 schemas must not import sqlalchemy
+type = forbidden
+source_modules =
+    admin_platform.domains.*.schemas
+forbidden_modules =
+    sqlalchemy
+allow_indirect_imports = True
+
+[importlinter:contract:models-not-pydantic]
+name = C7 models must not import pydantic
+type = forbidden
+source_modules =
+    admin_platform.domains.*.models
+forbidden_modules =
+    pydantic
+allow_indirect_imports = True

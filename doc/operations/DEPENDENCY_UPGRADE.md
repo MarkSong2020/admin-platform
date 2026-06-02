@@ -78,6 +78,15 @@
 - **节奏**：每月按需升，看是否要 fix 新 warnings；不要凭"无新错误"心理跳过
 - **新规则 opt-in**：本模板 `pyproject.toml [tool.ruff.lint].select` 已锁定规则集，升 ruff 不自动启用新规则
 
+### `import-linter`
+
+- **新增 intake（2026-06-03）**：dev-only，为 `make check-layer-boundaries` 提供分层 import 契约（C1–C7，见 `.importlinter`）。核验：v2.11 最新、David Seddon 维护、py3.14 wheel 可用、`uv run lint-imports` 项目内跑通
+- **传递依赖**：拉 `grimp`（同作者的 import-graph 引擎，含预编译 rust 扩展，有 wheel）
+- **当前 pin**：`import-linter>=2.11,<3`
+- **当前裁剪**：C1（domain layers）暂注释 —— 业务域 tenant/user 仅有 `models.py`，未长出 api/service/repository 三层，`layers` 契约会报 "module not found"。补齐三层后填入 C1 `containers` 再启用；C2–C7 已生效
+- **典型踩坑**：大版本可能调整 `[importlinter:contract:*]` 配置 schema / module 通配语法（`admin_platform.domains.*.api`）；升级后必跑 `uv run lint-imports` 确认契约仍 `kept`
+- **守门**：`make check-layer-boundaries`（lint-imports）
+
 ### `pytest` + 插件
 
 - **当前 floor**：`pytest>=9` / `pytest-asyncio>=1.3` / `pytest-cov>=7` / `pytest-mock>=3.15`（v0.4.22 起；`pytest-asyncio` 从 0.x 系列跨 major 到 1.x，`asyncio_mode = "auto"` 在 1.x 下行为不变）

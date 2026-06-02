@@ -142,10 +142,11 @@ def test_dry_run_lists_seven_files_without_model(
     assert rc == 0
     out = capsys.readouterr().out
     assert "Would generate" in out
-    # 4 domain files + tests (service + api) + domains/__init__.py = 7
+    # 5 domain files + tests (service + api) + domains/__init__.py = 8
     assert "src/admin_platform/domains/order/schemas.py" in out
     assert "src/admin_platform/domains/order/service.py" in out
     assert "src/admin_platform/domains/order/repository.py" in out
+    assert "src/admin_platform/domains/order/deps.py" in out
     assert "src/admin_platform/domains/order/api.py" in out
     assert "tests/unit/test_order_service.py" in out
     assert "tests/api/test_order_api.py" in out
@@ -176,6 +177,7 @@ def test_generate_minimal_module_writes_expected_files(fake_repo: Path, new_modu
     assert (domain / "schemas.py").exists()
     assert (domain / "service.py").exists()
     assert (domain / "repository.py").exists()
+    assert (domain / "deps.py").exists()
     assert (domain / "api.py").exists()
     assert not (domain / "models.py").exists()
     assert (fake_repo / "tests" / "unit" / "test_order_service.py").exists()
@@ -311,6 +313,18 @@ def test_with_model_generates_orm_class_and_db_repository(fake_repo: Path, new_m
     # adding composite indexes after the fact is expensive on hot tables.
     assert "__table_args__" in models
     assert "Index(" in models  # hint comment must remain
+
+
+def test_generated_api_uses_deps_composition_root(fake_repo: Path, new_module) -> None:
+    """D5-C：组合根落在 deps.py；api.py 不直接 import repository。"""
+    new_module.main(["--name", "order"])
+    base = fake_repo / "src" / "admin_platform" / "domains" / "order"
+    api = (base / "api.py").read_text()
+    deps = (base / "deps.py").read_text()
+    assert "from admin_platform.domains.order.repository" not in api
+    assert "get_order_service" in api
+    assert "from admin_platform.domains.order.repository import OrderRepository" in deps
+    assert "get_order_service" in deps
 
 
 def test_custom_plural_overrides_default(fake_repo: Path, new_module) -> None:

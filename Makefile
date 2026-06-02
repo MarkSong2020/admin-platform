@@ -1,4 +1,4 @@
-.PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-db compose-up compose-up-cache compose-down docker-build
+.PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-openapi-contract check-layer-boundaries check-db compose-up compose-up-cache compose-down docker-build
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -56,6 +56,13 @@ check:  ## Full quality gate excluding integration tests (mirror of CI fast lane
 	uv run ruff check .
 	uv run pyright
 	uv run pytest -m "not integration"
+	uv run lint-imports
+
+check-openapi-contract:  ## OpenAPI 契约规则表（pytest 子集）
+	uv run pytest tests/unit/test_openapi_contract.py
+
+check-layer-boundaries:  ## 分层边界静态契约（import-linter，C1–C7）
+	uv run lint-imports
 
 check-db:  ## Alembic migration drift detection (Errata #3, requires compose-up)
 	uv run alembic check
