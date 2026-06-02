@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from admin_platform.core.config import get_settings
+from admin_platform.db.tenant_filter import TenantContextMissing
 
 
 class ProblemDetail(BaseModel):
@@ -103,6 +104,11 @@ AUTH_TOKEN_INVALID = "auth.TOKEN_INVALID"  # noqa: S105
 AUTH_TOKEN_EXPIRED = "auth.TOKEN_EXPIRED"  # noqa: S105
 AUTH_FORBIDDEN_BY_ROLE = "auth.FORBIDDEN_BY_ROLE"
 AUTH_FORBIDDEN_BY_SCOPE = "auth.FORBIDDEN_BY_SCOPE"
+
+# ---- 租户隔离 fail-closed（ADR-A/E）----
+# 业务查询缺租户上下文 = 服务端 bug（某路径用错 session），按 500 处理。
+# distinct code 便于 ops 单独告警（区别于普通 framework.INTERNAL_ERROR）。
+TENANT_CONTEXT_MISSING = "framework.TENANT_CONTEXT_MISSING"
 
 
 # ----------------------------- IntegrityError 兜底映射 ----------------------------- #
@@ -237,6 +243,32 @@ def register_exception_handlers(app: FastAPI) -> None:
                 errors=exc.errors,
             ),
             headers=exc.headers,
+        )
+
+    @app.exception_handler(TenantContextMissing)
+    async def _tenant_context_missing(request: Request, exc: TenantContextMissing) -> JSONResponse:
+        # 业务查询缺租户上下文 = 服务端 bug（某路径用错 session），不是客户端的错 → 500。
+        # 比通用 Exception handler 更具体（按 MRO 优先命中），给 ops 一个可单独告警的
+        # distinct code；stack trace 只进服务端日志，响应 detail=None 不泄内部细节。
+        logger.exception(
+            "business query without tenant context (fail-closed)",
+            extra={
+                "request_id": _request_id(request),
+                "method": request.method,
+                "path": request.url.path,
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=_payload(
+                code=TENANT_CONTEXT_MISSING,
+                title="Internal server error",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=None,
+                request_id=_request_id(request),
+                trace_id=_trace_id(request),
+                errors=None,
+            ),
         )
 
     @app.exception_handler(StarletteHTTPException)
