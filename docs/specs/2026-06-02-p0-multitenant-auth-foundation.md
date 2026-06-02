@@ -10,7 +10,7 @@
 
 **Architecture:** SaaS 共享库多租户,业务表带 `tenant_id`;隔离用 SQLAlchemy `do_orm_execute` 事件 + `with_loader_criteria` 自动注入过滤,**租户上下文绑定在 `session.info`**(由 `get_session` 依赖从 `request.state` 注入,不走跨 task ContextVar)。缺上下文的业务查询 **fail-closed 抛错**;平台超管 / 系统任务走**显式 system context** bypass。认证在底座「只校验」的 `AuthMiddleware` 上补「签发端」(登录 → access token)。
 
-**Tech Stack:** FastAPI · SQLAlchemy 2.x(async/asyncpg)· Alembic · PyJWT(底座已有)· **passlib[bcrypt](P0 唯一新增 runtime 依赖,走 intake)** · Pytest。继承底座工程约定(RFC 9457 错误、Request ID、分层红线、85% 覆盖率门槛)。
+**Tech Stack:** FastAPI · SQLAlchemy 2.x(async/asyncpg)· Alembic · PyJWT(底座已有)· **argon2-cffi(Argon2id 密码哈希,P0 唯一新增 runtime 依赖,走 intake;见 ADR-F)** · Pytest。继承底座工程约定(RFC 9457 错误、Request ID、分层红线、85% 覆盖率门槛)。
 
 ---
 
@@ -65,6 +65,14 @@ P6+ 前端           Vue3 + Element Plus 各模块(独立计划群)
   3. `do_orm_execute` / `before_flush` 从 `session.info` 读(它们天然能拿到 session)。
 - **不引入** `TenantMiddleware`。租户上下文的唯一注入点是 `get_session` 依赖 + 显式 system context。
 
+### ADR-F:密码哈希 —— Argon2id（argon2-cffi）★intake 修正
+
+- **背景**:v3 plan 原写 `passlib[bcrypt]`。Task 2 intake 核验否决——passlib 1.7.4 停在 2020、Python 3.14 已移除其依赖的 `crypt` 模块、bcrypt≥4 触发启动警告;作为新项目安全关键依赖不合适。
+- **决策**:用 **Argon2id**(`argon2-cffi>=25,<26` 的 `PasswordHasher`),不用 bcrypt。
+- **理由**:① greenfield 零存量哈希,选现代默认无迁移成本;② admin 后台登录并发极低,Argon2 memory-hard 的内存成本(默认 64 MiB/次)非瓶颈;③ OWASP 密码存储首选,抗 GPU/ASIC 撞库余量更大;④ 无 bcrypt 72-byte 输入限制(不必在新系统硬塞"密码太长"的 422);⑤ `PasswordHasher` API 自带盐管理 + `check_needs_rehash`,比 raw bcrypt 更难写错。
+- **参数**:用库默认 `m=65536 KiB(64 MiB) / t=3 / p=4 / hash_len=32 / salt_len=16`(强于 OWASP 最低线)。调参须先压测登录并发 × 单次内存;调参后靠 `check_needs_rehash` 在用户下次登录时透明 rehash,不批量迁移。
+- **跨语言**:密码哈希不跨服务共享(跨语言鉴权走 JWT);Spring Security 也支持 `Argon2PasswordEncoder`,未来若需互通无硬阻塞。
+
 ---
 
 ## 2. 数据模型(P0 最小集)
@@ -115,7 +123,7 @@ src/admin_platform/
 ├── core/
 │   ├── auth.py            修改:CurrentUser 加 tenant_id/is_platform;AuthMiddleware 把 claims 写 request.state
 │   ├── config.py          修改:加 auth_access_token_ttl_seconds(去验证码字段,验证码→P1)
-│   ├── security.py        新增:passlib 哈希 + JWT access token 签发/解码
+│   ├── security.py        新增:Argon2id 密码哈希 + JWT access token 签发/解码
 │   └── errors.py          修改:加 TENANT_CONTEXT_MISSING / LOGIN_FAILED 错误码
 ├── db/
 │   ├── base.py            修改:加 TenantMixin
@@ -153,9 +161,9 @@ git -C ~/PythonProjects/python-web-service-template archive HEAD | tar -x -C ~/P
 - [ ] **Step 4 验收** `cd ~/PythonProjects/admin-platform && make check` → 底座原有测试在改名后全绿。
 - [ ] **Checkpoint** 审 diff(确认无残留 `service_name`)→ Commit `chore: scaffold admin-platform via git archive`
 
-### Task 2:依赖 intake(passlib)+ config 扩展
+### Task 2:依赖 intake(argon2-cffi)+ config 扩展
 
-- [ ] **Step 1 依赖 intake**:确认 `passlib[bcrypt]` 来源/维护状态(PyPI),记录到 `docs/operations/DEPENDENCY_UPGRADE.md` 的 intake 段;`uv add "passlib[bcrypt]"`(**需操作者确认装依赖**)。
+- [ ] **Step 1 依赖 intake**:核验 PyPI 来源/维护状态——**原 `passlib[bcrypt]` 被否决,改 `argon2-cffi`(Argon2id),见 ADR-F**;记录到 `doc/operations/DEPENDENCY_UPGRADE.md` 的 intake 段;`uv add "argon2-cffi>=25,<26"`(**需操作者确认装依赖**)。
 - [ ] **Step 2** `config.py` 在 `auth_*` 段后加(**不加验证码字段**):
 ```python
     # Token 签发(P0:仅 access token;refresh 在 P1)。校验复用底座 auth_jwt_* 字段。
@@ -163,7 +171,7 @@ git -C ~/PythonProjects/python-web-service-template archive HEAD | tar -x -C ~/P
 ```
 - [ ] **Step 3** 同步 `.env.example`(底座 `test_env_example_covers_all_settings_fields` 守门)。
 - [ ] **Step 4 验收** `pytest tests/unit/test_config.py -v` PASS;`make audit`(底座 Errata #1 = `uvx pip-audit .`,**不是** `uv run pip-audit`——pip-audit 非 dev 依赖,`uv run` 会找不到)无新增高危。
-- [ ] **Checkpoint** → Commit `feat(config): access token ttl + passlib intake`
+- [ ] **Checkpoint** → Commit `feat(config): access token ttl + argon2 intake`
 
 ### Task 3:租户隔离机制 ★地基核心(fail-closed + session.info)
 
@@ -286,9 +294,9 @@ def test_access_token_carries_tenant_claims():
     assert p["sub"] == "7" and p["tenant_id"] == 42 and p["is_platform"] is False
 ```
 - [ ] **Step 2 跑测试确认失败**。
-- [ ] **Step 3 实现 `core/security.py`**:passlib `CryptContext(schemes=["bcrypt"])`;`issue_access_token` 用 PyJWT encode,secret/alg 取底座 `get_auth_config()`,TTL 取 `auth_access_token_ttl_seconds`,`iss`/`aud` 按 config 填;`decode_token` 在底座 `_decode_and_validate` 的 `require` 列表里**增加 `tenant_id`**(令 tenant_id 成为必需 claim —— 缺失即 401,把 fail-closed 延伸到认证层,绝不放行"无租户归属"的合法签名 token);`is_platform` 为可选,缺失默认 `False`(fail-safe:缺失 → 当普通租户用户、受过滤,而非误判超管)。**P0 不实现 refresh**。
+- [ ] **Step 3 实现 `core/security.py`**:Argon2id —— `argon2.PasswordHasher()`(默认参数,见 ADR-F)封装 `hash_password`/`verify_password`(`verify` 捕获 `VerifyMismatchError` 返 `False`);`issue_access_token` 用 PyJWT encode,secret/alg 取底座 `get_auth_config()`,TTL 取 `auth_access_token_ttl_seconds`,`iss`/`aud` 按 config 填;`decode_token` 在底座 `_decode_and_validate` 的 `require` 列表里**增加 `tenant_id`**(令 tenant_id 成为必需 claim —— 缺失即 401,把 fail-closed 延伸到认证层,绝不放行"无租户归属"的合法签名 token);`is_platform` 为可选,缺失默认 `False`(fail-safe:缺失 → 当普通租户用户、受过滤,而非误判超管)。**P0 不实现 refresh**。
 - [ ] **Step 4 跑测试确认通过**。
-- [ ] **Checkpoint** → Commit `feat(security): bcrypt hashing + access token issuance`
+- [ ] **Checkpoint** → Commit `feat(security): argon2 hashing + access token issuance`
 
 ### Task 6:登录 API(system session 查 user,无验证码/refresh)
 
@@ -420,7 +428,7 @@ async def test_cross_tenant_get_404(client, seed):
 1. **ADR-A fail-closed**:废弃 v1 `tid is None: return` fail-open;业务查询缺上下文 → 抛 `TenantContextMissing`。
 2. **ADR-E 新增**:上下文改走 `session.info`(经 get_session 从 request.state 注入),回避 `BaseHTTPMiddleware`+`ContextVar` 跨 task 传播失效;删除 v1 的 `TenantMiddleware` 与 `tenant_context.py` ContextVar 方案。
 3. **ADR-C**:P0 去 refresh token(下放 P1 + 要求落库 jti 可撤销);access TTL 2h 折中。
-4. **依赖/验证码**:passlib 走 intake;验证码(Pillow/captcha)下放 P1。
+4. **依赖/验证码**:argon2-cffi 走 intake(原 passlib 被否决,见 ADR-F);验证码(Pillow/captcha)下放 P1。
 5. **CLI seed**:删除 lifespan auto-seed;改一次性 CLI,缺 `ADMIN_BOOTSTRAP_PASSWORD` 即失败,无默认口令。
 6. **ADR-D scaffold**:`cp -R`+`rm -rf .git` → `git archive` 干净导出。
 7. **中间件顺序**:修正为底座真实顺序(RequestID 最外层);本计划不再新增 TenantMiddleware。

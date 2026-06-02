@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     auth_public_paths: list[str] = Field(
         default=["/healthz", "/startupz", "/readyz", "/docs", "/openapi.json"]
     )
+    # access token 存活时长（秒）。P0 只签发 access token，不做 refresh，
+    # 所以 TTL 短一点（默认 2h）以收敛失窃 token 的暴露窗口；refresh + 撤销
+    # 下放 P1（须存 jti+hash 才能撤销）。下限 60s —— 比这更短令牌还没用就过期。
+    auth_access_token_ttl_seconds: int = Field(default=7200, ge=60)
 
     @field_validator("database_url")
     @classmethod
