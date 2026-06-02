@@ -34,8 +34,11 @@ P6+ 前端           Vue3 + Element Plus 各模块(独立计划群)
 
 ### ADR-A:多租户隔离 —— 应用层 fail-closed 注入(主)+ RLS 加固(P0.5 spike)
 
-- **机制**:带 `TenantMixin` 的 model,查询经 `do_orm_execute` 自动追加 `WHERE tenant_id = :current`;写入经 `before_flush` 自动填 `tenant_id`。
-- **fail-closed(硬规则)**:业务路径的 SELECT 命中 `TenantMixin`、但当前 session **既无 tenant context 又非 system** → **抛 `TenantContextMissing`**,绝不放行裸查询。(对比 v1 的 `tid is None: return` fail-open —— 已废弃。)
+- **机制**:带 `TenantMixin` 的 model,查询经 `do_orm_execute` 自动追加 `WHERE tenant_id = :current`;写入经 `before_flush` 按上下文自动填 `tenant_id`。
+- **fail-closed(硬规则,读写对称)**:
+  - **读**:无 tenant context 且非 system 的 ORM SELECT → 抛 `TenantContextMissing`。**广义拦截 —— 不区分是否租户表**。理由:`ORMExecuteState.all_mappers` 对 `select(平台表).join(租户表)` 漏掉 join 进来的租户表(实测假阴性),按表收窄会让这类 join 在无上下文时 fail-open;两害相权宁可广义拦截,平台/无上下文查询**显式走 `system_session()`**。代价为零:HTTP 路径 `get_session` 必带上下文;raw SQL / `engine.connect()` 直连(如 `/readyz` 的 `SELECT 1`)不经 Session 不受影响。
+  - **写**:无上下文却 flush 含 `TenantMixin` 的对象(**即便显式带了 `tenant_id`**)→ 抛 `TenantContextMissing`,堵住裸 session 绕过上下文写跨租户数据;纯平台表(无 `TenantMixin`)写放行。
+  - (对比 v1 的 `tid is None: return` fail-open —— 已废弃。)
 - **上下文来源**:`session.info["tenant_ctx"]`,**不是** ContextVar。原因见 ADR-E。
 - **RLS**:Postgres 行级安全作为 **P0.5(Task 12)** 加固,spike 验证 asyncpg 连接池下 `SET LOCAL` 稳定后叠加,形成"应用层 + DB 层"双重防御(工程原则①「验证至每层」)。
 
@@ -248,8 +251,22 @@ def install_tenant_filter(sync_session_cls) -> None:
     @event.listens_for(sync_session_cls, "before_flush")
     def _fill_tenant(session, flush_context, instances):
         ctx = session.info.get(TENANT_CTX_KEY)
-        if ctx is None or ctx is SYSTEM_CTX or ctx.get("platform"):
-            return  # system/platform/无上下文:不自动填(system 写入须显式带 tenant_id)
+        if ctx is SYSTEM_CTX or (isinstance(ctx, dict) and ctx.get("platform")):
+            return  # 显式 system/平台超管:bypass(写入须自带 tenant_id,不自动填)
+        # 写路径与读路径对称 fail-closed:无上下文却写租户表 = 服务端 bug。
+        # 即便对象显式带了 tenant_id 也拒绝,否则裸 session 能绕过上下文写跨租户数据。
+        tenant_writes = [
+            obj
+            for obj in (*session.new, *session.dirty, *session.deleted)
+            if isinstance(obj, TenantMixin)
+        ]
+        if ctx is None:
+            if tenant_writes:
+                raise TenantContextMissing(
+                    "tenant-scoped write without tenant context; use get_session "
+                    "(HTTP) or system_session() (CLI/login) explicitly"
+                )
+            return  # 无租户对象的写入(纯平台表)放行
         tid = ctx["tenant_id"]
         for obj in session.new:
             if isinstance(obj, TenantMixin) and getattr(obj, "tenant_id", None) is None:
@@ -441,3 +458,9 @@ async def test_cross_tenant_get_404(client, seed):
 3. **migration 语法**:`make migration m=...` → `make migration name=...`(底座 `Makefile:40` 用 `name=`)。
 4. **token 必需 claim**:`tenant_id` 加入 `decode` 的 `require` 列表(缺失即 401,把 fail-closed 延伸到认证层);`request.state.tenant_id = payload["tenant_id"]` 直取、不 `.get()` 软取;`is_platform` 缺失默认 `False`(fail-safe 方向,刻意保留软取)。
 5. **删 `_debug/leak` 生产端点**:fail-closed 改由 Task 3 单测覆盖(不在生产代码加测试专用端点,工程原则④)。
+
+**Task 3 实施(2026-06-02,实现 + 二处隔离边界 review 后 —— commit `ccb35b0`):**
+1. **写路径 fail-closed(对称)** ★:`before_flush` 从 `ctx is None: return`(fail-open)改为——无上下文却 flush 含 `TenantMixin` 的对象(**即便显式带 tenant_id**)抛 `TenantContextMissing`;只 `SYSTEM_CTX`/platform 明确 bypass;纯平台表写放行。堵住裸 session 绕过上下文写跨租户数据。
+2. **读路径维持广义 fail-closed(不按表收窄)** ★:review 曾提议"只拦 `TenantMixin` 表",但实测 `ORMExecuteState.all_mappers` 对 `select(平台表).join(租户表)` 漏掉 join 的租户表(假阴性)→ 按表收窄会 fail-open。故**保留广义拦截**(无上下文任何 ORM SELECT 都抛),平台/无上下文查询显式走 `system_session()`;代价为零(HTTP 必带上下文,readyz 走 `engine.connect()` 不经 Session)。决策 + 理由固化进 `db/tenant_filter.py` docstring + 4 条新测试。
+3. **`TenantContextMissing` → 500 专属 handler**:`core/errors.py` 加 `TENANT_CONTEXT_MISSING`,distinct code 便于 ops 告警,响应 `detail=None` 不泄内部细节。
+4. **测试含变异验证**:临时禁用 `install_tenant_filter` → 3 个 guard 立即转红,证明事件真触发、不误绿。
