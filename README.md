@@ -34,14 +34,14 @@ make new-module name=order                    # 最小（内存仓储桩）
 make new-module name=product with-model=1     # 含 ORM model
 ```
 
-蓝本对照 → [`doc/architecture/EXAMPLE_DOMAIN.md`](./doc/architecture/EXAMPLE_DOMAIN.md)；generator 细节 → [`doc/standards/CODE_GENERATOR.md`](./doc/standards/CODE_GENERATOR.md)
+generator 细节与 domain 五层蓝本 → [`doc/standards/CODE_GENERATOR.md`](./doc/standards/CODE_GENERATOR.md)
 
 ## 🎯 当前状态（v0.0.1 — P0 多租户认证地基）
 
 - **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%
 - **P0 进度**：Task 1 scaffold ✓ / Task 2 argon2 密码哈希依赖 + access token TTL ✓ / Task 3 fail-closed 租户隔离（`session.info` + `do_orm_execute`/`before_flush`）✓；下一步 Task 4 数据模型（Tenant/User）+ 迁移
 - **完整计划** → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
-- **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（example domain `todo`/`tag`、generator、CI 等模板资产暂保留，后续按需裁剪）→ [`CHANGELOG.md`](./CHANGELOG.md)
+- **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）→ [`CHANGELOG.md`](./CHANGELOG.md)
 
 ## 🌐 跨语言协同
 

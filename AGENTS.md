@@ -23,7 +23,7 @@
 - Task 3：fail-closed 租户隔离 —— `session.info` 上下文 + `do_orm_execute`（读广义 fail-closed）/ `before_flush`（写对称 fail-closed）✓
 - 下一步：Task 4 数据模型（Tenant/User）+ 迁移 → Task 5/6/7 认证签发 / 登录 / 上下文注入
 
-**脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（example domain `todo`/`tag`、generator、CI 等模板资产暂保留）。模板演进史 → [`CHANGELOG.md`](./CHANGELOG.md)。
+**脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）。模板演进史 → [`CHANGELOG.md`](./CHANGELOG.md)。
 
 **KNOWN_DEVIATIONS 状态**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 按各自「触发条件」等待，不主动重写（v0.5.0 reality check）。详见 [`doc/tech-debt/KNOWN_DEVIATIONS.md`](./doc/tech-debt/KNOWN_DEVIATIONS.md)。
 

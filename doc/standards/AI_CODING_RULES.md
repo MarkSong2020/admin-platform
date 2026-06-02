@@ -15,8 +15,8 @@
 **所有 docstring、inline comments、模块 docstring 默认用简体中文**。
 
 保留**英文原貌**的例外（限于以下三类，避免破坏契约）：
-- **代码 identifier**：类名 / 函数名 / 变量名 / 模块路径（``service_name.TODO_NOT_FOUND`` 不翻译）
-- **错误码字面量**：``service_name.TODO_NOT_FOUND`` / ``framework.IDEMPOTENT_RETRY_IN_FLIGHT`` 等字符串值
+- **代码 identifier**：类名 / 函数名 / 变量名 / 模块路径（``admin_platform.USER_NOT_FOUND`` 不翻译）
+- **错误码字面量**：``admin_platform.USER_NOT_FOUND`` / ``framework.IDEMPOTENT_RETRY_IN_FLIGHT`` 等字符串值
 - **三方框架专有名词与文献引用**：``BaseHTTPMiddleware`` / ``selectinload`` / ``RFC 9457`` / ``ADR 0001 §1`` 等
 
 **触发条件**：v0.5.1 翻译了当时新加 / 修改的代码；v0.5.2 清扫了 `scripts/new_module.py` generator 模板 + `core/*` + `db/*` + `api/v1/health.py` 等基础设施债。**至此模板内代码 docstring 一致简体中文**，后续任何**新写**或**修改**的注释 / docstring 都按本规则走，**不再有例外**。

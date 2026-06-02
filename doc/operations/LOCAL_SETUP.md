@@ -58,11 +58,9 @@ make test-integration  # pytest -m integration（v0.5.3 当前 collect 29 项）
 make compose-down      # 停 Docker
 ```
 
-**`make test-integration` 当前覆盖**（v0.5.3 baseline，跑 `pytest -m integration --collect-only` 自查最新数字）：
+**`make test-integration` 当前覆盖**（P0 baseline；示例域 todo/tag 已删，跑 `pytest -m integration --collect-only` 自查最新数字）：
 - `test_db_smoke.py` 2 项（DB 连通 + transaction commit smoke）
 - `test_transaction_commit.py` 3 项（`get_session` 起真事务 / 回滚 / SAVEPOINT）
-- `test_todo_db.py` 13 项（含 7 项 todo CRUD + 4 项多对多 E2E + 1 项 N+1 守门 + 1 项 IntegrityError 兜底 race）
-- `test_tag_db.py` 6 项（tag CRUD + DUPLICATE 409）
 - `test_idempotency_redis.py` 5 项（Redis-backed idempotency E2E，需 Redis 起来）
 
 Redis（idempotency 中间件用）默认 lazy 连——本地开发不强制起。`compose-up`（不带 -cache）只起 Postgres，Redis 相关测试通常跑过去因为 `STRICT_REDIS_INTEGRATION` 默认未设时 redis_integration 标记的测试**会 skip**；要真测就 `make compose-up-cache` 起 Redis + 跑 `uv run pytest -m redis_integration`。

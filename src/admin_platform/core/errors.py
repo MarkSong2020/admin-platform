@@ -133,14 +133,14 @@ def register_unique_constraint(constraint_name: str, code: str, title: str) -> N
     ``IntegrityError`` handler 据此把竞态撞约束的 500 翻译成有意义的
     409 业务错误码。
 
-    示例（``domains/todo/models.py`` 末尾）::
+    示例（``domains/<domain>/models.py`` 末尾）::
 
         from admin_platform.core.errors import register_unique_constraint
 
         register_unique_constraint(
-            "uq_todos_title",
-            "admin_platform.TODO_TITLE_DUPLICATE",
-            "Todo title already exists",
+            "uq_users_username",
+            "admin_platform.USERNAME_DUPLICATE",
+            "Username already exists",
         )
     """
     _UNIQUE_CONSTRAINT_CODES[constraint_name] = (code, title)
