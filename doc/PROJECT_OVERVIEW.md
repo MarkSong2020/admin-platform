@@ -1,8 +1,8 @@
 # 项目概览
 
-> **这是什么**：团队 Python Web 服务的脚手架模板。克隆 → 改名 → 跑 → 加业务，30 分钟出可用服务。
+> **这是什么**：多租户 admin 平台应用（`v0.0.1`，P0 多租户认证地基开发中）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 >
-> **为何存在**：把团队仓 ADR `0001-cross-language-conventions.md` 中 Python 侧应当实现的所有契约**一次性 baseline 化**，让新建服务不必每次重复实现错误响应 shape / Request ID / Idempotency-Key / 健康检查 / 分页 envelope / OpenAPI 契约。
+> **为何存在**：在团队脚手架的工程 baseline（错误响应 shape / Request ID / Idempotency-Key / 健康检查 / 分页 envelope / OpenAPI 契约）之上，长出 SaaS 多租户的 fail-closed 隔离 + JWT 认证，目标 RBAC / 审计 / admin 业务域。
 
 ## 一页讲清
 
@@ -33,16 +33,14 @@
   └── models.py     SQLAlchemy 2.x typed mapping （含 --with-model 时）
 ```
 
-## 现状（v0.5.3）
+## 现状（v0.0.1 — P0 多租户认证地基）
 
-- **模板里程碑**：v0.5.3 — 完整演进 → [../CHANGELOG.md](../CHANGELOG.md)。`pyproject.toml [project].version` 是业务实例初始版本号（与模板版本不同源）；v0.5.0 起里程碑 vs audit-build 分离，详见 CHANGELOG 头部「版本号语义」段
-- **2 个 example domain**（v0.5.0 / v0.5.1）：`domains/todo/` 单 domain 教科书蓝本 + `domains/tag/` 多对多关联（`lazy="raise"` + `selectinload` + N+1 守门 + 跨域 `ON DELETE CASCADE`）→ 详见 [`architecture/EXAMPLE_DOMAIN.md`](./architecture/EXAMPLE_DOMAIN.md)
-- **代码 docstring 一致简体中文**（v0.5.2）：generator 模板 + core/db/health ~2100 行翻译；后续 `make new-module` 生成出来的 domain 代码直接中文（AI_CODING_RULES.md §0 固化）
-- **测试**：`make check` 189 ✓（unit + api，ruff + pyright + pytest）/ `make test-integration` 29 selected ✓（本地 db-only：24 passed / 5 redis skipped；CI strict Redis 模式应全跑）/ `make coverage` 门槛 85%（`fail_under = 85`，实测 ~87.19%）
+- **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。P0 进度：Task 1 scaffold / Task 2 argon2 密码哈希依赖 + access token TTL / Task 3 fail-closed 租户隔离 ✓；下一步 Task 4 数据模型 + 迁移。完整计划 → [`../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
+- **多租户隔离**（Task 3）：`TenantMixin` 业务表 + `session.info` 上下文；`do_orm_execute` 读广义 fail-closed、`before_flush` 写对称 fail-closed；`SYSTEM_CTX` / 平台超管 bypass。机制说明见 `db/tenant_filter.py`
+- **测试**：`make check` 202 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
-- **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg
-- **CI 平台**：`.github/workflows/ci.yml` 是参考资产（可直接 fork 跑）；真实 CI 平台由业务团队按 ADR 决议自选，见 [operations/CI_MIGRATION.md](./operations/CI_MIGRATION.md)
-- **KNOWN_DEVIATIONS**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 按各自「触发条件」等待，不主动重写（[tech-debt/KNOWN_DEVIATIONS.md](./tech-debt/KNOWN_DEVIATIONS.md)）
+- **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg + argon2-cffi（密码哈希）+ PyJWT
+- **脚手架 lineage**：example domain `domains/todo`/`domains/tag`、generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 均继承自模板 v0.5.3；去留待 P0 收口前单独决策。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)
 
 ## 已落地的契约（对应 ADR 0001 章节）
 
@@ -89,4 +87,4 @@ make test-integration              # 集成测试（需 docker）
 
 → [INDEX.md](./INDEX.md) 按角色找入口
 → [架构详情](./architecture/EXAMPLE_DOMAIN.md) 蓝本 domain 解读
-→ [CHANGELOG](../CHANGELOG.md) 完整版本演进（v0.1 → v0.5.3）
+→ [CHANGELOG](../CHANGELOG.md) 脚手架 lineage 演进（模板 v0.1 → v0.5.3）

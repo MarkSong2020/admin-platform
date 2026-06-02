@@ -1,10 +1,11 @@
-# python-web-service-template — AI Agent 协作指引
+# admin-platform — AI Agent 协作指引
 
 > 给 Codex / Cursor / Cline / 其它 AI agent 用。Claude Code 看 [`CLAUDE.md`](./CLAUDE.md)（两份内容基本同步）。
 
 ## 仓库角色
 
-团队 Python Web 服务脚手架模板。**新建后端 API / 微服务的默认起点**。
+多租户 admin 平台**应用**（不是模板）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+当前在 P0 多租户认证地基阶段；目标是 fail-closed 隔离 + JWT 认证 + 后续 RBAC / 审计 / admin 业务域。
 
 ## 完整文档
 
@@ -12,17 +13,17 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.5.3）
+## 当前阶段（v0.0.1 — P0 多租户认证地基）
 
-`make check` 189 ✓ / `make test-integration` 29 selected ✓ / `make coverage` 门槛 85%（`fail_under = 85`，实测 ~87.19%）。
+`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
 
-**v0.5.0-v0.5.3 四个 milestone 浓缩**：
-- v0.5.0：example domain `todo`（5 分钟跑通 CRUD）+ CHANGELOG 加「版本号语义」段（milestone vs audit build 分离）
-- v0.5.1：第二个 example domain `tag` + todo↔tag 多对多（`lazy="raise"` + `selectinload` + N+1 守门）+ v0.5.1 新代码 docstring 中文化
-- v0.5.2：generator 模板 + core/db/health 既有代码 ~2100 行 docstring 全量中文化 — **至此模板内代码 docstring 一致简体中文**
-- v0.5.3：JWT Bearer 鉴权中间件（ADR §5）— AuthMiddleware + get_current_user Depends + pyjwt
+**P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
+- Task 1：scaffold（从 `python-web-service-template` git archive 派生）✓
+- Task 2：argon2-cffi 密码哈希依赖（ADR-F）+ access token TTL 配置 ✓
+- Task 3：fail-closed 租户隔离 —— `session.info` 上下文 + `do_orm_execute`（读广义 fail-closed）/ `before_flush`（写对称 fail-closed）✓
+- 下一步：Task 4 数据模型（Tenant/User）+ 迁移 → Task 5/6/7 认证签发 / 登录 / 上下文注入
 
-逐版详情 → [`CHANGELOG.md`](./CHANGELOG.md)。
+**脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（example domain `todo`/`tag`、generator、CI 等模板资产暂保留）。模板演进史 → [`CHANGELOG.md`](./CHANGELOG.md)。
 
 **KNOWN_DEVIATIONS 状态**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 按各自「触发条件」等待，不主动重写（v0.5.0 reality check）。详见 [`doc/tech-debt/KNOWN_DEVIATIONS.md`](./doc/tech-debt/KNOWN_DEVIATIONS.md)。
 

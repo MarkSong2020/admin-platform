@@ -1,4 +1,4 @@
-name: python-web-service-template
+name: admin-platform
 
 # Local dev only. Production must run Postgres via managed RDS (or equivalent)
 # with secrets injected from K8s/Vault, never docker-compose. The password

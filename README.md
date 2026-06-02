@@ -1,8 +1,10 @@
-# python-web-service-template
+# admin-platform
 
-> 团队 Python Web 服务脚手架。FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest。
+> 多租户 admin 平台。FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest。
+> 派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 
-**新建后端 API / 微服务的默认起点**。从克隆到 `/healthz` 可访问 + 测试通过 ≤ 30 分钟。
+**当前阶段：P0 多租户认证地基开发中**（应用版本 `v0.0.1`）。SaaS 共享库多租户，
+fail-closed 隔离 + JWT 认证；后续长出 RBAC / 审计 / admin 业务域。
 
 ---
 
@@ -34,14 +36,12 @@ make new-module name=product with-model=1     # 含 ORM model
 
 蓝本对照 → [`doc/architecture/EXAMPLE_DOMAIN.md`](./doc/architecture/EXAMPLE_DOMAIN.md)；generator 细节 → [`doc/standards/CODE_GENERATOR.md`](./doc/standards/CODE_GENERATOR.md)
 
-## 🎯 当前状态（v0.5.3）
+## 🎯 当前状态（v0.0.1 — P0 多租户认证地基）
 
-- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 189 ✓ / `make test-integration` 29 selected ✓ / `make coverage` 门槛 85%（`fail_under = 85`，实测 ~87.19%）
-- **2 个 example domain**（v0.5.0 / v0.5.1）：`todo` 单 domain 蓝本 + `tag` 多对多关联 + N+1 守门
-- **代码 docstring 一致简体中文**（v0.5.2 — 含 generator 模板 + core/db/health）
-- **CI**：`.github/workflows/ci.yml` 是参考资产；真实 CI 平台由业务团队按 ADR 决议自选（[`doc/operations/CI_MIGRATION.md`](./doc/operations/CI_MIGRATION.md)）
-
-详细历史（v0.1 → v0.5.3 全部 milestone）→ [`CHANGELOG.md`](./CHANGELOG.md) / [`doc/archive/EVOLUTION.md`](./doc/archive/EVOLUTION.md)
+- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%
+- **P0 进度**：Task 1 scaffold ✓ / Task 2 argon2 密码哈希依赖 + access token TTL ✓ / Task 3 fail-closed 租户隔离（`session.info` + `do_orm_execute`/`before_flush`）✓；下一步 Task 4 数据模型（Tenant/User）+ 迁移
+- **完整计划** → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
+- **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（example domain `todo`/`tag`、generator、CI 等模板资产暂保留，后续按需裁剪）→ [`CHANGELOG.md`](./CHANGELOG.md)
 
 ## 🌐 跨语言协同
 
