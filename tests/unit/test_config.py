@@ -53,6 +53,23 @@ def test_idempotency_lock_ttl_overrides_via_env(monkeypatch: pytest.MonkeyPatch)
     assert Settings().idempotency_lock_ttl_seconds == 180
 
 
+def test_access_token_ttl_default_is_2h() -> None:
+    """P0 只发 access token、不做 refresh，默认 TTL 2h（7200s）收敛失窃窗口。"""
+    assert Settings().auth_access_token_ttl_seconds == 7200
+
+
+def test_access_token_ttl_overrides_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署可经 APP_AUTH_ACCESS_TOKEN_TTL_SECONDS 调整令牌存活时长。"""
+    monkeypatch.setenv("APP_AUTH_ACCESS_TOKEN_TTL_SECONDS", "3600")
+    assert Settings().auth_access_token_ttl_seconds == 3600
+
+
+def test_access_token_ttl_below_minimum_is_rejected() -> None:
+    """下限 60s —— 比这更短令牌还没用就过期，应在构造时报错而非运行期。"""
+    with pytest.raises(ValidationError, match="auth_access_token_ttl_seconds"):
+        Settings(auth_access_token_ttl_seconds=59)
+
+
 def test_env_with_prefix_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("APP_LOG_LEVEL", "DEBUG")

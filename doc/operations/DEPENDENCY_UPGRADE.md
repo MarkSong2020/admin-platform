@@ -57,6 +57,15 @@
 - **风险点**：`from_url(...)` 参数（connection pool sizing）、`decode_responses=False` 默认行为
 - **升级守门**：必跑 `STRICT_REDIS_INTEGRATION=1 uv run pytest -m redis_integration`
 
+### `argon2-cffi`（密码哈希）
+
+- **当前 floor `>=25,<26`**（P0 多租户鉴权地基新增的唯一 runtime 依赖）。MIT，Production/Stable，PyCA 风格活跃维护，25.1.0 官方支持 Python 3.13/3.14
+- **算法 = Argon2id**（ADR-F，见 `docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`）。`PasswordHasher()` 默认参数：`m=65536 KiB(64 MiB) / t=3 / p=4 / hash_len=32 / salt_len=16`，强于 OWASP 最低线，对后台管理系统的低登录并发是合适的
+- **intake 决策（依赖偏离记录）**：v3 plan 原写 `passlib[bcrypt]` → intake 核验否决（passlib 1.7.4 停在 2020、Python 3.14 已移除其依赖的 `crypt` 模块、bcrypt≥4 启动警告）→ 评估直连 `bcrypt` → **最终选 Argon2id**。理由：greenfield 零迁移成本 + admin 低登录并发使 memory-hard 的内存成本非瓶颈 + OWASP 密码存储首选 + 无 bcrypt 72-byte 输入限制 + `PasswordHasher` API 更难写错（自带盐管理 / `check_needs_rehash`）
+- **运维 caveat**：每次 `verify`/`hash` 约消耗 `memory_cost` 内存（默认 64 MiB）。调大 `memory_cost` 前**必须**压测登录并发峰值 × 单次内存，写进 DEPLOYMENT.md 容量规划
+- **参数演进**：调参后用 `ph.check_needs_rehash(stored_hash)` 在用户下次登录时透明 rehash，不需要批量迁移
+- **已知噪声**：`argon2.__version__` 已 deprecated，查版本用 `importlib.metadata.version("argon2-cffi")`，不要在代码里读 `__version__`
+
 ### `uvicorn`
 
 - **生产参数变化**：`--proxy-headers --forwarded-allow-ips` 配置近年迭代多
