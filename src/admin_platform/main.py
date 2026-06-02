@@ -21,8 +21,6 @@ from admin_platform.core.logging import configure_logging
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.observability import init_observability, shutdown_observability
 from admin_platform.db.engine import dispose_engine, get_engine
-from admin_platform.domains.tag.api import router as tag_router
-from admin_platform.domains.todo.api import router as todo_router
 
 # ADR 0001 §1：这些状态码上的错误响应必须符合 ProblemDetail 形状。
 # FastAPI 默认的 422 HTTPValidationError schema 在 OpenAPI 生成时被替换。
@@ -162,11 +160,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(health_router)
-    # 示例 domain —— 详见 doc/architecture/EXAMPLE_DOMAIN.md。
-    # 真实业务里删除或替换；保留是为了模板开箱即用一组可跑的 CRUD 示例
-    # （todo + tag 多对多关联）。
-    app.include_router(todo_router)
-    app.include_router(tag_router)
+    # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app
 

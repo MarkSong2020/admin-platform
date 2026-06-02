@@ -31,8 +31,7 @@ from admin_platform.db.base import Base
 # Import every module that defines ORM models so Base.metadata is populated.
 # Example (annotate with a noqa F401 since the import is only for its side effect):
 #     from admin_platform.domains.user.models import User
-from admin_platform.domains.todo.models import Todo  # noqa: F401
-from admin_platform.domains.tag.models import Tag  # noqa: F401
+# （示例 domain todo/tag 已删除；首个真实业务 model 在 Task 4 加入 Tenant/User 时补此处）
 
 # ----------------------------------------------------------------------------
 

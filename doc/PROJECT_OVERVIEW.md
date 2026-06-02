@@ -40,7 +40,7 @@
 - **测试**：`make check` 202 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
 - **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg + argon2-cffi（密码哈希）+ PyJWT
-- **脚手架 lineage**：example domain `domains/todo`/`domains/tag`、generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 均继承自模板 v0.5.3；去留待 P0 收口前单独决策。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)
+- **脚手架 lineage**：generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 继承自模板 v0.5.3。示例域 `domains/todo`/`domains/tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)
 
 ## 已落地的契约（对应 ADR 0001 章节）
 
@@ -86,5 +86,5 @@ make test-integration              # 集成测试（需 docker）
 ## 下一步看哪
 
 → [INDEX.md](./INDEX.md) 按角色找入口
-→ [架构详情](./architecture/EXAMPLE_DOMAIN.md) 蓝本 domain 解读
+→ [CODE_GENERATOR](./standards/CODE_GENERATOR.md) domain 五层骨架解读
 → [CHANGELOG](../CHANGELOG.md) 脚手架 lineage 演进（模板 v0.1 → v0.5.3）

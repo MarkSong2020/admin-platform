@@ -1,31 +1,32 @@
 # 知识库索引
 
-> 团队 Python Web 服务脚手架模板的全部文档入口。**按角色找最快路径**——先看你是谁，再点链接。
+> admin-platform（多租户 admin 平台应用）的全部文档入口。**按角色找最快路径**——先看你是谁，再点链接。
 
 ## 🚀 5 分钟新手路径（先跑通，再看文档）
 
 ```bash
-git clone <repo> && cd python-web-service-template
+git clone <repo> && cd admin-platform
 make init          # uv sync + pre-commit install
 make compose-up    # 起本地 Postgres（端口 5432；Redis 是 opt-in，详见 compose.yaml）
-make migrate       # 应用 Alembic 迁移（含 example domain 的 todos 表）
+make migrate       # 应用 Alembic 迁移（P0 基线；Task 4 后含 tenant/user 表）
 make dev           # 起 FastAPI dev server（端口 8000，hot reload）
 ```
 
-打开 <http://localhost:8000/docs>，**四步验证模板真的能跑**（含 v0.5.1 多 domain 关联）：
+打开 <http://localhost:8000/docs>，**验证应用能跑**：
 
-1. **`GET /api/v1/todos`** → 返回空 pagination envelope `{items: [], page: 1, ..., tags: []}`
-2. **`POST /api/v1/tags`** with `{"name": "urgent"}` → `201 Created` + `{id: 1, name: "urgent"}`
-3. **`POST /api/v1/todos`** with `{"title": "buy milk", "tag_ids": [1]}` → `201 Created` + `{..., tags: [{id: 1, name: "urgent"}]}`（**演示多对多关联 + selectinload 预加载**）
-4. 改一行 [`src/service_name/domains/todo/service.py`](../src/service_name/domains/todo/service.py)（例如把错误码改成 `TODO_GONE`），刷新浏览器看 hot reload 真生效
+1. **`GET /healthz`** → `200`（进程存活）
+2. **`GET /readyz`** → `200`（DB 可达；compose 起来后）
+3. **`GET /docs`** → OpenAPI 文档（当前是 health + 错误响应契约；认证 / 业务端点随 Task 5+ 落地）
 
-写第三个业务模块（5 分钟内）：
+> P0 阶段（多租户认证地基）业务端点尚未落地；隔离机制见 [`../src/admin_platform/db/tenant_filter.py`](../src/admin_platform/db/tenant_filter.py)，完整计划见 [`../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)。
+
+新建业务模块：
 
 ```bash
-make new-module name=ledger with-model=1
+make new-module name=order with-model=1
 ```
 
-对照 [`src/service_name/domains/todo/`](../src/service_name/domains/todo/) 写业务规则；蓝本里**每一行选择的理由**见 [`architecture/EXAMPLE_DOMAIN.md`](./architecture/EXAMPLE_DOMAIN.md)。
+generator 生成 schema → service → repository → api → models 五层骨架，即业务开发蓝本；细节见 [`standards/CODE_GENERATOR.md`](./standards/CODE_GENERATOR.md)。
 
 > 这条路径覆盖："从零到能看见返回值" + "理解我该照哪个模式写代码"。详细分流如下。
 
@@ -38,7 +39,7 @@ make new-module name=ledger with-model=1
 
 ## 🛠 业务开发者 / 加端点 / 改模型
 
-- **教科书蓝本（必读）** → [architecture/EXAMPLE_DOMAIN.md](./architecture/EXAMPLE_DOMAIN.md)（`todo` 单 domain + `tag` 多对多 + N+1 守门）
+- **domain 五层骨架（必读）** → [standards/CODE_GENERATOR.md](./standards/CODE_GENERATOR.md)（`make new-module` 生成 schema → service → repository → api → models 五层，即业务开发蓝本）
 - 命名约定（错误码 / operation_id / tag）→ [standards/NAMING_CONVENTIONS.md](./standards/NAMING_CONVENTIONS.md)
 - 错误响应 shape + AppError 用法 → [architecture/ERROR_RESPONSE.md](./architecture/ERROR_RESPONSE.md)
 - 分页 / Idempotency / Auth → [architecture/REQUEST_LIFECYCLE.md](./architecture/REQUEST_LIFECYCLE.md)

@@ -31,7 +31,7 @@
 
 **版本口径**：本应用版本以 `pyproject.toml [project].version`（当前 `0.0.1`）为准；`tests/unit/test_version_consistency.py` 守 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 含该应用版本。模板 CHANGELOG.md（v0.5.3）是派生 lineage，不是本应用发版记录。
 
-**脚手架 lineage / tech-debt**：example domain `todo`/`tag`、generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等均继承自模板，是 lineage 资产；去留待 P0 收口前单独决策，不在本阶段裁剪。
+**脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
 下一步：按 P0 计划推进 Task 4（数据模型）→ Task 5/6/7（认证签发 / 登录 / 上下文注入）→ Task 10 端到端隔离验收。
 
