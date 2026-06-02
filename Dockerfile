@@ -61,7 +61,7 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 #   (one record per request, with request_id / status / duration_ms). Leaving
 #   uvicorn's default access log on produces a second redundant plain-text
 #   line per request — doubles log volume and confuses aggregation.
-CMD ["uvicorn", "service_name.main:app", \
+CMD ["uvicorn", "admin_platform.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--proxy-headers", \

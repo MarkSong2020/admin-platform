@@ -1,10 +1,10 @@
-# python-web-service-template — 项目指引（给 Claude Code）
+# admin-platform — 项目指引（给 Claude Code）
 
 > 项目级 AI 上下文。全局规范在 `~/.claude/CLAUDE.md` 和 `~/.claude/rules/python.md`，**不要重复**。
 
 ## 仓库角色
 
-团队 Python Web 服务脚手架模板（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest）。**当选定 Python 作为后端栈后**，新建 API / 微服务的起点。
+多租户 admin 平台**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。SaaS 共享库多租户，fail-closed 隔离 + JWT 认证，目标长出 RBAC / 审计 / admin 业务域。
 
 > 跨栈选型决策不在本仓口径——见 `~/.claude/CLAUDE.md` 的「技术栈」段（按需求选型，不预设默认）。
 
@@ -16,27 +16,24 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.5.3）
+## 当前阶段（v0.0.1 — P0 多租户认证地基）
 
-`make check` 189 ✓ / `make test-integration` 29 selected ✓ / `make smoke-generator` ✓ / `make coverage` 门槛 85%（`fail_under = 85`，实测 ~87.19%）。
+`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
 
-**v0.5.x milestone 浓缩**（v0.4.x 完整 list 见 CHANGELOG）：
+**P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
 
-| 版本 | 主要价值 |
+| Task | 状态 |
 |---|---|
-| v0.5.0 | example domain `todo` 落地 — 5 分钟跑通 CRUD；CHANGELOG 加「版本号语义」段（milestone vs audit-build 分离） |
-| v0.5.1 | 第二个 example domain `tag` + todo↔tag 多对多 + `lazy="raise"` + `selectinload` + N+1 守门；v0.5.1 新代码 docstring 中文化 |
-| v0.5.2 | generator 模板 + core/db/health 既有代码 ~2100 行 docstring 全量中文化 — **至此模板内代码 docstring 一致简体中文** |
-| v0.5.3 | JWT Bearer 鉴权中间件（ADR §5）— AuthMiddleware + get_optional_current_user / require_current_user |
+| 1 scaffold（从 `python-web-service-template` git archive 派生） | ✓ |
+| 2 argon2-cffi 密码哈希依赖（ADR-F）+ access token TTL | ✓ |
+| 3 fail-closed 租户隔离（`session.info` + `do_orm_execute` 读 / `before_flush` 写，对称广义 fail-closed） | ✓ |
+| 4 数据模型 Tenant/User + 迁移 | 下一步 |
 
-**KNOWN_DEVIATIONS 当前状态**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 **按各自定义的"触发条件"等待，不主动重写**（v0.5.0 reality check：原 v0.5.1 重写 middleware 计划撤回，避免完美主义陷阱）。详见 [`doc/tech-debt/KNOWN_DEVIATIONS.md`](./doc/tech-debt/KNOWN_DEVIATIONS.md)。
+**版本口径**：本应用版本以 `pyproject.toml [project].version`（当前 `0.0.1`）为准；`tests/unit/test_version_consistency.py` 守 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 含该应用版本。模板 CHANGELOG.md（v0.5.3）是派生 lineage，不是本应用发版记录。
 
-**版本口径**：模板里程碑版本看 CHANGELOG.md 顶部（vX.Y.Z 严格三段）；`pyproject.toml [project].version` 是业务实例初始版本（克隆后由业务团队自管），两者不同源；`tests/unit/test_version_consistency.py` 守 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 与 CHANGELOG 一致；自审 build 走 git tag `-audit.N` 后缀，不进 CHANGELOG。
+**脚手架 lineage / tech-debt**：example domain `todo`/`tag`、generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等均继承自模板，是 lineage 资产；去留待 P0 收口前单独决策，不在本阶段裁剪。
 
-下一步触发点（无强制顺序）：
-- 解 ADR Open Q（团队仓 ADR；本仓追踪 → [`doc/tech-debt/OPEN_QUESTIONS.md`](./doc/tech-debt/OPEN_QUESTIONS.md)）
-- 加第二个 Python 服务（真实使用反馈）
-- OTel SDK 已接入（v0.5.3，默认关闭）；下一步补 exporter lifecycle hardening + enabled-path 自动化测试
+下一步：按 P0 计划推进 Task 4（数据模型）→ Task 5/6/7（认证签发 / 登录 / 上下文注入）→ Task 10 端到端隔离验收。
 
 ## AI 工作约束
 

@@ -1,38 +1,35 @@
-"""模板里程碑版本号漂移守门。
+"""应用版本号 × 文档一致性守门。
 
-历史：v0.4.16 review 发现 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 都还
-写 v0.4.14，但 CHANGELOG 顶部已经是 v0.4.16；没有自动守门，每次发版后人工
-同步 4 处文档很容易漏。
+admin-platform 是基于 ``python-web-service-template`` 脚手架派生的**独立应用**，
+版本口径以本仓 ``pyproject.toml [project].version`` 为准，**不再绑定**模板
+CHANGELOG 的里程碑版本（模板 CHANGELOG 现作为派生 lineage 保留，不是本应用的
+发版记录）。
 
-设计：CHANGELOG.md 顶部的 ``## [vX.Y.Z]`` 是 single source of truth；其它
-4 处文档必须出现同一个版本号。``pyproject.toml [project].version`` 是业务
-实例初始版本（克隆后业务自管），与模板里程碑版本不同源，**不**纳入守门。
+设计：``pyproject.toml [project].version`` 是 single source of truth；README /
+AGENTS / CLAUDE / PROJECT_OVERVIEW 必须出现当前应用版本，避免发版后漏同步 4 处文档。
 """
 
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_VERSION_HEADER_RE = re.compile(r"^##\s+\[(v\d+\.\d+\.\d+)\]")
+_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
-def _changelog_top_version() -> str:
-    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    for line in changelog.splitlines():
-        match = _VERSION_HEADER_RE.match(line)
-        if match:
-            return match.group(1)
-    raise AssertionError("CHANGELOG.md has no `## [vX.Y.Z]` header")
+def _app_version() -> str:
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return data["project"]["version"]
 
 
 @pytest.fixture(scope="module")
-def expected_version() -> str:
-    return _changelog_top_version()
+def app_version() -> str:
+    return _app_version()
 
 
 @pytest.mark.parametrize(
@@ -44,19 +41,17 @@ def expected_version() -> str:
         "doc/PROJECT_OVERVIEW.md",
     ],
 )
-def test_doc_mentions_current_template_version(doc_path: str, expected_version: str) -> None:
+def test_doc_mentions_current_app_version(doc_path: str, app_version: str) -> None:
     text = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
-    assert expected_version in text, (
-        f"{doc_path} does not mention current template version {expected_version} "
-        "(CHANGELOG.md top entry). Sync README / AGENTS / CLAUDE / PROJECT_OVERVIEW "
-        "every release."
+    assert app_version in text, (
+        f"{doc_path} does not mention current app version {app_version} "
+        "(pyproject.toml [project].version). Sync README / AGENTS / CLAUDE / "
+        "PROJECT_OVERVIEW every release."
     )
 
 
-def test_changelog_top_version_is_well_formed(expected_version: str) -> None:
-    assert _VERSION_HEADER_RE.match(f"## [{expected_version}]"), (
-        f"CHANGELOG top version {expected_version!r} is not vX.Y.Z"
-    )
+def test_app_version_is_well_formed(app_version: str) -> None:
+    assert _SEMVER_RE.match(app_version), f"pyproject app version {app_version!r} is not X.Y.Z"
 
 
 @pytest.mark.parametrize(
