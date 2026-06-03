@@ -17,11 +17,27 @@ from admin_platform.domains.user.schemas import UserCreate, UserUpdate
 from admin_platform.domains.user.service import UserService
 
 
+def _user(uid: int, username: str, *, nickname: str = "") -> User:
+    """构造 transient User，预置 UserRead 需要的全部字段（不入库）。"""
+    obj = User(username=username, nickname=nickname, password_hash="x", tenant_id=1)
+    obj.id = uid
+    obj.status = "active"
+    obj.is_platform_admin = False
+    return obj
+
+
 class _StubRepo:
     """最小 stub —— 只实现各用例会调到的方法。"""
 
-    def __init__(self, existing: User | None = None) -> None:
+    def __init__(
+        self,
+        existing: User | None = None,
+        rows: list[User] | None = None,
+        updated: User | None = None,
+    ) -> None:
         self.existing = existing
+        self.rows = rows if rows is not None else []
+        self.updated = updated
 
     async def find_by_username(self, username: str) -> User | None:
         if self.existing is not None and self.existing.username == username:
@@ -29,20 +45,21 @@ class _StubRepo:
         return None
 
     async def create(self, payload: UserCreate, *, password_hash: str) -> User:
-        obj = User(
-            username=payload.username, nickname=payload.nickname, password_hash=password_hash
-        )
-        obj.id = 2
-        obj.tenant_id = 1
-        obj.status = "active"
-        obj.is_platform_admin = False
-        return obj
+        return _user(2, payload.username, nickname=payload.nickname)
 
     async def get(self, user_id: int) -> User | None:
         return None
 
-    async def update(self, user_id: int, payload: UserUpdate, *, password_hash: str | None) -> None:
-        return None
+    async def list_paginated(self, page: int, size: int) -> list[User]:
+        return self.rows
+
+    async def count(self) -> int:
+        return len(self.rows)
+
+    async def update(
+        self, user_id: int, payload: UserUpdate, *, password_hash: str | None
+    ) -> User | None:
+        return self.updated
 
     async def delete(self, user_id: int) -> bool:
         return False
@@ -80,4 +97,38 @@ async def test_get_missing_raises_404() -> None:
 async def test_delete_missing_raises_404() -> None:
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo()).delete(999)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_returns_page() -> None:
+    rows = [_user(1, "alice"), _user(2, "bob")]
+    page = await _svc(_StubRepo(rows=rows)).list_(page=1, size=20)
+    assert {u.username for u in page.items} == {"alice", "bob"}
+    assert page.total == 2
+    assert page.total_pages == 1
+
+
+@pytest.mark.asyncio
+async def test_update_existing_returns_user() -> None:
+    out = await _svc(_StubRepo(updated=_user(5, "carol", nickname="Carol"))).update(
+        5, UserUpdate(nickname="Carol")
+    )
+    assert out.id == 5
+    assert out.nickname == "Carol"
+
+
+@pytest.mark.asyncio
+async def test_update_with_password_rehashes() -> None:
+    # 覆盖 update 里 payload.password 非 None → hash_password 分支。
+    out = await _svc(_StubRepo(updated=_user(5, "carol"))).update(
+        5, UserUpdate(password="new-strong-password")
+    )
+    assert out.id == 5
+
+
+@pytest.mark.asyncio
+async def test_update_missing_raises_404() -> None:
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(updated=None)).update(999, UserUpdate(nickname="x"))
     assert exc.value.status_code == 404
