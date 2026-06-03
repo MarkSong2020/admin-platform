@@ -89,13 +89,14 @@ def _render_table(table: Table, cls: type | None) -> str:
         lines.append("")
 
     # 列表格。
-    lines.append("| 列 | 类型 | 空 | 默认 | 备注 |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| 列 | 类型 | 空 | 默认 | 描述 | 备注 |")
+    lines.append("|---|---|---|---|---|---|")
     for column in table.columns:
         nullable = "NULL" if column.nullable else "NOT NULL"
         note = "PK" if column.primary_key else ""
+        desc = column.comment or "—"
         lines.append(
-            f"| `{column.name}` | {_col_type(column)} | {nullable} | {_col_default(column)} | {note} |"
+            f"| `{column.name}` | {_col_type(column)} | {nullable} | {_col_default(column)} | {desc} | {note} |"
         )
     lines.append("")
 
