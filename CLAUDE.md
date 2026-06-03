@@ -18,22 +18,26 @@
 
 ## 当前阶段（v0.0.1 — P0 多租户认证地基）
 
-`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
+`make check` 219 ✓ / `make test-integration` 28 ✓ / `make coverage` 88%（门槛 85%）。
 
 **P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
 
 | Task | 状态 |
 |---|---|
-| 1 scaffold（从 `python-web-service-template` git archive 派生） | ✓ |
-| 2 argon2-cffi 密码哈希依赖（ADR-F）+ access token TTL | ✓ |
-| 3 fail-closed 租户隔离（`session.info` + `do_orm_execute` 读 / `before_flush` 写，对称广义 fail-closed） | ✓ |
-| 4 数据模型 Tenant/User + 迁移 | 下一步 |
+| 1–4 scaffold / 依赖 intake / fail-closed 隔离 / Tenant·User 模型迁移 | ✓ |
+| 5 security（argon2 + JWT；认证层 fail-closed：tenant_id 必需 + 类型校验） | ✓ |
+| 6 登录 API（system_session 查 + 验密 + 签 token；统一 401 防枚举 + dummy-hash 抹平时序） | ✓ |
+| 7 上下文注入（`get_session`→`session.info` + `system_session`） | ✓ |
+| 8 user 域五层 CRUD（受租户隔离；C1 分层契约启用） | ✓ |
+| 9 CLI 建平台超管（无默认口令 + 一次性信任根 + 最小校验） | ✓ |
+| 10 端到端隔离验收门 ＋ 11 覆盖率 88% + `MULTI_TENANCY.md` | ✓ |
+| 12 RLS spike（P0.5 DB 层加固） | 进行中 |
 
 **版本口径**：本应用版本以 `pyproject.toml [project].version`（当前 `0.0.1`）为准；`tests/unit/test_version_consistency.py` 守 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 含该应用版本。模板 CHANGELOG.md（v0.5.3）是派生 lineage，不是本应用发版记录。
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：按 P0 计划推进 Task 4（数据模型）→ Task 5/6/7（认证签发 / 登录 / 上下文注入）→ Task 10 端到端隔离验收。
+下一步：Task 12 RLS spike（应用层 fail-closed 已成型，评估 asyncpg 连接池下 `SET LOCAL` RLS 叠加 DB 层防御的可行性）；之后 P0 收尾复审。
 
 ## AI 工作约束
 
@@ -46,6 +50,7 @@
 5. **改代码必须同步改 `doc/`**（drift 视为 bug）
 6. **碰基础设施红线**（`core/` `db/` `main.py`）先停下来评估
 7. **docstring / comments 默认简体中文**（v0.5.1 起 §0 红线）—— 仅 code identifier / 错误码字面量 / 框架名保留英文
+8. **多租户隔离红线**（写 repo / 查询前必读 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)）：业务表查询默认 fail-closed（无租户上下文抛 `TenantContextMissing`）；repo **读用显式 `select`（非 `session.get`）、写用 ORM UoW（`add`/`session.delete`，非 bulk `update()/delete()`）、count 用 `select_from(实体)`**——否则绕过 `do_orm_execute` 事件 → 跨租户越权；bypass 只走 `system_session()` 且必须显式带 `tenant_id`；`text()` / raw SQL 不被隔离保护（code review 必查 `text(`）
 
 ## 工作约束（给 Claude Code 的特定行为）
 
