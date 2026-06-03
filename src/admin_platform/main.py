@@ -12,6 +12,7 @@ from fastapi.openapi.utils import get_openapi
 from redis.asyncio import Redis
 from sqlalchemy import text
 
+from admin_platform.api.v1.auth import router as auth_router
 from admin_platform.api.v1.health import router as health_router
 from admin_platform.core.auth import AuthMiddleware, get_auth_config
 from admin_platform.core.config import get_settings
@@ -160,6 +161,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(health_router)
+    app.include_router(auth_router)
     # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app

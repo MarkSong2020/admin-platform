@@ -104,6 +104,10 @@ AUTH_TOKEN_INVALID = "auth.TOKEN_INVALID"  # noqa: S105
 AUTH_TOKEN_EXPIRED = "auth.TOKEN_EXPIRED"  # noqa: S105
 AUTH_FORBIDDEN_BY_ROLE = "auth.FORBIDDEN_BY_ROLE"
 AUTH_FORBIDDEN_BY_SCOPE = "auth.FORBIDDEN_BY_SCOPE"
+# 登录失败统一码（Task 6）：租户不存在/停用、用户不存在/停用、密码错一律此码 + 401，
+# 不区分以防账号枚举（spec 字面写 admin.LOGIN_FAILED，本仓归入 auth.* 体系，与
+# auth.TOKEN_* 一致；admin_platform.* 留给业务资源错误）。
+AUTH_LOGIN_FAILED = "auth.LOGIN_FAILED"
 
 # ---- 租户隔离 fail-closed（ADR-A/E）----
 # 业务查询缺租户上下文 = 服务端 bug（某路径用错 session），按 500 处理。

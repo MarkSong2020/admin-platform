@@ -112,8 +112,16 @@ class Settings(BaseSettings):
     auth_jwt_issuer: str = ""  # 非空时校验 iss claim
     auth_jwt_audience: str = ""  # 非空时校验 aud claim（单值，应与 Settings.service_id 一致）
     # 无需 token 的公开路径前缀。精确前缀匹配（不含 query string）。
+    # /api/v1/auth/login：登录端点本身免 token（它负责签发 token）。
     auth_public_paths: list[str] = Field(
-        default=["/healthz", "/startupz", "/readyz", "/docs", "/openapi.json"]
+        default=[
+            "/healthz",
+            "/startupz",
+            "/readyz",
+            "/docs",
+            "/openapi.json",
+            "/api/v1/auth/login",
+        ]
     )
     # access token 存活时长（秒）。P0 只签发 access token，不做 refresh，
     # 所以 TTL 短一点（默认 2h）以收敛失窃 token 的暴露窗口；refresh + 撤销
