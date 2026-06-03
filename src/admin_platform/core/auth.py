@@ -34,6 +34,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from admin_platform.core import security
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AUTH_TOKEN_EXPIRED, AUTH_TOKEN_INVALID, AppError
 
@@ -83,39 +84,8 @@ class CurrentUser:
     user_id: str  # sub claim
     sub: str = field(compare=False)  # 等于 user_id，保留给习惯 sub 字段的调用方
     scope: str = ""
-
-
-# ---- JWT validation ----
-
-_TOKEN_EXPIRY_SKEW = 0  # exp 严格不宽限
-
-
-def _decode_and_validate(token: str, config: AuthConfig) -> dict[str, Any]:
-    """验证 JWT 签名与必要 claims。返回 decoded payload dict。
-
-    可能抛：
-      ``jwt.ExpiredSignatureError``  →  401 TOKEN_EXPIRED
-      ``jwt.InvalidTokenError``       →  401 TOKEN_INVALID（含签名错 / 格式错 / 缺必要 claim）
-    """
-    audience = config.audience if config.validate_audience else None
-    issuer = config.issuer if config.validate_issuer else None
-
-    return jwt.decode(
-        token,
-        key=config.secret,
-        algorithms=[config.algorithm],
-        options={
-            "require": ["sub", "exp", "iat"],
-            "verify_exp": True,
-            "verify_iat": True,
-            "verify_nbf": False,
-            "verify_iss": config.validate_issuer,
-            "verify_aud": config.validate_audience,
-        },
-        audience=audience,
-        issuer=issuer,
-        leeway=_TOKEN_EXPIRY_SKEW,
-    )
+    tenant_id: int | None = None  # 业务 token 必带；未鉴权 / optional 路径为 None
+    is_platform: bool = False  # 平台超管 → 跨租户 bypass（缺省非超管，fail-safe）
 
 
 # ---- AuthMiddleware ----
@@ -183,7 +153,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         token = auth_header[7:]  # len("Bearer ") == 7
 
         try:
-            payload = _decode_and_validate(token, self._config)
+            payload = security.decode_token(token)
         except jwt.ExpiredSignatureError:
             logger.info("auth: token expired", extra={"path": request.url.path})
             return _problem_auth(request, AUTH_TOKEN_EXPIRED, HTTPStatus.UNAUTHORIZED)
@@ -203,6 +173,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user_id = sub
         request.state.token_sub = sub
         request.state.token_scope = payload.get("scope", "")
+        # tenant_id 是 decode_token 的必需 claim（缺失/类型非法已在上面 401）——直取、
+        # 不软取，与隔离层 fail-closed 同口径。is_platform 可选，缺失默认非超管（fail-safe）。
+        request.state.tenant_id = payload["tenant_id"]
+        request.state.is_platform = payload.get("is_platform", False)
 
         response = await call_next(request)
 
@@ -244,6 +218,8 @@ def get_optional_current_user(request: Request) -> CurrentUser:
         user_id=getattr(request.state, "user_id", ""),
         sub=getattr(request.state, "token_sub", ""),
         scope=getattr(request.state, "token_scope", ""),
+        tenant_id=getattr(request.state, "tenant_id", None),
+        is_platform=getattr(request.state, "is_platform", False),
     )
 
 
@@ -277,6 +253,8 @@ def require_current_user(request: Request) -> CurrentUser:
         user_id=user_id,
         sub=getattr(request.state, "token_sub", ""),
         scope=getattr(request.state, "token_scope", ""),
+        tenant_id=getattr(request.state, "tenant_id", None),
+        is_platform=getattr(request.state, "is_platform", False),
     )
 
 
