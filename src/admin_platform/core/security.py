@@ -9,7 +9,9 @@
   * ``decode_token`` —— 解码 + 校验。在底座 require(``sub``/``exp``/``iat``)之上**强制
     ``tenant_id`` 必需并做类型校验**，把 fail-closed 从隔离层延伸到认证层。
 
-签名密钥 / 算法 / iss / aud 复用底座 ``get_auth_config()``（即 ``Settings.auth_jwt_*``）。
+签名密钥 / 算法 / iss / aud 直接读 ``Settings.auth_jwt_*``（不经 auth 层，保持
+``config ← security ← auth`` 单向依赖 —— 中间件 ``AuthMiddleware`` 复用本模块 ``decode_token``，
+若 security 反向依赖 auth 会构成循环 import）。
 
 安全设计（经 Codex 安全 PK 收紧）：
 
@@ -35,7 +37,6 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
-from admin_platform.core.auth import get_auth_config
 from admin_platform.core.config import get_settings
 
 logger = logging.getLogger("admin_platform.security")
@@ -90,9 +91,8 @@ def _require_secret(secret: str) -> str:
 
 def issue_access_token(*, user_id: int, tenant_id: int, is_platform: bool, username: str) -> str:
     """签发 access token。claims = sub/tenant_id/is_platform/username/iat/exp(+iss/aud)。"""
-    config = get_auth_config()
-    secret = _require_secret(config.secret)
-    ttl_seconds = get_settings().auth_access_token_ttl_seconds
+    settings = get_settings()
+    secret = _require_secret(settings.auth_jwt_secret)
     issued_at = datetime.now(UTC)
     claims: dict[str, Any] = {
         "sub": str(user_id),
@@ -100,13 +100,13 @@ def issue_access_token(*, user_id: int, tenant_id: int, is_platform: bool, usern
         "is_platform": is_platform,
         "username": username,
         "iat": issued_at,
-        "exp": issued_at + timedelta(seconds=ttl_seconds),
+        "exp": issued_at + timedelta(seconds=settings.auth_access_token_ttl_seconds),
     }
-    if config.issuer:
-        claims["iss"] = config.issuer
-    if config.audience:
-        claims["aud"] = config.audience
-    return jwt.encode(claims, key=secret, algorithm=config.algorithm)
+    if settings.auth_jwt_issuer:
+        claims["iss"] = settings.auth_jwt_issuer
+    if settings.auth_jwt_audience:
+        claims["aud"] = settings.auth_jwt_audience
+    return jwt.encode(claims, key=secret, algorithm=settings.auth_jwt_algorithm)
 
 
 # ---- access token 解码 + 校验 ----
@@ -119,24 +119,24 @@ def decode_token(token: str) -> dict[str, Any]:
     据此分别映射 401 ``auth.TOKEN_EXPIRED`` / ``auth.TOKEN_INVALID``。tenant_id / is_platform
     的类型不合法亦抛 ``jwt.InvalidTokenError``（当作非法 token，而非服务端错误）。
     """
-    config = get_auth_config()
-    secret = _require_secret(config.secret)
-    audience = config.audience if config.validate_audience else None
-    issuer = config.issuer if config.validate_issuer else None
+    settings = get_settings()
+    secret = _require_secret(settings.auth_jwt_secret)
+    validate_issuer = bool(settings.auth_jwt_issuer)
+    validate_audience = bool(settings.auth_jwt_audience)
     payload: dict[str, Any] = jwt.decode(
         token,
         key=secret,
-        algorithms=[config.algorithm],
+        algorithms=[settings.auth_jwt_algorithm],
         options={
             "require": list(_REQUIRED_CLAIMS),
             "verify_exp": True,
             "verify_iat": True,
             "verify_nbf": False,
-            "verify_iss": config.validate_issuer,
-            "verify_aud": config.validate_audience,
+            "verify_iss": validate_issuer,
+            "verify_aud": validate_audience,
         },
-        audience=audience,
-        issuer=issuer,
+        audience=settings.auth_jwt_audience if validate_audience else None,
+        issuer=settings.auth_jwt_issuer if validate_issuer else None,
     )
     _validate_claim_types(payload)
     return payload

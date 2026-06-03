@@ -44,9 +44,17 @@ def _make_token(  # noqa: PLR0913
     iss: str | None = None,
     aud: str | None = None,
     iat: int = 0,
+    tenant_id: int = 1,
 ) -> str:
     now = int(time.time())
-    payload: dict = {"sub": sub, "iat": iat or now, "exp": exp or (now + 3600)}
+    # admin token 恒带 tenant_id（spec v3 #4 / Task 5：decode 必需 claim + 类型校验）——
+    # 测试 token 同口径，否则会被认证层 fail-closed 挡掉。
+    payload: dict = {
+        "sub": sub,
+        "tenant_id": tenant_id,
+        "iat": iat or now,
+        "exp": exp or (now + 3600),
+    }
     if iss:
         payload["iss"] = iss
     if aud:

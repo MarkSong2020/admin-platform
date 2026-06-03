@@ -25,12 +25,40 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.db.engine import get_sessionmaker
+from admin_platform.db.tenant_filter import SYSTEM_CTX, TENANT_CTX_KEY
 
 
-async def get_session() -> AsyncIterator[AsyncSession]:
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """每请求一个 AsyncSession，从 request.state 注入租户上下文到 session.info。
+
+    上下文来源是 ``AuthMiddleware`` 写入 ``request.state`` 的 tenant_id/is_platform
+    （见 ADR-E：走 request.state 而非 ContextVar，回避 BaseHTTPMiddleware 跨 task 传播
+    失效）。public 路径（如登录）无 tenant_id → 不设上下文；这类 handler **不得**用
+    ``get_session`` 直查 ``TenantMixin``（会 fail-closed 抛错），应走 ``system_session()``。
+    """
     async with get_sessionmaker()() as session, session.begin():
+        tenant_id = getattr(request.state, "tenant_id", None)
+        if tenant_id is not None:
+            session.info[TENANT_CTX_KEY] = {
+                "tenant_id": tenant_id,
+                "platform": getattr(request.state, "is_platform", False),
+            }
+        yield session
+
+
+@asynccontextmanager
+async def system_session() -> AsyncIterator[AsyncSession]:
+    """系统 / 登录 / CLI 用：显式 ``SYSTEM_CTX`` bypass 租户过滤。
+
+    调用方负责按 ``tenant_id`` 显式过滤（如登录 service 先按 tenant_code 查租户、再
+    ``where(User.tenant_id == tid)``）。bypass 全过滤的口子，code review 必查每个调用点。
+    """
+    async with get_sessionmaker()() as session, session.begin():
+        session.info[TENANT_CTX_KEY] = SYSTEM_CTX
         yield session
