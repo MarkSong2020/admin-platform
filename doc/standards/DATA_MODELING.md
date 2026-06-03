@@ -20,10 +20,11 @@
 
 ## 现状（vs 模板目标）
 
-- ✅ `TenantMixin` 已落地（`db/base.py:35`）
-- ✅ 现有 `tenants` / `users` 用 `created_at`（符合模板裁决）
-- ⏳ `IdMixin` / `TimestampMixin` 同模板待建；`updated_at` 待补（随模板 mixin 落地，migration 0003，下一阶段）
-- ⏳ 列级 / 表级 `comment` 待回填；comment pytest 门禁待加
+- ✅ `IdMixin` / `TimestampMixin` / `TenantMixin` 均已落地（`db/base.py`，与模板同款）
+- ✅ `tenants` / `users` 采用 mixin：BIGINT `id` + `created_at` / `updated_at`（timestamptz、均带中文 comment）；迁移 0002 in-place 同步（含 comment，`check-db` 零漂移、`test-integration` 通过）
+- ✅ 全列中文 comment 回填（业务列 + `tenant_id`）；迁移 0002 同步（`check-db` 比对 comment 零漂移）
+- ✅ comment 门禁 `tests/unit/test_column_comments.py`（自动发现 domain + 已变异验证会咬），与模板同款
+- ✅ schema 速览 `scripts/dump_schema.py` 加「描述」列渲染列 comment
 
 ## 引用
 
