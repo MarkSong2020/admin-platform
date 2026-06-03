@@ -29,9 +29,10 @@ from admin_platform.db.base import Base
 
 # --- Register models here for autogenerate ----------------------------------
 # Import every module that defines ORM models so Base.metadata is populated.
-# Example (annotate with a noqa F401 since the import is only for its side effect):
-#     from admin_platform.domains.user.models import User
-# （示例 domain todo/tag 已删除；首个真实业务 model 在 Task 4 加入 Tenant/User 时补此处）
+# Side-effect-only imports（noqa F401）：把 model 类注册进 Base.metadata，
+# 供 autogenerate / alembic check 与 live schema 做 diff。
+from admin_platform.domains.tenant.models import Tenant  # noqa: F401
+from admin_platform.domains.user.models import User  # noqa: F401
 
 # ----------------------------------------------------------------------------
 
