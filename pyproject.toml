@@ -83,6 +83,8 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 ]
 # Generator script must call ``print()`` for CLI feedback.
 "scripts/new_module.py" = ["T201"]
+# Schema-doc generator likewise reports progress via ``print()``.
+"scripts/dump_schema.py" = ["T201"]
 
 # ---- Pytest -----------------------------------------------------------------
 [tool.pytest.ini_options]
