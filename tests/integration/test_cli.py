@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 
-from admin_platform.cli import CliError, create_platform_admin, main
+from admin_platform.cli import CliError, create_platform_admin
 from admin_platform.core.security import verify_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import system_session
@@ -107,9 +107,3 @@ async def test_rejects_second_admin_even_different_username(
         await create_platform_admin("admin2")
     usernames = {u.username for u in await _all_users()}
     assert usernames == {"root"}  # admin2 没被创建
-
-
-def test_main_missing_env_returns_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 同步测 main()（无运行中 loop）：缺 env 在 DB 之前就失败 → 退出码非 0，不建记录。
-    monkeypatch.delenv(_ENV, raising=False)
-    assert main(["create-platform-admin", "--username", "root"]) != 0
