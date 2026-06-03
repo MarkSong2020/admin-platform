@@ -11,26 +11,24 @@
 #   直接违规仍被拦截（已变异验证 C2/C3/C5：注入直接 import 即 BROKEN）。
 #   ⚠️ 勿删此开关：删后这些合法传递链会误报 broken。
 #
-# C1（domain-layers）：admin-platform 当前业务域 tenant/user 仅有 models.py，
-#   尚未长出 api/service/repository 三层 —— layers 契约会因模块缺失报
-#   "module not found"。故 C1 暂注释，待任一业务域长出完整 api/service/
-#   repository 三层后，把该域填入 containers 再启用。C2–C7 用 wildcard
-#   (`admin_platform.domains.*.api` 等)，空匹配不报错，C7 已真查 tenant/user
-#   models。
+# C1（domain-layers）：user 域已长出完整 api/service/repository 三层（Task 8），故启用 C1
+#   并把 user 填入 containers。layers 契约要求容器内三层模块都存在，所以只纳入有完整三层的
+#   域：tenant 仍仅 models.py、auth 仅 service/schemas（router 在 api/v1/auth.py 顶层），暂不
+#   纳入；它们将来长出三层时再加进 containers。C2–C7 用 wildcard 覆盖全部域。
 
 [importlinter]
 root_package = admin_platform
 include_external_packages = True
 
-# [importlinter:contract:domain-layers]
-# name = C1 domain layers (api > service > repository, 禁反向)
-# type = layers
-# layers =
-#     api
-#     service
-#     repository
-# containers =
-#     admin_platform.domains.<domain>
+[importlinter:contract:domain-layers]
+name = C1 domain layers (api > service > repository, 禁反向)
+type = layers
+layers =
+    api
+    service
+    repository
+containers =
+    admin_platform.domains.user
 
 [importlinter:contract:api-not-repository]
 name = C2 api must not import repository (composition root lives in deps.py)

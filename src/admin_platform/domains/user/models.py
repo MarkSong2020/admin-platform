@@ -27,6 +27,7 @@ from __future__ import annotations
 from sqlalchemy import ForeignKeyConstraint, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from admin_platform.core.errors import register_unique_constraint
 from admin_platform.db.base import Base, IdMixin, TenantMixin, TimestampMixin
 
 
@@ -43,3 +44,12 @@ class User(Base, IdMixin, TimestampMixin, TenantMixin):
     nickname: Mapped[str] = mapped_column(String(64), default="", comment="昵称")
     status: Mapped[str] = mapped_column(String(16), default="active", comment="状态")
     is_platform_admin: Mapped[bool] = mapped_column(default=False, comment="是否平台超管")
+
+
+# DB 唯一约束 → 业务错误码：并发预检都通过时第二个 INSERT 撞 uq_users_tenant_username →
+# IntegrityError handler 据此把 500 翻成 409（与 service 的 USERNAME_DUPLICATE 同码）。
+register_unique_constraint(
+    "uq_users_tenant_username",
+    "admin_platform.USERNAME_DUPLICATE",
+    "Username already exists",
+)
