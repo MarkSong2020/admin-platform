@@ -11,19 +11,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import BigInteger, DateTime, String, func
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from admin_platform.db.base import Base
+from admin_platform.db.base import Base, IdMixin, TimestampMixin
 
 
-class Tenant(Base):
+class Tenant(Base, IdMixin, TimestampMixin):
     __tablename__ = "tenants"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    code: Mapped[str] = mapped_column(String(64), unique=True)
-    name: Mapped[str] = mapped_column(String(128))
-    status: Mapped[str] = mapped_column(String(16), default="active")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    code: Mapped[str] = mapped_column(String(64), unique=True, comment="租户编码(业务自然键)")
+    name: Mapped[str] = mapped_column(String(128), comment="租户名称")
+    status: Mapped[str] = mapped_column(String(16), default="active", comment="状态")
