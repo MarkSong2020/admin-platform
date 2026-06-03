@@ -85,6 +85,8 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 "scripts/new_module.py" = ["T201"]
 # Schema-doc generator likewise reports progress via ``print()``.
 "scripts/dump_schema.py" = ["T201"]
+# 管理 CLI 通过 ``print()`` / stderr 给操作者反馈（Task 9 bootstrap 超管）。
+"src/admin_platform/cli.py" = ["T201"]
 
 # ---- Pytest -----------------------------------------------------------------
 [tool.pytest.ini_options]
