@@ -66,6 +66,7 @@ make new-module name=order         # 生成 5 层业务模块
 make new-module name=product with-model=1   # 含 ORM model
 make smoke-generator               # 改 generator 后 E2E 烟测（new-module + check + cleanup）
 make compose-up && make migrate    # 起 PostgreSQL + 应用 baseline migration
+make schema-doc                    # 从 ORM models 重生 doc/architecture/DATA_MODEL.md（无需 DB）
 make test-integration              # 集成测试（需 docker）
 ```
 

@@ -1,4 +1,4 @@
-.PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-openapi-contract check-layer-boundaries check-db compose-up compose-up-cache compose-down docker-build
+.PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-openapi-contract check-layer-boundaries check-db schema-doc compose-up compose-up-cache compose-down docker-build
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -66,6 +66,9 @@ check-layer-boundaries:  ## 分层边界静态契约（import-linter，C1–C7�
 
 check-db:  ## Alembic migration drift detection (Errata #3, requires compose-up)
 	uv run alembic check
+
+schema-doc:  ## Regenerate doc/architecture/DATA_MODEL.md from ORM models (no DB needed)
+	uv run python scripts/dump_schema.py
 
 compose-up:  ## Bring up local Postgres and wait until healthy (Errata #5: redis is opt-in)
 	docker compose up -d --wait db
