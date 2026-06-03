@@ -15,14 +15,17 @@ from contextlib import contextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import NoOpTracerProvider
 
 from admin_platform.core import middleware as mw_module
+from admin_platform.core import observability as otel_module
 from admin_platform.core.config import get_settings
-from admin_platform.core.observability import _state
 from admin_platform.main import create_app
 
-_TEST_ENDPOINT = "http://127.0.0.1:9/v1/traces"  # 不可达，不影响 span 创建
+# OTEL_EXPORTER_OTLP_ENDPOINT 仅为让 enabled 路径有个值；真 exporter 在测试里被
+# InMemorySpanExporter 顶替，从不发网络（否则会朝此死端点重试、污染 make check 输出）。
+_TEST_ENDPOINT = "http://127.0.0.1:9/v1/traces"
 
 _OTEL_ENV_VARS = (
     "APP_OTEL_ENABLED",
@@ -31,24 +34,39 @@ _OTEL_ENV_VARS = (
 )
 
 
+def _in_memory_exporter(**_kwargs: object) -> InMemorySpanExporter:
+    """顶替真 ``OTLPSpanExporter``：吞掉 endpoint/timeout kwargs，返回进程内 exporter。
+
+    测试只验证 span_id/trace_id 注入 access log，不需要真发网络；用 InMemory exporter
+    避免 BatchSpanProcessor 朝不可达 endpoint 重试刷日志（含 pytest 关流后的泄漏线程报错）。
+    """
+    return InMemorySpanExporter()
+
+
 @contextmanager
 def _otel_context() -> Generator[None]:
     saved = {k: os.environ.get(k) for k in _OTEL_ENV_VARS}
     os.environ["APP_OTEL_ENABLED"] = "true"
     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = _TEST_ENDPOINT
+    saved_exporter = otel_module.OTLPSpanExporter
+    otel_module.OTLPSpanExporter = _in_memory_exporter  # type: ignore[assignment]
     get_settings.cache_clear()
     try:
         yield
     finally:
+        otel_module.OTLPSpanExporter = saved_exporter
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
         get_settings.cache_clear()
-        # 重置 OTel 全局 provider，避免跨测试文件污染
+        # 关停测试期建的 provider（停掉 BatchSpanProcessor 后台线程）再切回 NoOp，
+        # 避免线程泄漏 + 跨测试文件污染。
+        if otel_module._state.provider is not None:
+            otel_module._state.provider.shutdown()
         trace.set_tracer_provider(NoOpTracerProvider())
-        _state.provider = None
+        otel_module._state.provider = None
 
 
 def _spy_access_log() -> tuple[list, object]:
