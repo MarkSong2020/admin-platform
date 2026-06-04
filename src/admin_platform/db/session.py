@@ -1,8 +1,8 @@
-"""FastAPI 依赖：per-request AsyncSession，自动提交。
+"""数据库 session 工厂：per-request AsyncSession（FastAPI 依赖）+ 非请求 helper。
 
 事务策略（v0.4.11+）
 --------------------
-每个请求拿到一个 SQLAlchemy 事务，由 ``session.begin()`` 管理：
+每个 session 拿到一个 SQLAlchemy 事务，由 ``session.begin()`` 管理：
 
   * Handler 正常返回 → 依赖 teardown 时 COMMIT
   * Handler 抛错（AppError / HTTPException / 未捕获）→ ROLLBACK
@@ -27,38 +27,23 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.db.engine import get_sessionmaker
-from admin_platform.db.tenant_filter import SYSTEM_CTX, TENANT_CTX_KEY
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    """每请求一个 AsyncSession，从 request.state 注入租户上下文到 session.info。
-
-    上下文来源是 ``AuthMiddleware`` 写入 ``request.state`` 的 tenant_id/is_platform
-    （见 ADR-E：走 request.state 而非 ContextVar，回避 BaseHTTPMiddleware 跨 task 传播
-    失效）。public 路径（如登录）无 tenant_id → 不设上下文；这类 handler **不得**用
-    ``get_session`` 直查 ``TenantMixin``（会 fail-closed 抛错），应走 ``system_session()``。
-    """
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI 依赖：每请求一个 AsyncSession，一请求一事务（``session.begin()``）。"""
     async with get_sessionmaker()() as session, session.begin():
-        tenant_id = getattr(request.state, "tenant_id", None)
-        if tenant_id is not None:
-            session.info[TENANT_CTX_KEY] = {
-                "tenant_id": tenant_id,
-                "platform": getattr(request.state, "is_platform", False),
-            }
         yield session
 
 
 @asynccontextmanager
-async def system_session() -> AsyncIterator[AsyncSession]:
-    """系统 / 登录 / CLI 用：显式 ``SYSTEM_CTX`` bypass 租户过滤。
+async def db_session() -> AsyncIterator[AsyncSession]:
+    """非请求上下文（CLI / 登录 / 后台任务）用的 AsyncSession，一调用一事务。
 
-    调用方负责按 ``tenant_id`` 显式过滤（如登录 service 先按 tenant_code 查租户、再
-    ``where(User.tenant_id == tid)``）。bypass 全过滤的口子，code review 必查每个调用点。
+    与 ``get_session`` 等价，只是不依赖 FastAPI ``Request``，可在任意 async 代码里
+    ``async with db_session() as session`` 使用。
     """
     async with get_sessionmaker()() as session, session.begin():
-        session.info[TENANT_CTX_KEY] = SYSTEM_CTX
         yield session

@@ -1,9 +1,9 @@
 """User DTO —— /api/v1/users 的请求/响应形状。纯 Pydantic（C5/C6：不碰 models/sqlalchemy）。
 
-安全（经 Codex 隔离 PK）：
-  * **请求侧不接** id / tenant_id / password_hash / is_platform_admin / created_at / updated_at——
-    tenant_id 由 ``before_flush`` 按当前租户上下文自动填；is_platform_admin 是 CLI 专属（平台超管，
-    Task 9）；时间戳由 DB 维护。客户端只能设 username / password / nickname / status。
+安全（经 Codex 隔离 PK，沿用到单租户）：
+  * **请求侧不接** id / password_hash / is_super_admin / created_at / updated_at——
+    is_super_admin 是 CLI 专属（超级管理员 bootstrap）；时间戳由 DB 维护。客户端只能设
+    username / password / nickname / status。
   * **响应侧 ``UserRead`` 不含 ``password_hash``**（绝不序列化口令哈希）。
 """
 
@@ -13,9 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserCreate(BaseModel):
-    """POST payload。tenant_id / is_platform_admin 不可由客户端设。"""
+    """POST payload。id / is_super_admin / 时间戳不可由客户端设。"""
 
-    username: str = Field(min_length=1, max_length=64, description="用户名（租户内唯一）")
+    username: str = Field(min_length=1, max_length=64, description="用户名（全局唯一）")
     password: str = Field(
         min_length=1, max_length=256, description="明文密码（入库前 argon2 哈希）"
     )
@@ -23,7 +23,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """PATCH payload —— 字段全可选（merge 语义）。不支持改 username（租户内唯一键）。"""
+    """PATCH payload —— 字段全可选（merge 语义）。不支持改 username（唯一键）。"""
 
     model_config = ConfigDict(from_attributes=True)
     nickname: str | None = Field(default=None, max_length=64)
@@ -38,11 +38,10 @@ class UserRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
     id: int
-    tenant_id: int
     username: str
     nickname: str
     status: str
-    is_platform_admin: bool
+    is_super_admin: bool
 
 
 class UserPage(BaseModel):

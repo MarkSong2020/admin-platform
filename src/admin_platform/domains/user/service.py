@@ -2,10 +2,10 @@
 
 业务不变式：
 
-  * **username 租户内唯一** —— create/update 前用 ``find_by_username`` 预检（租户上下文下天然
-    租户内 scoped），违反抛 409 ``admin_platform.USERNAME_DUPLICATE``。DB 的
-    ``uq_users_tenant_username`` 是竞态兜底：并发预检都通过时第二个 INSERT 撞约束 →
-    ``IntegrityError`` handler 按 ``models.py`` 注册的映射翻成同一个 409 业务码。
+  * **username 全局唯一** —— create/update 前用 ``find_by_username`` 预检，违反抛 409
+    ``admin_platform.USERNAME_DUPLICATE``。DB 的 ``uq_users_username`` 是竞态兜底：并发预检
+    都通过时第二个 INSERT 撞约束 → ``IntegrityError`` handler 按 ``models.py`` 注册的映射
+    翻成同一个 409 业务码。
 
 分层：service 抛 ``AppError``（不抛 HTTPException），持有注入的 repository（单测可 stub）。
 """

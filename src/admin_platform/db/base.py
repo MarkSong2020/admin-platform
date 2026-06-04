@@ -25,8 +25,7 @@ Eager loading 在 query 层用 ``selectinload`` / ``joinedload`` opt-in。
 通用字段 mixin
 -------------
 ``IdMixin`` / ``TimestampMixin`` 提供数据建模标准的基线同心圈（身份 + 生命周期，
-与模板 ``python-web-service-template`` 同款）；``TenantMixin`` 提供多租户业务表的
-``tenant_id``（仅多租户业务表，平台级表不继承）。完整规约见
+与模板 ``python-web-service-template`` 同款）。完整规约见
 ``doc/standards/DATA_MODELING.md``。
 """
 
@@ -61,23 +60,4 @@ class TimestampMixin:
         server_default=func.now(),
         onupdate=func.now(),
         comment="更新时间(UTC, ORM flush 触发)",
-    )
-
-
-class TenantMixin:
-    """多租户业务表 mixin —— 带 ``tenant_id`` 列，是租户隔离机制的契约。
-
-    任何继承 ``TenantMixin`` 的 mapped 类都会被 ``db/tenant_filter.py`` 的
-    ``do_orm_execute`` 事件自动注入 ``tenant_id`` 过滤（见 ADR-A/E）：
-    业务 session 无租户上下文时 fail-closed 抛错，带上下文时只见本租户行，
-    显式 system / 平台超管上下文 bypass。
-
-    平台级表（如 ``Tenant`` 本身、跨租户的注册表）**不**继承本 mixin。
-
-    ``index=True``：tenant 维度是几乎所有业务查询的隐含过滤条件，单列索引是
-    多租户共享库的基本盘；复合索引（``tenant_id`` + 业务键）由各表按需追加。
-    """
-
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, index=True, nullable=False, comment="所属租户 id"
     )

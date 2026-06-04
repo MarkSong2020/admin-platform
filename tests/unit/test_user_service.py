@@ -1,4 +1,4 @@
-"""Task 8 user service 单测 —— username 租户内唯一(409) / 缺失(404)。
+"""user service 单测 —— username 全局唯一(409) / 缺失(404)。
 
 用 stub repository 隔离 service 业务逻辑（DI 缝，DB-free）；不是 mock 行为断言：测的是
 service 在"repo 说已存在/不存在"时**自己**抛什么领域错误码，repo 只提供前置条件。
@@ -19,10 +19,10 @@ from admin_platform.domains.user.service import UserService
 
 def _user(uid: int, username: str, *, nickname: str = "") -> User:
     """构造 transient User，预置 UserRead 需要的全部字段（不入库）。"""
-    obj = User(username=username, nickname=nickname, password_hash="x", tenant_id=1)
+    obj = User(username=username, nickname=nickname, password_hash="x")
     obj.id = uid
     obj.status = "active"
-    obj.is_platform_admin = False
+    obj.is_super_admin = False
     return obj
 
 
@@ -71,7 +71,7 @@ def _svc(repo: _StubRepo) -> UserService:
 
 @pytest.mark.asyncio
 async def test_create_duplicate_username_raises_409() -> None:
-    existing = User(username="alice", tenant_id=1, password_hash="x", nickname="")
+    existing = User(username="alice", password_hash="x", nickname="")
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(existing=existing)).create(UserCreate(username="alice", password="pw"))
     assert exc.value.status_code == 409
@@ -82,7 +82,7 @@ async def test_create_duplicate_username_raises_409() -> None:
 async def test_create_new_username_ok() -> None:
     out = await _svc(_StubRepo()).create(UserCreate(username="bob", password="pw", nickname="Bob"))
     assert out.username == "bob"
-    assert out.is_platform_admin is False
+    assert out.is_super_admin is False
 
 
 @pytest.mark.asyncio

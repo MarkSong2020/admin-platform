@@ -84,8 +84,6 @@ class CurrentUser:
     user_id: str  # sub claim
     sub: str = field(compare=False)  # 等于 user_id，保留给习惯 sub 字段的调用方
     scope: str = ""
-    tenant_id: int | None = None  # 业务 token 必带；未鉴权 / optional 路径为 None
-    is_platform: bool = False  # 平台超管 → 跨租户 bypass（缺省非超管，fail-safe）
 
 
 # ---- AuthMiddleware ----
@@ -173,10 +171,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user_id = sub
         request.state.token_sub = sub
         request.state.token_scope = payload.get("scope", "")
-        # tenant_id 是 decode_token 的必需 claim（缺失/类型非法已在上面 401）——直取、
-        # 不软取，与隔离层 fail-closed 同口径。is_platform 可选，缺失默认非超管（fail-safe）。
-        request.state.tenant_id = payload["tenant_id"]
-        request.state.is_platform = payload.get("is_platform", False)
 
         response = await call_next(request)
 
@@ -218,8 +212,6 @@ def get_optional_current_user(request: Request) -> CurrentUser:
         user_id=getattr(request.state, "user_id", ""),
         sub=getattr(request.state, "token_sub", ""),
         scope=getattr(request.state, "token_scope", ""),
-        tenant_id=getattr(request.state, "tenant_id", None),
-        is_platform=getattr(request.state, "is_platform", False),
     )
 
 
@@ -253,8 +245,6 @@ def require_current_user(request: Request) -> CurrentUser:
         user_id=user_id,
         sub=getattr(request.state, "token_sub", ""),
         scope=getattr(request.state, "token_scope", ""),
-        tenant_id=getattr(request.state, "tenant_id", None),
-        is_platform=getattr(request.state, "is_platform", False),
     )
 
 
