@@ -4,8 +4,8 @@
 
 ## 仓库角色
 
-多租户 admin 平台**应用**（不是模板）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
-当前在 P0 多租户认证地基阶段；目标是 fail-closed 隔离 + JWT 认证 + 后续 RBAC / 审计 / admin 业务域。
+单租户后台管理脚手架**应用**（不是模板），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+已有 JWT 认证 + user CRUD；目标是 RuoYi 风格 RBAC / 审计 / 字典 / 前端。
 
 ## 完整文档
 
@@ -13,15 +13,16 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P0 多租户认证地基）
+## 当前阶段（v0.0.1 — 单租户回归完成，进 P1 RBAC）
 
-`make check` 223 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
+`make check` 202 ✓ / `make coverage` 门槛 85%。
 
-**P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
-- Task 1：scaffold（从 `python-web-service-template` git archive 派生）✓
-- Task 2：argon2-cffi 密码哈希依赖（ADR-F）+ access token TTL 配置 ✓
-- Task 3：fail-closed 租户隔离 —— `session.info` 上下文 + `do_orm_execute`（读广义 fail-closed）/ `before_flush`（写对称 fail-closed）✓
-- 下一步：Task 4 数据模型（Tenant/User）+ 迁移 → Task 5/6/7 认证签发 / 登录 / 上下文注入
+**进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
+- P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 ✓
+- P0.9 单租户回归：拆多租户（tenant_filter/TenantMixin/tenants 表/上下文/隔离）→ 对标 RuoYi 本体 ✓
+- 下一步 P1 RBAC：角色/菜单/部门/岗位 + 数据权限（参考 RuoYi-Vue3-FastAPI）
+
+> **2026-06-05 重大方向**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi。背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md) 废弃说明 + roadmap §3。
 
 **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）。模板演进史 → [`CHANGELOG.md`](./CHANGELOG.md)。
 

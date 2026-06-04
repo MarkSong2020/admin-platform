@@ -1,8 +1,8 @@
 # 项目概览
 
-> **这是什么**：多租户 admin 平台应用（`v0.0.1`，P0 多租户认证地基开发中）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+> **这是什么**：单租户后台管理脚手架应用（`v0.0.1`，对标 RuoYi / 若依）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 >
-> **为何存在**：在团队脚手架的工程 baseline（错误响应 shape / Request ID / Idempotency-Key / 健康检查 / 分页 envelope / OpenAPI 契约）之上，长出 SaaS 多租户的 fail-closed 隔离 + JWT 认证，目标 RBAC / 审计 / admin 业务域。
+> **为何存在**：在团队脚手架的工程 baseline（错误响应 shape / Request ID / Idempotency-Key / 健康检查 / 分页 envelope / OpenAPI 契约）之上，长出 RuoYi 风格的 RBAC / 审计 / 字典 / 前端，做成对标若依的 Python 后台脚手架。
 
 ## 一页讲清
 
@@ -33,11 +33,11 @@
   └── models.py     SQLAlchemy 2.x typed mapping （含 --with-model 时）
 ```
 
-## 现状（v0.0.1 — P0 多租户认证地基）
+## 现状（v0.0.1 — 单租户回归完成，对标 RuoYi）
 
-- **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。P0 进度：Task 1 scaffold / Task 2 argon2 密码哈希依赖 + access token TTL / Task 3 fail-closed 租户隔离 ✓；下一步 Task 4 数据模型 + 迁移。完整计划 → [`../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
-- **多租户隔离**（Task 3）：`TenantMixin` 业务表 + `session.info` 上下文；`do_orm_execute` 读广义 fail-closed、`before_flush` 写对称 fail-closed；`SYSTEM_CTX` / 平台超管 bypass。机制说明见 `db/tenant_filter.py`
-- **测试**：`make check` 223 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
+- **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。进度：JWT 认证 + Argon2 密码 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归（拆多租户）✓；下一步 P1 RBAC。对标路线图 → [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)
+- **方向变更（2026-06-05）**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi 本体。多租户机制（`TenantMixin` / `tenant_filter` / `tenants` 表）已拆除，背景见 [`architecture/MULTI_TENANCY.md`](./architecture/MULTI_TENANCY.md) 废弃说明
+- **测试**：`make check` 202 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
 - **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg + argon2-cffi（密码哈希）+ PyJWT
 - **脚手架 lineage**：generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 继承自模板 v0.5.3。示例域 `domains/todo`/`domains/tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)

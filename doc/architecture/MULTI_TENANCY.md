@@ -1,7 +1,16 @@
-# 多租户隔离（MULTI_TENANCY）
+# 多租户隔离（MULTI_TENANCY）—— ⚠️ 已废弃（2026-06-05 单租户回归）
 
-> P0 认证地基的隔离机制正本。决策来源：[`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](../../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
-> 的 ADR-A/B/C/E。本文是给开发者读的「机制怎么用、红线在哪」；逐 Task 实施细节看 spec。
+> **⚠️ DEPRECATED / 历史文档**：2026-06-05 决策**回归单租户**（对标 RuoYi 本体），P0.9 已拆除
+> 全部多租户机制（`tenant_filter` / `TenantMixin` / `tenants` 表 / `session.info` 租户上下文 /
+> fail-closed 隔离 / `system_session` bypass）。本文仅作历史决策留痕，**不再反映现行机制**。
+> 单租户下数据权限改走 RuoYi 风格 dept 部门（见 P1 RBAC）。
+> 决策与拆除背景见 [`../../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../../docs/specs/2026-06-04-ruoyi-parity-roadmap.md) §3「单租户回归重构」。
+>
+> ---
+> *（以下为原 P0 多租户设计，保留作历史，已不反映现状）*
+>
+> P0 认证地基的隔离机制正本。决策来源：`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`
+> 的 ADR-A/B/C/E。
 
 ## 0. 一句话
 
