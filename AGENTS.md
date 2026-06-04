@@ -15,7 +15,7 @@
 
 ## 当前阶段（v0.0.1 — P0 多租户认证地基）
 
-`make check` 202 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
+`make check` 223 ✓（含租户隔离单测）/ `make coverage` 门槛 85%。
 
 **P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
 - Task 1：scaffold（从 `python-web-service-template` git archive 派生）✓
