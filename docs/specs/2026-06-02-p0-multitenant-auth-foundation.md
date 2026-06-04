@@ -1,5 +1,7 @@
 # Admin Platform — P0 多租户认证地基 实施计划(v2,review 修订版)
 
+> **⚠️ DEPRECATED / 历史文档**（2026-06-05 加注）：本计划描述的**多租户机制已于 P0.9 单租户回归中完整拆除**（`tenant_filter` / `TenantMixin` / `tenants` 表 / `system_session` 等均已删除，下文引用的多数源文件/测试已不存在）。本文仅作 P0 历史决策留痕（记录当时为何/如何做多租户），**不反映现行设计**。现行单租户路线见 [`2026-06-04-ruoyi-parity-roadmap.md`](./2026-06-04-ruoyi-parity-roadmap.md)（§3 拆除、§9 工程质量对标）。
+
 > **执行方式(环境中立):** 本计划不依赖任何特定 agent 插件能力。按 Task 顺序执行,**每个 Task 末尾是一个 checkpoint gate**:跑该 Task 的「验收命令」+ 人工审 diff,通过才进下一个 Task。步骤用 `- [ ]` 跟踪。任何"建仓 / commit / 装依赖"动作都需操作者显式确认。
 >
 > **颗粒度:** 关键地基(租户隔离 / 上下文传播 / 认证签发)给完整代码与测试;重复 CRUD 给接口契约 + 验收点,由执行者对照底座 `python-web-service-template` 的 `domains/todo` 五层模式生成。

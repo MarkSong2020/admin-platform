@@ -11,10 +11,10 @@
 #   直接违规仍被拦截（已变异验证 C2/C3/C5：注入直接 import 即 BROKEN）。
 #   ⚠️ 勿删此开关：删后这些合法传递链会误报 broken。
 #
-# C1（domain-layers）：user 域已长出完整 api/service/repository 三层（Task 8），故启用 C1
-#   并把 user 填入 containers。layers 契约要求容器内三层模块都存在，所以只纳入有完整三层的
-#   域：tenant 仍仅 models.py、auth 仅 service/schemas（router 在 api/v1/auth.py 顶层），暂不
-#   纳入；它们将来长出三层时再加进 containers。C2–C7 用 wildcard 覆盖全部域。
+# C1（domain-layers）：user 域已长出完整 api/service/repository 三层，故启用 C1 并把 user 填入
+#   containers。layers 契约要求容器内三层模块都存在，所以只纳入有完整三层的域：auth 仅
+#   service/schemas（router 在 api/v1/auth.py 顶层），暂不纳入；将来长出三层时再加进 containers。
+#   （tenant 域已随单租户回归 2026-06-05 删除。）C2–C7 用 wildcard 覆盖全部域。
 
 [importlinter]
 root_package = admin_platform
