@@ -23,6 +23,12 @@ class UserRepository:
         result = await self._session.execute(select(func.count()).select_from(User))
         return int(result.scalar_one())
 
+    async def count_super_admins(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(User).where(User.is_super_admin.is_(True))
+        )
+        return int(result.scalar_one())
+
     async def get(self, user_id: int) -> User | None:
         result = await self._session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()

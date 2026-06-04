@@ -17,12 +17,12 @@ from admin_platform.domains.user.schemas import UserCreate, UserUpdate
 from admin_platform.domains.user.service import UserService
 
 
-def _user(uid: int, username: str, *, nickname: str = "") -> User:
+def _user(uid: int, username: str, *, nickname: str = "", is_super_admin: bool = False) -> User:
     """构造 transient User，预置 UserRead 需要的全部字段（不入库）。"""
     obj = User(username=username, nickname=nickname, password_hash="x")
     obj.id = uid
     obj.status = "active"
-    obj.is_super_admin = False
+    obj.is_super_admin = is_super_admin
     return obj
 
 
@@ -34,10 +34,14 @@ class _StubRepo:
         existing: User | None = None,
         rows: list[User] | None = None,
         updated: User | None = None,
+        get_row: User | None = None,
+        super_admin_count: int = 0,
     ) -> None:
         self.existing = existing
         self.rows = rows if rows is not None else []
         self.updated = updated
+        self.get_row = get_row
+        self.super_admin_count = super_admin_count
 
     async def find_by_username(self, username: str) -> User | None:
         if self.existing is not None and self.existing.username == username:
@@ -48,7 +52,7 @@ class _StubRepo:
         return _user(2, payload.username, nickname=payload.nickname)
 
     async def get(self, user_id: int) -> User | None:
-        return None
+        return self.get_row
 
     async def list_paginated(self, page: int, size: int) -> list[User]:
         return self.rows
@@ -56,13 +60,16 @@ class _StubRepo:
     async def count(self) -> int:
         return len(self.rows)
 
+    async def count_super_admins(self) -> int:
+        return self.super_admin_count
+
     async def update(
         self, user_id: int, payload: UserUpdate, *, password_hash: str | None
     ) -> User | None:
         return self.updated
 
     async def delete(self, user_id: int) -> bool:
-        return False
+        return self.get_row is not None
 
 
 def _svc(repo: _StubRepo) -> UserService:
@@ -132,3 +139,33 @@ async def test_update_missing_raises_404() -> None:
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(updated=None)).update(999, UserUpdate(nickname="x"))
     assert exc.value.status_code == 404
+
+
+# ---- 最后一个超管保护（P0.9 review C：保证系统至少一个超管入口）----
+
+
+@pytest.mark.asyncio
+async def test_delete_last_super_admin_raises_409() -> None:
+    admin = _user(1, "root", is_super_admin=True)
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(get_row=admin, super_admin_count=1)).delete(1)
+    assert exc.value.status_code == 409
+    assert exc.value.code == "admin_platform.LAST_SUPER_ADMIN"
+
+
+@pytest.mark.asyncio
+async def test_delete_super_admin_when_others_exist_ok() -> None:
+    # 还有其他超管（count=2）→ 删一个不抛。
+    admin = _user(1, "root", is_super_admin=True)
+    await _svc(_StubRepo(get_row=admin, super_admin_count=2)).delete(1)
+
+
+@pytest.mark.asyncio
+async def test_disable_last_super_admin_raises_409() -> None:
+    admin = _user(1, "root", is_super_admin=True)
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(get_row=admin, super_admin_count=1)).update(
+            1, UserUpdate(status="disabled")
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.code == "admin_platform.LAST_SUPER_ADMIN"

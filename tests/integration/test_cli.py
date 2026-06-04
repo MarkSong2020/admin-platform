@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from admin_platform.cli import CliError, create_super_admin
 from admin_platform.core.security import verify_password
@@ -98,3 +99,13 @@ async def test_rejects_second_admin_even_different_username(
         await create_super_admin("admin2")
     usernames = {u.username for u in await _all_users()}
     assert usernames == {"root"}  # admin2 没被创建
+
+
+async def test_db_rejects_second_super_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """partial unique index 兜底：绕过 cli 应用层检查，直接建第二个超管(不同 username)
+    应撞 DB 约束 `uq_users_one_super_admin`（防并发竞态创建多超管，P0.9 review B）。"""
+    monkeypatch.setenv(_ENV, _STRONG_PW)
+    await create_super_admin("root")
+    with pytest.raises(IntegrityError):
+        async with db_session() as session:
+            session.add(User(username="root2", password_hash="x", is_super_admin=True))

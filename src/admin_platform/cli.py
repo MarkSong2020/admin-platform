@@ -14,9 +14,9 @@
   * **并发防御**：建超管在单事务内，靠 ``uq_users_username`` 让一个创建者胜出；中途失败回滚。
   * **不泄密**：stderr / ``CliError`` / 成功输出都不含密码或 hash；非预期异常只打类型名。
 
-> 残留 follow-up（未做）：要在 DB 层硬保证"至多一个超管"，需 partial unique index
-> ``WHERE is_super_admin``（迁移）；本任务范围内用应用层检查兜底。P1 RBAC 落地后超管由
-> 「超级管理员角色」接管，该检查再评估去留。
+> DB 层硬保证"至多一个超管"：partial unique index ``uq_users_one_super_admin``（迁移 0003，
+> ``WHERE is_super_admin``）—— 并发 bootstrap 第二个超管会撞约束。应用层检查 + DB 约束双保险。
+> P1 RBAC 落地后超管由「超级管理员角色」接管，该约束再评估去留（roadmap §7 Q6）。
 """
 
 from __future__ import annotations
