@@ -1,11 +1,10 @@
-"""Users HTTP API —— /api/v1/users 下的 CRUD 路由（受租户隔离）。
+"""Users HTTP API —— /api/v1/users 下的 CRUD 路由。
 
-鉴权：非公开路径，AuthMiddleware 强制带有效 token；token 的 tenant_id 经 get_session 注入
-session.info，CRUD 查询自动租户内 scoped。平台超管 token（is_platform=True）bypass → 跨租户可见。
+鉴权：非公开路径，AuthMiddleware 强制带有效 token。
 
 错误路径在 ``responses=`` 声明，SDK 生成器据此 emit 类型化错误类（ADR §1）：
-  * 404 admin_platform.USER_NOT_FOUND     —— get/update/delete 命中不存在（或跨租户）id
-  * 409 admin_platform.USERNAME_DUPLICATE —— create 想用租户内已存在 username
+  * 404 admin_platform.USER_NOT_FOUND     —— get/update/delete 命中不存在的 id
+  * 409 admin_platform.USERNAME_DUPLICATE —— create 想用已存在 username
   * 422 framework.VALIDATION_FAILED       —— Pydantic 拒绝 payload
 """
 

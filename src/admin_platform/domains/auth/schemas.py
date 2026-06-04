@@ -8,8 +8,7 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     """登录请求体。字段加长度上限：public 端点防超大输入放大 argon2 / DB 比较成本。"""
 
-    tenant_code: str = Field(max_length=64, description="租户编码（tenants.code）")
-    username: str = Field(max_length=64, description="用户名（租户内唯一）")
+    username: str = Field(max_length=64, description="用户名（全局唯一）")
     password: str = Field(max_length=256, description="明文密码")
 
 

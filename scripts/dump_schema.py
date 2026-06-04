@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 
 import admin_platform.domains as _domains_pkg
-from admin_platform.db.base import Base, TenantMixin
+from admin_platform.db.base import Base
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DOC_PATH = _REPO_ROOT / "doc" / "architecture" / "DATA_MODEL.md"
@@ -54,7 +54,7 @@ def _discover_models() -> None:
 
 
 def _table_to_class() -> dict[str, type]:
-    """表名 → ORM 类，用于标注来源 model 与是否继承 ``TenantMixin``。"""
+    """表名 → ORM 类，用于标注来源 model。"""
     return {mapper.local_table.name: mapper.class_ for mapper in Base.registry.mappers}
 
 
@@ -77,15 +77,9 @@ def _render_table(table: Table, cls: type | None) -> str:
     lines.append(f"### `{table.name}`")
     lines.append("")
 
-    # 来源 model + 是否多租户业务表（继承 TenantMixin）。
+    # 来源 model。
     if cls is not None:
-        scoped = issubclass(cls, TenantMixin)
-        kind = (
-            "多租户业务表（继承 `TenantMixin`，受租户隔离过滤）"
-            if scoped
-            else "平台级表（不继承 `TenantMixin`）"
-        )
-        lines.append(f"> 来源 model：`{cls.__module__}.{cls.__qualname__}` —— {kind}")
+        lines.append(f"> 来源 model：`{cls.__module__}.{cls.__qualname__}`")
         lines.append("")
 
     # 列表格。
@@ -153,10 +147,7 @@ def _render() -> str:
     # 表清单速览。
     toc_lines = ["## 表清单", ""]
     for table in tables:
-        cls = cls_map.get(table.name)
-        scoped = cls is not None and issubclass(cls, TenantMixin)
-        tag = "租户隔离" if scoped else "平台级"
-        toc_lines.append(f"- [`{table.name}`](#{table.name})（{tag}，{len(table.columns)} 列）")
+        toc_lines.append(f"- [`{table.name}`](#{table.name})（{len(table.columns)} 列）")
     toc_lines.append("")
 
     body = ["## 表结构", ""]

@@ -1,10 +1,8 @@
-"""Task 5 单测：Argon2id 哈希 + access token 签发/解码（含认证层 fail-closed 类型校验）。
+"""单测：Argon2id 哈希 + access token 签发/解码（单租户）。
 
-设计经 Codex 安全 PK 收紧（见 spec Task 5 + ADR-C/F）：
+设计经 Codex 安全 PK 收紧（见 ADR-C/F）：
   * ``verify_password`` 对损坏 hash 返 ``False`` 不抛（登录边界不因存量 hash 损坏 500）。
-  * ``decode_token`` 强制 ``tenant_id`` 必需 + **类型校验**（tenant_id 正整数、is_platform 必 bool）。
-    PyJWT 的 ``require`` 只查存在性、不查类型；缺类型校验则 ``tenant_id="42"`` 会让 ORM 过滤
-    比较字符串、``is_platform="false"`` 在 truthiness 下被误判超管 → 跨租户越权。
+  * ``decode_token`` require ``sub`` / ``exp`` / ``iat``，缺失即 ``InvalidTokenError``。
   * 空 secret fail-fast（拒绝用空密钥签发可伪造 token）。
 """
 
@@ -46,8 +44,6 @@ def _base_claims(**override: object) -> dict:
     now = datetime.now(UTC)
     claims: dict = {
         "sub": "7",
-        "tenant_id": 42,
-        "is_platform": False,
         "username": "alice",
         "iat": now,
         "exp": now + timedelta(hours=1),
@@ -75,59 +71,20 @@ def test_verify_corrupt_hash_returns_false() -> None:
 # ---- token 签发 + claims ----
 
 
-def test_access_token_carries_tenant_claims() -> None:
-    tok = issue_access_token(user_id=7, tenant_id=42, is_platform=False, username="alice")
+def test_access_token_carries_claims() -> None:
+    tok = issue_access_token(user_id=7, username="alice")
     p = decode_token(tok)
     assert p["sub"] == "7"
-    assert p["tenant_id"] == 42
-    assert p["is_platform"] is False
     assert p["username"] == "alice"
 
 
-def test_platform_admin_token() -> None:
-    tok = issue_access_token(user_id=1, tenant_id=1, is_platform=True, username="root")
-    assert decode_token(tok)["is_platform"] is True
+# ---- decode fail-closed：必需 claim ----
 
 
-# ---- decode fail-closed：tenant_id 必需 + 类型校验 ----
-
-
-def test_decode_missing_tenant_id_rejected() -> None:
-    tok = _encode({k: v for k, v in _base_claims().items() if k != "tenant_id"})
+def test_decode_missing_sub_rejected() -> None:
+    tok = _encode({k: v for k, v in _base_claims().items() if k != "sub"})
     with pytest.raises(jwt.InvalidTokenError):
         decode_token(tok)
-
-
-def test_decode_tenant_id_as_string_rejected() -> None:
-    tok = _encode(_base_claims(tenant_id="42"))
-    with pytest.raises(jwt.InvalidTokenError):
-        decode_token(tok)
-
-
-def test_decode_tenant_id_nonpositive_rejected() -> None:
-    tok = _encode(_base_claims(tenant_id=0))
-    with pytest.raises(jwt.InvalidTokenError):
-        decode_token(tok)
-
-
-def test_decode_tenant_id_bool_rejected() -> None:
-    # bool 是 int 子类；True 不该被当 tenant_id=1 放行。
-    tok = _encode(_base_claims(tenant_id=True))
-    with pytest.raises(jwt.InvalidTokenError):
-        decode_token(tok)
-
-
-def test_decode_is_platform_string_rejected() -> None:
-    # "false" 字符串在 truthiness 下为真 → 必须在 decode 层拦掉（防超管越权）。
-    tok = _encode(_base_claims(is_platform="false"))
-    with pytest.raises(jwt.InvalidTokenError):
-        decode_token(tok)
-
-
-def test_decode_is_platform_absent_ok() -> None:
-    claims = {k: v for k, v in _base_claims().items() if k != "is_platform"}
-    p = decode_token(_encode(claims))
-    assert "is_platform" not in p  # decode 不注入默认；消费方自行 .get(..., False)
 
 
 def test_decode_expired_raises() -> None:
@@ -144,4 +101,4 @@ def test_empty_secret_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_AUTH_JWT_SECRET", "")
     get_settings.cache_clear()
     with pytest.raises(TokenConfigError):
-        issue_access_token(user_id=1, tenant_id=1, is_platform=False, username="x")
+        issue_access_token(user_id=1, username="x")

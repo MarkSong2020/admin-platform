@@ -1,4 +1,4 @@
-"""Task 9 CLI 纯逻辑单测（DB-free）—— username/password 校验 + main 缺 env 退出码。
+"""CLI 纯逻辑单测（DB-free）—— username/password 校验 + main 缺 env 退出码。
 
 这些是纯函数 / 校验分支，不碰 DB（``_create`` 的 DB 路径由 tests/integration/test_cli.py 覆盖）。
 放 unit 让 ``make coverage``（``-m "not integration"``）也能计入 cli.py 的校验 + main 覆盖。
@@ -64,4 +64,4 @@ def test_read_password_surrounding_whitespace(monkeypatch: pytest.MonkeyPatch) -
 
 def test_main_missing_env_returns_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(_ENV, raising=False)
-    assert main(["create-platform-admin", "--username", "root"]) != 0
+    assert main(["create-super-admin", "--username", "root"]) != 0

@@ -1,8 +1,7 @@
 """User 组合根（Composition Root）。
 
 把 ``UserService`` 的依赖（repository + AsyncSession）在此组装，使 ``api.py`` 只依赖 service、
-不直接 import repository（分层契约 C2）。租户上下文由 ``get_session`` 从 request.state 注入到
-session.info（见 ADR-E），repository 的查询经 do_orm_execute 自动按租户过滤。
+不直接 import repository（分层契约 C2）。
 """
 
 from __future__ import annotations

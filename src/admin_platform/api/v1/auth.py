@@ -21,4 +21,4 @@ _LOGIN_FAILED_RESPONSE: dict[int | str, dict[str, object]] = {401: {"model": Pro
 
 @router.post("/login", operation_id="auth_login", responses=_LOGIN_FAILED_RESPONSE)
 async def login_endpoint(payload: LoginRequest) -> LoginResponse:
-    return await login(payload.tenant_code, payload.username, payload.password)
+    return await login(payload.username, payload.password)
