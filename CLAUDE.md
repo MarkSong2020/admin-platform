@@ -18,7 +18,7 @@
 
 ## 当前阶段（v0.0.1 — 单租户回归完成，进 P1 RBAC）
 
-`make check` 202 ✓ / `make test-integration` 需本地 DB / `make coverage` 门槛 85%。
+`make check` 202 ✓ / `make test-integration` 24 selected（19 passed / 5 redis skipped）✓ / `make coverage` 门槛 85%。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
