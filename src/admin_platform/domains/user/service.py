@@ -19,6 +19,9 @@ from admin_platform.domains.user.schemas import UserCreate, UserPage, UserRead, 
 
 NOT_FOUND_CODE = "admin_platform.USER_NOT_FOUND"
 USERNAME_DUPLICATE_CODE = "admin_platform.USERNAME_DUPLICATE"
+LAST_SUPER_ADMIN_CODE = "admin_platform.LAST_SUPER_ADMIN"
+
+_ACTIVE = "active"
 
 
 class UserService:
@@ -50,6 +53,15 @@ class UserService:
         return UserRead.model_validate(row)
 
     async def update(self, user_id: int, payload: UserUpdate) -> UserRead:
+        # 禁用最后一个超管 = 系统失去管理入口，拒之（数据完整性，P0.9 review C）。
+        if payload.status is not None and payload.status != _ACTIVE:
+            row = await self._repo.get(user_id)
+            if (
+                row is not None
+                and row.is_super_admin
+                and await self._repo.count_super_admins() <= 1
+            ):
+                raise self._last_super_admin()
         password_hash = hash_password(payload.password) if payload.password is not None else None
         row = await self._repo.update(user_id, payload, password_hash=password_hash)
         if row is None:
@@ -57,8 +69,13 @@ class UserService:
         return UserRead.model_validate(row)
 
     async def delete(self, user_id: int) -> None:
-        if not await self._repo.delete(user_id):
+        row = await self._repo.get(user_id)
+        if row is None:
             raise self._not_found(user_id)
+        # 删最后一个超管 = 系统失去管理入口，拒之（数据完整性，P0.9 review C）。
+        if row.is_super_admin and await self._repo.count_super_admins() <= 1:
+            raise self._last_super_admin()
+        await self._repo.delete(user_id)
 
     @staticmethod
     def _not_found(user_id: int) -> AppError:
@@ -75,5 +92,14 @@ class UserService:
             code=USERNAME_DUPLICATE_CODE,
             title="Username already exists",
             detail=f"username={username!r}",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _last_super_admin() -> AppError:
+        return AppError(
+            code=LAST_SUPER_ADMIN_CODE,
+            title="Cannot remove the last super admin",
+            detail="系统必须保留至少一个超级管理员",
             status_code=409,
         )

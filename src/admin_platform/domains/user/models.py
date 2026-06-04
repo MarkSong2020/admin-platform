@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from admin_platform.core.errors import register_unique_constraint
@@ -22,7 +22,18 @@ from admin_platform.db.base import Base, IdMixin, TimestampMixin
 class User(Base, IdMixin, TimestampMixin):
     __tablename__ = "users"
 
-    __table_args__ = (UniqueConstraint("username", name="uq_users_username"),)
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_users_username"),
+        # P0.9 临时信任根约束：DB 硬保证【至多一个】超管（一次性 bootstrap，防 CLI 并发竞态）。
+        # partial unique index 让 is_super_admin=true 的行在索引上唯一 → 至多一行 true。
+        # P1 RBAC 接管超管模型（roadmap §7 Q6：布尔 vs 角色）后复审是否放宽。
+        Index(
+            "uq_users_one_super_admin",
+            "is_super_admin",
+            unique=True,
+            postgresql_where=text("is_super_admin"),
+        ),
+    )
 
     username: Mapped[str] = mapped_column(String(64), comment="用户名")
     password_hash: Mapped[str] = mapped_column(String(255), comment="密码哈希")
