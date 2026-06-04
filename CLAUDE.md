@@ -4,7 +4,7 @@
 
 ## 仓库角色
 
-多租户 admin 平台**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。SaaS 共享库多租户，fail-closed 隔离 + JWT 认证，目标长出 RBAC / 审计 / admin 业务域。
+单租户后台管理脚手架**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。已有 JWT 认证 + user CRUD，目标长出 RBAC / 审计 / 字典 / 前端。
 
 > 跨栈选型决策不在本仓口径——见 `~/.claude/CLAUDE.md` 的「技术栈」段（按需求选型，不预设默认）。
 
@@ -16,28 +16,26 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P0 多租户认证地基）
+## 当前阶段（v0.0.1 — 单租户回归完成，进 P1 RBAC）
 
-`make check` 223 ✓ / `make test-integration` 28 ✓ / `make coverage` 88%（门槛 85%）。
+`make check` 202 ✓ / `make test-integration` 需本地 DB / `make coverage` 门槛 85%。
 
-**P0 进度**（完整计划 → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)）：
+**进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
-| Task | 状态 |
+| 阶段 | 状态 |
 |---|---|
-| 1–4 scaffold / 依赖 intake / fail-closed 隔离 / Tenant·User 模型迁移 | ✓ |
-| 5 security（argon2 + JWT；认证层 fail-closed：tenant_id 必需 + 类型校验） | ✓ |
-| 6 登录 API（system_session 查 + 验密 + 签 token；统一 401 防枚举 + dummy-hash 抹平时序） | ✓ |
-| 7 上下文注入（`get_session`→`session.info` + `system_session`） | ✓ |
-| 8 user 域五层 CRUD（受租户隔离；C1 分层契约启用） | ✓ |
-| 9 CLI 建平台超管（无默认口令 + 一次性信任根 + 最小校验） | ✓ |
-| 10 端到端隔离验收门 ＋ 11 覆盖率 88% + `MULTI_TENANCY.md` | ✓ |
-| 12 RLS spike（P0.5 DB 层加固） | 进行中 |
+| P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 | ✓ |
+| P0.9 单租户回归：拆多租户（tenant_filter/TenantMixin/tenants 表/上下文/隔离）→ 对标 RuoYi 本体 | ✓ |
+| P1 RBAC：角色/菜单/部门/岗位 + 数据权限 + 登录增强（refresh/验证码） | 下一步 |
+| P2+ 审计日志 / 字典参数 / 监控任务 / Vue 前端 | 待做 |
+
+> **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
 **版本口径**：本应用版本以 `pyproject.toml [project].version`（当前 `0.0.1`）为准；`tests/unit/test_version_consistency.py` 守 README / AGENTS / CLAUDE / PROJECT_OVERVIEW 含该应用版本。模板 CHANGELOG.md（v0.5.3）是派生 lineage，不是本应用发版记录。
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：Task 12 RLS spike（应用层 fail-closed 已成型，评估 asyncpg 连接池下 `SET LOCAL` RLS 叠加 DB 层防御的可行性）；之后 P0 收尾复审。
+下一步：P1 RBAC（角色/菜单/部门/岗位 + RuoYi 风格数据权限，参考 RuoYi-Vue3-FastAPI；具体表结构设计拉 Codex PK）。
 
 ## AI 工作约束
 
@@ -50,7 +48,6 @@
 5. **改代码必须同步改 `doc/`**（drift 视为 bug）
 6. **碰基础设施红线**（`core/` `db/` `main.py`）先停下来评估
 7. **docstring / comments 默认简体中文**（v0.5.1 起 §0 红线）—— 仅 code identifier / 错误码字面量 / 框架名保留英文
-8. **多租户隔离红线**（写 repo / 查询前必读 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)）：业务表查询默认 fail-closed（无租户上下文抛 `TenantContextMissing`）；repo **读用显式 `select`（非 `session.get`）、写用 ORM UoW（`add`/`session.delete`，非 bulk `update()/delete()`）、count 用 `select_from(实体)`**——否则绕过 `do_orm_execute` 事件 → 跨租户越权；bypass 只走 `system_session()` 且必须显式带 `tenant_id`；`text()` / raw SQL 不被隔离保护（code review 必查 `text(`）
 
 ## 工作约束（给 Claude Code 的特定行为）
 

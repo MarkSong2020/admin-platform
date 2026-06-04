@@ -1,10 +1,10 @@
 # admin-platform
 
-> 多租户 admin 平台。FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest。
+> 单租户后台管理脚手架（对标 RuoYi / 若依）。FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest。
 > 派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 
-**当前阶段：P0 多租户认证地基开发中**（应用版本 `v0.0.1`）。SaaS 共享库多租户，
-fail-closed 隔离 + JWT 认证；后续长出 RBAC / 审计 / admin 业务域。
+**当前阶段：单租户回归（P0.9）完成，进 P1 RBAC**（应用版本 `v0.0.1`）。对标 RuoYi（若依）的
+单租户后台管理脚手架，已有 JWT 认证 + user CRUD；后续长出 RBAC / 审计 / 字典 / 前端。
 
 ---
 
@@ -36,11 +36,12 @@ make new-module name=product with-model=1     # 含 ORM model
 
 generator 细节与 domain 五层蓝本 → [`doc/standards/CODE_GENERATOR.md`](./doc/standards/CODE_GENERATOR.md)
 
-## 🎯 当前状态（v0.0.1 — P0 多租户认证地基）
+## 🎯 当前状态（v0.0.1 — 单租户回归完成，对标 RuoYi）
 
-- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 223 ✓（含租户隔离单测）/ `make coverage` 门槛 85%
-- **P0 进度**：Task 1 scaffold ✓ / Task 2 argon2 密码哈希依赖 + access token TTL ✓ / Task 3 fail-closed 租户隔离（`session.info` + `do_orm_execute`/`before_flush`）✓；下一步 Task 4 数据模型（Tenant/User）+ 迁移
-- **完整计划** → [`docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](./docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
+- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 202 ✓ / `make coverage` 门槛 85%
+- **进度**：JWT 认证签发 + Argon2 密码 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归（拆多租户）✓；下一步 P1 RBAC（角色/菜单/部门/岗位）
+- **对标路线图** → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)（RuoYi 功能矩阵 + 分阶段）
+- **方向变更**：原 SaaS 多租户定位已废弃（2026-06-05），回归单租户。背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md) 废弃说明
 - **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）→ [`CHANGELOG.md`](./CHANGELOG.md)
 
 ## 🌐 跨语言协同
