@@ -4,7 +4,7 @@
 > **结构边界**（import 方向、api↛repository、schemas↛models、service/repository↛fastapi、models↛pydantic）由 `make check` 的 **import-linter 机检**（契约 C1–C7，见 `.importlinter`）——直接跨层 import 会让 CI 红。
 > **语义边界**（api 不写业务逻辑、repository 不抛业务异常等无法静态投影的约定）仍由 **code review** 兜。
 > DI 组合根（装配 service + repository）在 `domains/<x>/deps.py`，不在 `api.py`（这样 api 不直接 import repository，满足 C2）。
-> **当前裁剪**：C1（domain layers）在 `.importlinter` 暂注释——业务域 tenant/user 目前仅有 `models.py`，未长出 api/service/repository 三层，`layers` 契约会因模块缺失报错。任一业务域补齐三层后，把该域填入 C1 `containers` 再启用；C2–C7 已生效（C7 实查 tenant/user models 不得 import pydantic）。
+> **C1–C7 全部生效**（`make check` 7 contracts kept）：`user` 域已完整五层、纳入 C1 `containers`；`auth` 仅 service/schemas（router 在 `api/v1/auth.py` 顶层）暂不纳入 C1，待长出三层再加；`tenant` 域已随单租户回归（2026-06-05）删除。C2–C7 用 wildcard 覆盖全部域。
 
 ## 一图看懂
 
