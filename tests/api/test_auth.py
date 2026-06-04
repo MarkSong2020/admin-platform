@@ -230,6 +230,22 @@ def test_token_missing_sub_claim_returns_401() -> None:
         assert resp.json()["type"] == AUTH_TOKEN_INVALID
 
 
+def test_empty_sub_token_returns_401() -> None:
+    """合法签名但 sub="" 的 token 不得访问私有路由（P0.9 Codex review 纵深加固）。"""
+    with _auth_context():
+        app = create_app()
+
+        @app.get("/__auth-empty-sub")
+        async def handler() -> dict[str, bool]:
+            return {"ok": True}
+
+        token = _make_token(sub="")
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get("/__auth-empty-sub", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+        assert resp.json()["type"] == AUTH_TOKEN_INVALID
+
+
 # --------------------------------------------------------------------------- #
 # 401 响应带 request-id                                                         #
 # --------------------------------------------------------------------------- #

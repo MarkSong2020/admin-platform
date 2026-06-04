@@ -23,6 +23,22 @@
 - DB 凭据错（不会出现在 ProblemDetail body — 见 [../architecture/ERROR_RESPONSE.md](../architecture/ERROR_RESPONSE.md) 安全段）
 - DB 真挂
 
+## P0.9 后旧库 schema 与 ORM 不一致（残留 `tenants` / `tenant_id`）
+
+**症状**：`make check-db`（alembic check）报大量漂移（`detected removed table 'tenants'`、`removed column 'tenant_id'/'is_platform_admin'`），或运行时报列不存在；但代码已是单租户。
+
+**根因**：P0.9 单租户回归（2026-06-05）**重写了 `0002` 迁移**（同 revision id，内容从多租户 `tenants`/`users` 改为单租户 `users`）。已跑过**旧** `0002_p0_tenant_user` 的库，`alembic_version` 已记 `0002` applied，`alembic upgrade head` 不会重跑新 `0002` 的 DDL → 残留旧多租户结构。
+
+**解决**（dev/CI 库，无生产数据）：
+```bash
+docker compose down -v            # 删数据卷
+make compose-up && make migrate   # 全新跑迁移链 0001 → 0002 users
+make check-db                     # 应零漂移
+```
+fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
+
+> 这是"重写已 applied 迁移"的固有要求。若将来有**不可重建**的持久库，必须改用新 `0003` 做显式转换（drop `tenant_id`/`tenants`），而非重写 `0002`。
+
 ## Idempotency 失效（重复请求出现重复副作用）
 
 **症状**：调用方传相同 `Idempotency-Key`，服务端**没**返 `Idempotent-Replayed: true`，反而执行了两次（如扣两次款）。
