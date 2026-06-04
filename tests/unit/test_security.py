@@ -87,6 +87,13 @@ def test_decode_missing_sub_rejected() -> None:
         decode_token(tok)
 
 
+def test_decode_empty_sub_rejected() -> None:
+    # 合法签名但 sub="" —— require 挡不住空串，decode 必须自己拒（纵深，P0.9 review）。
+    tok = _encode(_base_claims(sub=""))
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_token(tok)
+
+
 def test_decode_expired_raises() -> None:
     now = datetime.now(UTC)
     tok = _encode(_base_claims(iat=now - timedelta(hours=2), exp=now - timedelta(hours=1)))

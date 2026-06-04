@@ -114,7 +114,7 @@ def decode_token(token: str) -> dict[str, Any]:
     secret = _require_secret(settings.auth_jwt_secret)
     validate_issuer = bool(settings.auth_jwt_issuer)
     validate_audience = bool(settings.auth_jwt_audience)
-    return jwt.decode(
+    payload: dict[str, Any] = jwt.decode(
         token,
         key=secret,
         algorithms=[settings.auth_jwt_algorithm],
@@ -129,3 +129,8 @@ def decode_token(token: str) -> dict[str, Any]:
         audience=settings.auth_jwt_audience if validate_audience else None,
         issuer=settings.auth_jwt_issuer if validate_issuer else None,
     )
+    # PyJWT 的 require 只保证 sub 存在且非 None，不挡空串。空 sub 没有有效 subject —— 拒之，
+    # 防"合法签名但 sub='' 的 token"访问私有路由（纵深加固，P0.9 Codex review）。
+    if not payload["sub"]:
+        raise jwt.InvalidTokenError("sub 不能为空")
+    return payload
