@@ -37,7 +37,7 @@
 
 - **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。P0 进度：Task 1 scaffold / Task 2 argon2 密码哈希依赖 + access token TTL / Task 3 fail-closed 租户隔离 ✓；下一步 Task 4 数据模型 + 迁移。完整计划 → [`../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md`](../docs/specs/2026-06-02-p0-multitenant-auth-foundation.md)
 - **多租户隔离**（Task 3）：`TenantMixin` 业务表 + `session.info` 上下文；`do_orm_execute` 读广义 fail-closed、`before_flush` 写对称 fail-closed；`SYSTEM_CTX` / 平台超管 bypass。机制说明见 `db/tenant_filter.py`
-- **测试**：`make check` 202 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
+- **测试**：`make check` 223 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
 - **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg + argon2-cffi（密码哈希）+ PyJWT
 - **脚手架 lineage**：generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 继承自模板 v0.5.3。示例域 `domains/todo`/`domains/tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)

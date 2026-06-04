@@ -71,7 +71,12 @@ middleware 用 regex `^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$`
 - 配置走标准 OTel env vars（`OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` 等）
 - 未开启时 span_id 为 None（零开销，NoOp tracer）
 
-**测试守门**：`tests/api/test_access_log.py::test_traceparent_*` 5 项。
+**生命周期健壮性**（`observability.py`）：
+- **初始化失败降级**：OTel 是可选能力——exporter/provider 构造抛错时降级为 warning + 关闭 tracing，**绝不阻塞服务启动**（`init_observability` 整段 try/except）
+- **全局 Once**：`trace.set_tracer_provider` 进程内只能成功设一次。本模块用 identity 校验（`get_tracer_provider() is provider`）确认真的安装成功才记为 owned；否则说明已有别的全局 provider → 清理刚新建的 provider（停 `BatchSpanProcessor` 后台导出线程，防泄漏）+ **不保存假引用**（避免日志谎报、shutdown flush 错对象）
+- **shutdown 只 flush owned provider**：lifespan teardown 调 `force_flush()` 把缓冲 span 推出去；不调 `provider.shutdown()`（进程级单例，进程退出即回收）
+
+**测试守门**：`tests/api/test_access_log.py::test_traceparent_*` 5 项 + `tests/api/test_otel.py` 7 项（disabled / span_id 注入 / **span 真导出** / **入站 traceparent → remote parent 串联** / 多生命周期复用 / **init 失败降级** / **Once 不保存假 provider**）。
 
 ## Access log per request
 
