@@ -29,6 +29,7 @@ layers =
     repository
 containers =
     admin_platform.domains.user
+    admin_platform.domains.dept
 
 [importlinter:contract:api-not-repository]
 name = C2 api must not import repository (composition root lives in deps.py)

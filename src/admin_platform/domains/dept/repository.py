@@ -7,26 +7,50 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, literal, select
+from sqlalchemy import func, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.authz.data_scope import apply_data_scope
+from admin_platform.authz.scope import DataScope
 from admin_platform.domains.dept.models import Dept
 from admin_platform.domains.dept.schemas import DeptCreate, DeptUpdate
+
+# pg_advisory_xact_lock 的稳定 key —— 串行化所有 dept 树写（移动/删除防并发成环）。
+_DEPT_TREE_LOCK_KEY = 478221  # 任意固定 bigint，全仓 dept 树写共用
+_MAX_DEPT_DEPTH = 64  # recursive CTE 深度兜底（实际深度 <10）；坏数据成环时防死循环
 
 
 class DeptRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_paginated(self, page: int, size: int) -> list[Dept]:
+    async def list_paginated(
+        self, page: int, size: int, *, scope: DataScope | None = None
+    ) -> list[Dept]:
         offset = (page - 1) * size
-        stmt = select(Dept).offset(offset).limit(size).order_by(Dept.id)
+        stmt = select(Dept)
+        if scope is not None:
+            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=Dept.id)
+        stmt = stmt.offset(offset).limit(size).order_by(Dept.id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count(self) -> int:
-        result = await self._session.execute(select(func.count()).select_from(Dept))
+    async def count(self, *, scope: DataScope | None = None) -> int:
+        stmt = select(func.count()).select_from(Dept)
+        if scope is not None:
+            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=Dept.id)
+        result = await self._session.execute(stmt)
         return int(result.scalar_one())
+
+    async def acquire_tree_lock(self) -> None:
+        """事务级 advisory lock，串行化 dept 树写（移动/删除防并发成环）。
+
+        提交/回滚自动释放。配合锁内重新校验，关掉 ``_check_no_cycle`` 的 TOCTOU 窗口
+        （两个并发移动 A→B、B→A 各自校验都过、提交后成环）。
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_DEPT_TREE_LOCK_KEY)
+        )
 
     async def get(self, dept_id: int) -> Dept | None:
         return await self._session.get(Dept, dept_id)
@@ -75,8 +99,16 @@ class DeptRepository:
         recursive CTE：base = 自身行；递归段按 ``parent_id == tree.id`` 连下一层。
         只按 ``parent_id`` 展开（不过滤 status，可见性过滤留更上层）。
         """
-        tree = select(Dept.id).where(Dept.id == dept_id).cte("dept_descendants", recursive=True)
-        tree = tree.union_all(select(Dept.id).where(Dept.parent_id == tree.c.id))
+        tree = (
+            select(Dept.id, literal(0).label("depth"))
+            .where(Dept.id == dept_id)
+            .cte("dept_descendants", recursive=True)
+        )
+        tree = tree.union_all(
+            select(Dept.id, tree.c.depth + 1).where(
+                Dept.parent_id == tree.c.id, tree.c.depth < _MAX_DEPT_DEPTH
+            )
+        )
         result = await self._session.execute(select(tree.c.id))
         return frozenset(int(row) for row in result.scalars().all())
 

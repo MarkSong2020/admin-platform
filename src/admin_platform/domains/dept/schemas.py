@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,7 +33,9 @@ class DeptUpdate(BaseModel):
     code: str | None = Field(default=None, min_length=1, max_length=64, description="部门编码")
     parent_id: int | None = Field(default=None, description="父部门ID(None=根部门)")
     sort_order: int | None = Field(default=None, description="显示顺序")
-    status: str | None = Field(default=None, max_length=16, description="active / disabled")
+    status: Literal["active", "disabled"] | None = Field(
+        default=None, description="部门状态（active / disabled）"
+    )
     leader: str | None = Field(default=None, max_length=64, description="负责人")
     phone: str | None = Field(default=None, max_length=32, description="联系电话")
     email: str | None = Field(default=None, max_length=128, description="邮箱")

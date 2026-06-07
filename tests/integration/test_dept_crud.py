@@ -52,6 +52,39 @@ class _SuperAdminProvider(PermissionProvider):
     def invalidate_all(self) -> None: ...
 
 
+class _LimitedProvider(PermissionProvider):
+    """非超管 stub：有 system:dept:list 权限，data_scope 限定可见部门集合（CUSTOM_DEPT）。"""
+
+    def __init__(self, *, visible: frozenset[int]) -> None:
+        self._visible = visible
+
+    def get_is_super_admin(self, user_id: int) -> bool:
+        return False
+
+    def get_user_permissions(self, user_id: int) -> frozenset[str]:
+        return frozenset({"system:dept:list"})
+
+    def get_effective_data_scope(self, user_id: int) -> DataScope:
+        return DataScope(ScopeType.CUSTOM_DEPT, user_id=user_id, visible_dept_ids=self._visible)
+
+    def invalidate_user(self, user_id: int) -> None: ...
+    def invalidate_role(self, role_id: int) -> None: ...
+    def invalidate_all(self) -> None: ...
+
+
+def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncClient:
+    """建一个 dept app 的 AsyncClient（override 登录 + provider），供非超管场景。"""
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+    app.include_router(dept_router)
+    app.dependency_overrides[require_current_user] = lambda: CurrentUser(
+        user_id=user_id, sub=user_id
+    )
+    app.dependency_overrides[get_permission_provider] = lambda: provider
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
 async def _wipe() -> None:
     async with db_session() as session:
         await session.execute(text("TRUNCATE TABLE depts CASCADE"))
@@ -186,3 +219,30 @@ async def test_get_missing_returns_404(client: AsyncClient) -> None:
     res = await client.get("/api/v1/depts/999999")
     assert res.status_code == 404
     assert res.json()["type"] == "dept.NOT_FOUND"
+
+
+# ---- Codex review 修复：data_scope 过滤 / parent 预检 / status -------------
+
+
+async def test_list_data_scope_limits_non_superadmin(client: AsyncClient) -> None:
+    # 超管建 3 个部门；非超管（可见 {a,b}）list 只看 a,b，c 不可见（防泄露完整组织树，C8）。
+    a = await _create(client, code="A", name="A")
+    b = await _create(client, code="B", name="B")
+    await _create(client, code="C", name="C")
+    async with _build_client(_LimitedProvider(visible=frozenset({a, b})), user_id="2") as lc:
+        listing = (await lc.get("/api/v1/depts")).json()
+    assert {d["id"] for d in listing["items"]} == {a, b}
+    assert listing["total"] == 2
+
+
+async def test_create_nonexistent_parent_returns_404(client: AsyncClient) -> None:
+    res = await client.post("/api/v1/depts", json={"name": "x", "code": "X", "parent_id": 999999})
+    assert res.status_code == 404
+    assert res.json()["type"] == "dept.PARENT_NOT_FOUND"
+
+
+async def test_status_disabled_accepted(client: AsyncClient) -> None:
+    dept_id = await _create(client, code="RD", name="研发部")
+    res = await client.patch(f"/api/v1/depts/{dept_id}", json={"status": "disabled"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "disabled"

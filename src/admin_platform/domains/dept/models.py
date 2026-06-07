@@ -31,6 +31,8 @@ class Dept(Base, IdMixin, TimestampMixin):
         UniqueConstraint("code", name="uq_depts_code"),
         # 防自环：parent_id 不能指向自身（移动成环的更深检测在 service 层用子孙集合做）。
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_depts_not_self_parent"),
+        # status 枚举约束：只允许 active / disabled（与 schemas Literal 对齐，防脏数据）。
+        CheckConstraint("status IN ('active', 'disabled')", name="ck_depts_status"),
         # 按父节点取子节点并排序的复合索引（建树 / 同级排序的主查询路径）。
         Index("ix_depts_parent_sort", "parent_id", "sort_order", "id"),
     )
