@@ -32,6 +32,7 @@ from admin_platform.db.base import Base
 # Side-effect-only imports（noqa F401）：把 model 类注册进 Base.metadata，
 # 供 autogenerate / alembic check 与 live schema 做 diff。
 from admin_platform.domains.user.models import User  # noqa: F401
+from admin_platform.domains.dept.models import Dept  # noqa: F401
 
 # ----------------------------------------------------------------------------
 
