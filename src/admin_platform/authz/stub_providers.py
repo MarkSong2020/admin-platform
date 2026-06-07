@@ -17,9 +17,14 @@ class StubPermissionProvider(PermissionProvider):
         self,
         permissions: dict[int, frozenset[str]] | None = None,
         scopes: dict[int, DataScope] | None = None,
+        super_admins: frozenset[int] = frozenset(),
     ) -> None:
         self._permissions = permissions or {}
         self._scopes = scopes or {}
+        self._super_admins = super_admins
+
+    def get_is_super_admin(self, user_id: int) -> bool:
+        return user_id in self._super_admins
 
     def get_user_permissions(self, user_id: int) -> frozenset[str]:
         return self._permissions.get(user_id, frozenset())

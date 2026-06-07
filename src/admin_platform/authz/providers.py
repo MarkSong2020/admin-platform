@@ -31,6 +31,14 @@ class PermissionProvider(ABC):
     """用户权限标识与数据范围的来源。P1 每次直查 DB，不缓存（Q8）。"""
 
     @abstractmethod
+    def get_is_super_admin(self, user_id: int) -> bool:
+        """用户是否超级管理员（信任根布尔，对应 ``users.is_super_admin``）。
+
+        超管短路只认这个布尔（spec §2.1/§2.3），**不**靠 permissions 含 ``*:*:*``
+        通配判定（通配是 §6.1 的展示语义，非安全判定）。
+        """
+
+    @abstractmethod
     def get_user_permissions(self, user_id: int) -> frozenset[str]:
         """用户拥有的权限标识集合（如 ``{"system:user:list"}``）。
 

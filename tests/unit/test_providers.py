@@ -26,6 +26,13 @@ def test_effective_scope_preset_and_default() -> None:
     assert provider.get_effective_data_scope(8).scope_type is ScopeType.SELF
 
 
+def test_is_super_admin_trust_root() -> None:
+    """信任根布尔：预置 super_admins 的 user_id 返回 True，其余 False。"""
+    provider = StubPermissionProvider(super_admins=frozenset({1}))
+    assert provider.get_is_super_admin(1) is True
+    assert provider.get_is_super_admin(2) is False
+
+
 def test_menu_provider_returns_preset_tree() -> None:
     """预置菜单树按 user_id 返回。"""
     node = MenuNode(id=1, name="System", path="/system")
