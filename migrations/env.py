@@ -33,6 +33,7 @@ from admin_platform.db.base import Base
 # 供 autogenerate / alembic check 与 live schema 做 diff。
 from admin_platform.domains.user.models import User  # noqa: F401
 from admin_platform.domains.dept.models import Dept  # noqa: F401
+from admin_platform.domains.role.models import Role  # noqa: F401
 
 # ----------------------------------------------------------------------------
 
