@@ -1,0 +1,139 @@
+"""Dept service —— 业务用例层（部门树，抛 ``AppError``，错误码 ``dept.*``）。
+
+事务边界由 ``get_session`` 拥有（一请求 = 一事务）。service 决定**何时** raise
+（触发请求事务回滚），不抛 HTTPException（分层契约 C3）。
+
+业务不变式：
+
+  * **code 全局唯一** —— create / update（改 code 时）用 ``find_by_code`` 预检，违反抛
+    409 ``dept.CODE_DUPLICATE``。DB 的 ``uq_depts_code`` 是竞态兜底：并发预检都通过时
+    第二个 INSERT 撞约束 → ``IntegrityError`` handler 按 ``models.py`` 注册映射翻成同一码。
+  * **移动防环** —— update 改 ``parent_id`` 时，新父不能是自身、也不能落在自身子孙集合内
+    （邻接表移动成环会让子树脱离根 + 递归 CTE 死循环），违反抛 409 ``dept.CYCLE``。
+    移到根（``parent_id=None``）永远安全，不校验。
+  * **删除 RESTRICT** —— 有直接子部门时禁删，抛 409 ``dept.HAS_CHILDREN``（与 DB 外键
+    ``ondelete=RESTRICT`` 同义，但给出友好业务码，避免裸 IntegrityError 退化成无意义 conflict）。
+"""
+
+from __future__ import annotations
+
+from admin_platform.core.errors import AppError
+from admin_platform.domains.dept.repository import DeptRepository
+from admin_platform.domains.dept.schemas import (
+    DeptCreate,
+    DeptPage,
+    DeptRead,
+    DeptUpdate,
+)
+
+NOT_FOUND_CODE = "dept.NOT_FOUND"
+CODE_DUPLICATE_CODE = "dept.CODE_DUPLICATE"
+CYCLE_CODE = "dept.CYCLE"
+HAS_CHILDREN_CODE = "dept.HAS_CHILDREN"
+
+
+class DeptService:
+    def __init__(self, repository: DeptRepository) -> None:
+        self._repo = repository
+
+    async def list_(self, *, page: int, size: int) -> DeptPage:
+        """offset 分页（ADR 0001 §7.5 envelope）。"""
+        rows = await self._repo.list_paginated(page, size)
+        total = await self._repo.count()
+        total_pages = (total + size - 1) // size if size > 0 else 0
+        return DeptPage(
+            items=[DeptRead.model_validate(row) for row in rows],
+            page=page,
+            size=size,
+            total=total,
+            total_pages=total_pages,
+        )
+
+    async def get(self, item_id: int) -> DeptRead:
+        row = await self._repo.get(item_id)
+        if row is None:
+            raise self._not_found(item_id)
+        return DeptRead.model_validate(row)
+
+    async def create(self, payload: DeptCreate) -> DeptRead:
+        if await self._repo.find_by_code(payload.code) is not None:
+            raise self._duplicate(payload.code)
+        row = await self._repo.create(payload)
+        return DeptRead.model_validate(row)
+
+    async def update(self, item_id: int, payload: DeptUpdate) -> DeptRead:
+        existing = await self._repo.get(item_id)
+        if existing is None:
+            raise self._not_found(item_id)
+        await self._check_code_unique(existing, payload)
+        await self._check_no_cycle(item_id, payload)
+        row = await self._repo.update(item_id, payload)
+        if row is None:  # 并发删除兜底：预检后被他人删除
+            raise self._not_found(item_id)
+        return DeptRead.model_validate(row)
+
+    async def delete(self, item_id: int) -> None:
+        row = await self._repo.get(item_id)
+        if row is None:
+            raise self._not_found(item_id)
+        # 删除 RESTRICT：有子部门时禁删（友好 409，对应 DB 外键 ondelete=RESTRICT）。
+        if await self._repo.count_children(item_id) > 0:
+            raise self._has_children(item_id)
+        await self._repo.delete(item_id)
+
+    async def _check_code_unique(self, existing: object, payload: DeptUpdate) -> None:
+        """改 code 且与现值不同时校验全局唯一（未改 code 跳过）。"""
+        if "code" not in payload.model_fields_set or payload.code is None:
+            return
+        if payload.code == getattr(existing, "code", None):
+            return
+        if await self._repo.find_by_code(payload.code) is not None:
+            raise self._duplicate(payload.code)
+
+    async def _check_no_cycle(self, item_id: int, payload: DeptUpdate) -> None:
+        """移动防环：新父不能是自身或自身子孙（移到根 None 永远安全）。"""
+        if "parent_id" not in payload.model_fields_set or payload.parent_id is None:
+            return
+        new_parent_id = payload.parent_id
+        if new_parent_id == item_id:
+            raise self._cycle(item_id, new_parent_id)
+        # list_descendant_dept_ids 含自身，子孙集合即「不可作为新父」的封闭集。
+        descendants = await self._repo.list_descendant_dept_ids(item_id)
+        if new_parent_id in descendants:
+            raise self._cycle(item_id, new_parent_id)
+
+    @staticmethod
+    def _not_found(item_id: int) -> AppError:
+        return AppError(
+            code=NOT_FOUND_CODE,
+            title="Dept not found",
+            detail=f"id={item_id}",
+            status_code=404,
+        )
+
+    @staticmethod
+    def _duplicate(code: str) -> AppError:
+        return AppError(
+            code=CODE_DUPLICATE_CODE,
+            title="Dept code already exists",
+            detail=f"code={code!r}",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _cycle(item_id: int, new_parent_id: int) -> AppError:
+        return AppError(
+            code=CYCLE_CODE,
+            title="Dept move would create a cycle",
+            detail=f"不能把部门 id={item_id} 移动到自身或其子孙 id={new_parent_id} 之下",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _has_children(item_id: int) -> AppError:
+        return AppError(
+            code=HAS_CHILDREN_CODE,
+            title="Dept has children",
+            detail=f"部门 id={item_id} 存在子部门，禁止删除",
+            status_code=409,
+        )
