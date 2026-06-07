@@ -2,100 +2,68 @@
   "meta": {
     "branch": "p1-rbac",
     "spec": "docs/specs/2026-06-05-p1.0-rbac-mechanism.md",
-    "created": "2026-06-05",
-    "note": "status 取值：pending(待跑) / done / blocked / blocked-deps / requires_human。supervisor 只跑 auto==true 且依赖全 done 的 pending 任务。"
+    "version": "v2 (Codex 审查后轻量重写：git 管理 + verify 枚举 + manifest 精确 stage)",
+    "note": "verify 枚举: check=make check / check_db=make migrate+check-db+check+test-integration（测试环境，DDL 走 Alembic 可重建）。manifest=产出路径前缀，supervisor 只精确 stage 这些、不污染会话前 dirty。status: pending/done/blocked/blocked-deps/requires_human。A1-M2 机制层已人值守完成（commit 在分支），标 done。"
   },
   "tasks": [
     {
-      "id": "A1",
-      "title": "authz 包 + DataScope 值对象 + ScopeType 5 范围枚举 + 单测",
-      "spec": "§4.1/§4.2",
-      "auto": true,
-      "depends_on": [],
-      "verify": "make check",
+      "id": "A1", "title": "authz 类型层（ScopeType + DataScope）",
+      "auto": true, "depends_on": [], "verify": "check",
+      "manifest": ["src/admin_platform/authz", "tests/unit/test_authz_scope.py", ".importlinter"],
+      "status": "done"
+    },
+    {
+      "id": "A2", "title": "apply_data_scope helper（5 范围 SQL + 默认 deny）",
+      "auto": true, "depends_on": ["A1"], "verify": "check",
+      "manifest": ["src/admin_platform/authz/data_scope.py", "tests/unit/test_apply_data_scope.py"],
+      "status": "done"
+    },
+    {
+      "id": "A3", "title": "Permission/Menu Provider 抽象 + stub",
+      "auto": true, "depends_on": ["A1"], "verify": "check",
+      "manifest": ["src/admin_platform/authz", "tests/unit/test_providers.py"],
+      "status": "done"
+    },
+    {
+      "id": "M1", "title": "CurrentUser 扩展 RBAC 上下文",
+      "auto": false, "depends_on": ["A1"], "verify": "check",
+      "manifest": ["src/admin_platform/core/auth.py", "tests/unit/test_current_user.py"],
+      "status": "done"
+    },
+    {
+      "id": "M2", "title": "require_permission 依赖（默认 deny + 超管短路）",
+      "auto": false, "depends_on": ["M1", "A3"], "verify": "check",
+      "manifest": ["src/admin_platform/core/permissions.py", "src/admin_platform/authz/providers.py", "src/admin_platform/authz/stub_providers.py", "tests/unit/test_require_permission.py", "tests/unit/test_providers.py"],
+      "status": "done"
+    },
+    {
+      "id": "D1", "title": "dept 域（make new-module）+ 部门树 CRUD + data_scope 接入",
+      "spec": "§12.2", "auto": true, "depends_on": ["M1", "M2", "A2"],
+      "verify": "check_db", "needs_db": true,
+      "manifest": ["src/admin_platform/domains/dept", "migrations/", "tests/"],
       "status": "pending",
-      "note": "纯新增 src/admin_platform/authz/，不碰 core，纯单测"
+      "note": "⚠️ 实现前 O1 dept 树存储（邻接表/路径枚举/闭包表）须先拉 Codex PK + 人拍板；prompt 待 O1 定后写"
     },
     {
-      "id": "A2",
-      "title": "apply_data_scope helper（5 范围 SQL where 注入）+ 单测",
-      "spec": "§4.2",
-      "auto": true,
-      "depends_on": ["A1"],
-      "verify": "make check",
-      "status": "pending",
-      "note": "纯函数：输入 stmt+DataScope+dept_col/owner_col，输出加 where 的 stmt"
+      "id": "R1", "title": "role 域 + data_scope 字段 + user_roles/role_depts 关联",
+      "spec": "§12.3", "auto": true, "depends_on": ["D1", "A3"],
+      "verify": "check_db", "needs_db": true,
+      "manifest": ["src/admin_platform/domains/role", "migrations/", "tests/"],
+      "status": "pending"
     },
     {
-      "id": "A3",
-      "title": "PermissionProvider/MenuProvider 抽象接口 + stub 实现 + invalidate no-op + 单测",
-      "spec": "§5.2",
-      "auto": true,
-      "depends_on": ["A1"],
-      "verify": "make check",
-      "status": "pending",
-      "note": "Q8 P1 不缓存：stub 直查 stub 数据；invalidate 是 no-op，接口先冻结"
+      "id": "ME1", "title": "menu 域（目录/菜单/按钮 + perms）+ role_menus + getRouters payload",
+      "spec": "§12.4/§6.1", "auto": true, "depends_on": ["R1"],
+      "verify": "check_db", "needs_db": true,
+      "manifest": ["src/admin_platform/domains/menu", "migrations/", "tests/"],
+      "status": "pending"
     },
     {
-      "id": "M1",
-      "title": "CurrentUser 扩展（is_super_admin/roles/permissions/dept_id/data_scope）",
-      "spec": "§3.1",
-      "auto": false,
-      "depends_on": ["A1"],
-      "verify": "make check",
-      "status": "requires_human",
-      "note": "碰 core/auth.py 基础设施红线 —— 人值守做 + review"
-    },
-    {
-      "id": "M2",
-      "title": "require_permission 依赖 + 默认 deny + 超管短路 + 启用 FORBIDDEN_BY_ROLE/SCOPE",
-      "spec": "§3.2",
-      "auto": false,
-      "depends_on": ["M1", "A3"],
-      "verify": "make check",
-      "status": "requires_human",
-      "note": "碰 core 红线 + 权限安全语义 —— 人值守做 + review"
-    },
-    {
-      "id": "D1",
-      "title": "dept 域（make new-module）+ 部门树 CRUD + data_scope 接入",
-      "spec": "§12.2",
-      "auto": true,
-      "depends_on": ["M1", "M2", "A2"],
-      "verify": "make check && make test-integration",
-      "status": "pending",
-      "needs_db": true,
-      "note": "依赖机制层就绪；涉及 migration，需一次性 DB"
-    },
-    {
-      "id": "R1",
-      "title": "role 域 + data_scope 字段 + user_roles/role_depts 关联",
-      "spec": "§12.3",
-      "auto": true,
-      "depends_on": ["D1", "A3"],
-      "verify": "make check && make test-integration",
-      "status": "pending",
-      "needs_db": true
-    },
-    {
-      "id": "ME1",
-      "title": "menu 域（目录/菜单/按钮 + perms）+ role_menus + getRouters payload",
-      "spec": "§12.4/§6.1",
-      "auto": true,
-      "depends_on": ["R1"],
-      "verify": "make check && make test-integration",
-      "status": "pending",
-      "needs_db": true
-    },
-    {
-      "id": "P1T",
-      "title": "post 域 + user_posts 关联",
-      "spec": "§12.5",
-      "auto": true,
-      "depends_on": ["R1"],
-      "verify": "make check && make test-integration",
-      "status": "pending",
-      "needs_db": true
+      "id": "P1T", "title": "post 域 + user_posts 关联",
+      "spec": "§12.5", "auto": true, "depends_on": ["R1"],
+      "verify": "check_db", "needs_db": true,
+      "manifest": ["src/admin_platform/domains/post", "migrations/", "tests/"],
+      "status": "pending"
     }
   ]
 }
