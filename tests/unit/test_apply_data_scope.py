@@ -34,9 +34,35 @@ def test_self_filters_by_owner_only() -> None:
 
 
 def test_self_dept_filters_by_dept() -> None:
-    """本部门：按 dept_id 等值过滤。"""
-    sql = _where_sql(DataScope(ScopeType.SELF_DEPT, user_id=7, dept_id=10))
-    assert "dept_id = 10" in sql
+    """O2 归一后部门范围统一走 visible_dept_ids（Provider 展开 SELF_DEPT → {dept_id}）。"""
+    sql = _where_sql(
+        DataScope(ScopeType.SELF_DEPT, user_id=7, dept_id=10, visible_dept_ids=frozenset({10}))
+    )
+    assert "dept_id IN" in sql
+    assert "10" in sql
+
+
+def test_self_and_dept_merge_to_or() -> None:
+    """O2 多角色归一：SELF + 部门范围 → owner_id = user OR dept_id IN (...)。"""
+    sql = _where_sql(
+        DataScope(
+            ScopeType.CUSTOM_DEPT,
+            user_id=7,
+            visible_dept_ids=frozenset({10, 11}),
+            include_self=True,
+        )
+    )
+    assert " OR " in sql
+    assert "owner_id = 7" in sql
+    assert "dept_id IN" in sql
+
+
+def test_owner_col_none_skips_self() -> None:
+    """无归属资源（owner_col=None）+ 仅 SELF → 无可用条件 → 默认 deny（不退化成 pk==user）。"""
+    scope = DataScope(ScopeType.SELF, user_id=7, include_self=True)
+    stmt = apply_data_scope(select(column("id")), scope, dept_col=column("dept_id"), owner_col=None)
+    sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "false" in sql.lower()
 
 
 def test_self_dept_without_dept_denies() -> None:

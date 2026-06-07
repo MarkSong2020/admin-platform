@@ -30,7 +30,8 @@ class DeptRepository:
         offset = (page - 1) * size
         stmt = select(Dept)
         if scope is not None:
-            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=Dept.id)
+            # dept 表无归属概念 → owner_col=None，SELF 段跳过（不退化成 Dept.id==user_id）。
+            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=None)
         stmt = stmt.offset(offset).limit(size).order_by(Dept.id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -38,7 +39,7 @@ class DeptRepository:
     async def count(self, *, scope: DataScope | None = None) -> int:
         stmt = select(func.count()).select_from(Dept)
         if scope is not None:
-            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=Dept.id)
+            stmt = apply_data_scope(stmt, scope, dept_col=Dept.id, owner_col=None)
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
 

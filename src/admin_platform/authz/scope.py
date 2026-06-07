@@ -30,11 +30,14 @@ class DataScope:
       * ``user_id`` —— 当前用户 id，供 ``SELF`` 范围按归属人过滤。
       * ``dept_id`` —— 当前用户所属部门 id，供 ``SELF_DEPT`` / ``SELF_DEPT_AND_BELOW`` 过滤；
         无部门时为 ``None``。
-      * ``visible_dept_ids`` —— 可见部门 id 集合，供 ``CUSTOM_DEPT``（自定义部门）
-        与 ``SELF_DEPT_AND_BELOW``（本部门 + 子孙）展开后的过滤；默认空。
+      * ``visible_dept_ids`` —— 可见部门 id 集合（多角色部门范围**并集**，O2 归一）；
+        部门范围（本部门 / 及以下 / 自定义）都展开进此集合，``apply_data_scope`` 用 ``dept IN``。
+      * ``include_self`` —— 是否含「仅本人」段（多角色任一为 ``SELF`` 时 True，O2 归一）；
+        ``apply_data_scope`` 据此追加 ``owner_col == user_id``（owner_col 非 None 时）。
     """
 
     scope_type: ScopeType
     user_id: int
     dept_id: int | None = None
     visible_dept_ids: frozenset[int] = frozenset()
+    include_self: bool = False
