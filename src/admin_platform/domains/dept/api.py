@@ -84,9 +84,10 @@ IDEMPOTENT_POST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 
 @router.get("", operation_id="depts_list", response_model=DeptPage, responses=AUTH_ERROR_RESPONSES)
 async def list_depts(
-    svc: ServiceDep, _user: ListGuard, page: PageQ = 1, size: SizeQ = 20
+    svc: ServiceDep, user: ListGuard, page: PageQ = 1, size: SizeQ = 20
 ) -> DeptPage:
-    return await svc.list_(page=page, size=size)
+    # 非超管按 data_scope 过滤可见部门（防泄露完整组织树）；超管 data_scope=ALL 不过滤。
+    return await svc.list_(page=page, size=size, scope=user.data_scope)
 
 
 @router.get(

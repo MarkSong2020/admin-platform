@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from admin_platform.authz.scope import DataScope
 from admin_platform.core.errors import AppError
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.dept.schemas import (
@@ -27,6 +28,7 @@ from admin_platform.domains.dept.schemas import (
 )
 
 NOT_FOUND_CODE = "dept.NOT_FOUND"
+PARENT_NOT_FOUND_CODE = "dept.PARENT_NOT_FOUND"
 CODE_DUPLICATE_CODE = "dept.CODE_DUPLICATE"
 CYCLE_CODE = "dept.CYCLE"
 HAS_CHILDREN_CODE = "dept.HAS_CHILDREN"
@@ -36,10 +38,14 @@ class DeptService:
     def __init__(self, repository: DeptRepository) -> None:
         self._repo = repository
 
-    async def list_(self, *, page: int, size: int) -> DeptPage:
-        """offset 分页（ADR 0001 §7.5 envelope）。"""
-        rows = await self._repo.list_paginated(page, size)
-        total = await self._repo.count()
+    async def list_(self, *, page: int, size: int, scope: DataScope | None = None) -> DeptPage:
+        """offset 分页（ADR 0001 §7.5 envelope）。
+
+        ``scope`` 非空时按数据权限过滤可见部门（**非超管必传**，防泄露完整组织树）；
+        超管在 api 层传 None（不过滤）。
+        """
+        rows = await self._repo.list_paginated(page, size, scope=scope)
+        total = await self._repo.count(scope=scope)
         total_pages = (total + size - 1) // size if size > 0 else 0
         return DeptPage(
             items=[DeptRead.model_validate(row) for row in rows],
@@ -56,6 +62,8 @@ class DeptService:
         return DeptRead.model_validate(row)
 
     async def create(self, payload: DeptCreate) -> DeptRead:
+        if payload.parent_id is not None and await self._repo.get(payload.parent_id) is None:
+            raise self._parent_not_found(payload.parent_id)
         if await self._repo.find_by_code(payload.code) is not None:
             raise self._duplicate(payload.code)
         row = await self._repo.create(payload)
@@ -66,7 +74,14 @@ class DeptService:
         if existing is None:
             raise self._not_found(item_id)
         await self._check_code_unique(existing, payload)
-        await self._check_no_cycle(item_id, payload)
+        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 防环
+        # 校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
+        new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else None
+        if new_parent_id is not None:
+            await self._repo.acquire_tree_lock()
+            if await self._repo.get(new_parent_id) is None:
+                raise self._parent_not_found(new_parent_id)
+            await self._check_no_cycle(item_id, payload)
         row = await self._repo.update(item_id, payload)
         if row is None:  # 并发删除兜底：预检后被他人删除
             raise self._not_found(item_id)
@@ -76,7 +91,8 @@ class DeptService:
         row = await self._repo.get(item_id)
         if row is None:
             raise self._not_found(item_id)
-        # 删除 RESTRICT：有子部门时禁删（友好 409，对应 DB 外键 ondelete=RESTRICT）。
+        # 树写串行化：锁内重新查子部门，避免并发把子部门移走后误判可删（与 DB RESTRICT 一致，给友好 409）。
+        await self._repo.acquire_tree_lock()
         if await self._repo.count_children(item_id) > 0:
             raise self._has_children(item_id)
         await self._repo.delete(item_id)
@@ -118,6 +134,15 @@ class DeptService:
             title="Dept code already exists",
             detail=f"code={code!r}",
             status_code=409,
+        )
+
+    @staticmethod
+    def _parent_not_found(parent_id: int) -> AppError:
+        return AppError(
+            code=PARENT_NOT_FOUND_CODE,
+            title="Parent dept not found",
+            detail=f"parent_id={parent_id}",
+            status_code=404,
         )
 
     @staticmethod

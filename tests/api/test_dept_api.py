@@ -22,6 +22,7 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.dept.api import router
+from admin_platform.main import create_app
 
 
 class _StubProvider(PermissionProvider):
@@ -99,6 +100,27 @@ def test_delete_with_only_list_permission_returns_403() -> None:
     assert res.status_code == 403
 
 
+def _no_perm_client() -> TestClient:
+    return _client(
+        current_user=CurrentUser(user_id="2", sub="2"),
+        provider=_StubProvider(is_super=False, perms=frozenset()),
+    )
+
+
+def test_query_without_permission_returns_403() -> None:
+    assert _no_perm_client().get("/api/v1/depts/1").status_code == 403
+
+
+def test_add_without_permission_returns_403() -> None:
+    assert (
+        _no_perm_client().post("/api/v1/depts", json={"name": "x", "code": "X"}).status_code == 403
+    )
+
+
+def test_edit_without_permission_returns_403() -> None:
+    assert _no_perm_client().patch("/api/v1/depts/1", json={"name": "x"}).status_code == 403
+
+
 # ---- 校验 422（超管越过守卫后触发）----------------------------------------
 
 
@@ -116,3 +138,16 @@ def test_update_returns_422_on_invalid_payload() -> None:
 def test_list_size_above_max_is_rejected() -> None:
     res = _superadmin_client().get("/api/v1/depts?size=101")
     assert res.status_code == 422
+
+
+def test_invalid_status_rejected_422() -> None:
+    # status 非 active/disabled → Pydantic Literal 拒绝（超管越守卫后到校验层）。
+    res = _superadmin_client().patch("/api/v1/depts/1", json={"status": "bogus"})
+    assert res.status_code == 422
+
+
+def test_depts_mounted_in_production_app() -> None:
+    """回归：dept router 必须挂进生产 create_app()（防 main.py 漏挂、测试绕过入口，Codex 🔴）。"""
+    paths = create_app().openapi()["paths"]
+    assert "/api/v1/depts" in paths
+    assert "/api/v1/depts/{item_id}" in paths

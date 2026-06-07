@@ -58,12 +58,17 @@ class _StubRepo:
         self._descendants = descendants
         self.update_called = False
 
-    async def list_paginated(self, page: int, size: int) -> list[Dept]:
+    async def list_paginated(
+        self, page: int, size: int, *, scope: object | None = None
+    ) -> list[Dept]:
         start = (page - 1) * size
         return list(self._rows.values())[start : start + size]
 
-    async def count(self) -> int:
+    async def count(self, *, scope: object | None = None) -> int:
         return len(self._rows)
+
+    async def acquire_tree_lock(self) -> None:
+        """stub no-op（真实是 pg_advisory_xact_lock，单测无 DB）。"""
 
     async def get(self, dept_id: int) -> Dept | None:
         return self._rows.get(dept_id)
@@ -131,6 +136,15 @@ async def test_create_duplicate_code_raises_409() -> None:
     assert exc.value.status_code == 409
 
 
+@pytest.mark.asyncio
+async def test_create_nonexistent_parent_raises_404() -> None:
+    """create 指定不存在的父部门 → dept.PARENT_NOT_FOUND（不退化成 FK CONFLICT）。"""
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo()).create(DeptCreate(name="x", code="X", parent_id=99))
+    assert exc.value.code == "dept.PARENT_NOT_FOUND"
+    assert exc.value.status_code == 404
+
+
 # ---- update：移动防环 ------------------------------------------------------
 
 
@@ -147,10 +161,11 @@ async def test_update_move_into_self_raises_cycle_409() -> None:
 
 @pytest.mark.asyncio
 async def test_update_move_into_descendant_raises_cycle_409() -> None:
-    # 树 A(2)->B(3)->C(4)，descendants(A) = {2,3,4}；把 A 移到 C 下成环。
+    # 树 A(2)->B(3)->C(4)，descendants(A) = {2,3,4}；把 A 移到 C（存在）下成环。
     node = _dept(2, code="A")
+    child_c = _dept(4, code="C", parent_id=3)
     with pytest.raises(AppError) as exc:
-        await _svc(_StubRepo(rows=[node], descendants=frozenset({2, 3, 4}))).update(
+        await _svc(_StubRepo(rows=[node, child_c], descendants=frozenset({2, 3, 4}))).update(
             2, DeptUpdate(parent_id=4)
         )
     assert exc.value.code == "dept.CYCLE"
@@ -168,12 +183,23 @@ async def test_update_move_to_root_ok() -> None:
 
 @pytest.mark.asyncio
 async def test_update_move_under_valid_parent_ok() -> None:
-    # 新父 9 不在 B 的子孙集合内 → 合法移动。
+    # 新父 9（存在、不在 B 的子孙集合内）→ 合法移动。
     node = _dept(3, code="B", parent_id=2)
-    out = await _svc(_StubRepo(rows=[node], descendants=frozenset({3}))).update(
+    parent9 = _dept(9, code="P9")
+    out = await _svc(_StubRepo(rows=[node, parent9], descendants=frozenset({3}))).update(
         3, DeptUpdate(parent_id=9)
     )
     assert out.parent_id == 9
+
+
+@pytest.mark.asyncio
+async def test_update_move_to_nonexistent_parent_raises_404() -> None:
+    # 移到不存在的父部门 → dept.PARENT_NOT_FOUND（parent 预检在防环前）。
+    node = _dept(3, code="B")
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(rows=[node])).update(3, DeptUpdate(parent_id=99))
+    assert exc.value.code == "dept.PARENT_NOT_FOUND"
+    assert exc.value.status_code == 404
 
 
 # ---- update：code 唯一 + NOT_FOUND -----------------------------------------

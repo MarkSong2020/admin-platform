@@ -47,6 +47,7 @@ def upgrade() -> None:
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_depts_not_self_parent"),
+        sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_depts_status"),
         sa.ForeignKeyConstraint(["parent_id"], ["depts.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("code", name="uq_depts_code"),
