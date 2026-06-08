@@ -18,10 +18,16 @@ class StubPermissionProvider(PermissionProvider):
         permissions: dict[int, frozenset[str]] | None = None,
         scopes: dict[int, DataScope] | None = None,
         super_admins: frozenset[int] = frozenset(),
+        inactive_users: frozenset[int] = frozenset(),
     ) -> None:
         self._permissions = permissions or {}
         self._scopes = scopes or {}
         self._super_admins = super_admins
+        self._inactive_users = inactive_users
+
+    def get_is_active(self, user_id: int) -> bool:
+        # 默认活跃；显式置入 inactive_users 的视作停用（测试请求期账号状态校验）。
+        return user_id not in self._inactive_users
 
     def get_is_super_admin(self, user_id: int) -> bool:
         return user_id in self._super_admins

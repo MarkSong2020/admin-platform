@@ -53,7 +53,7 @@ class _SuperAdminProvider(PermissionProvider):
 
 
 class _LimitedProvider(PermissionProvider):
-    """非超管 stub：有 system:dept:list 权限，data_scope 限定可见部门集合（CUSTOM_DEPT）。"""
+    """非超管 stub：有 system:dept:list/query 权限，data_scope 限定可见部门集合（CUSTOM_DEPT）。"""
 
     def __init__(self, *, visible: frozenset[int]) -> None:
         self._visible = visible
@@ -62,7 +62,7 @@ class _LimitedProvider(PermissionProvider):
         return False
 
     def get_user_permissions(self, user_id: int) -> frozenset[str]:
-        return frozenset({"system:dept:list"})
+        return frozenset({"system:dept:list", "system:dept:query"})
 
     def get_effective_data_scope(self, user_id: int) -> DataScope:
         return DataScope(ScopeType.CUSTOM_DEPT, user_id=user_id, visible_dept_ids=self._visible)
@@ -233,6 +233,18 @@ async def test_list_data_scope_limits_non_superadmin(client: AsyncClient) -> Non
         listing = (await lc.get("/api/v1/depts")).json()
     assert {d["id"] for d in listing["items"]} == {a, b}
     assert listing["total"] == 2
+
+
+async def test_get_data_scope_limits_non_superadmin(client: AsyncClient) -> None:
+    # Codex 深审 F5：非超管 get 按 data_scope 限制——可见部门 200，不可见部门 404（不泄露存在性）。
+    a = await _create(client, code="A", name="A")
+    b = await _create(client, code="B", name="B")  # 不在可见集
+    async with _build_client(_LimitedProvider(visible=frozenset({a})), user_id="2") as lc:
+        visible = await lc.get(f"/api/v1/depts/{a}")
+        assert visible.status_code == 200
+        invisible = await lc.get(f"/api/v1/depts/{b}")
+        assert invisible.status_code == 404
+        assert invisible.json()["type"] == "dept.NOT_FOUND"
 
 
 async def test_create_nonexistent_parent_returns_404(client: AsyncClient) -> None:

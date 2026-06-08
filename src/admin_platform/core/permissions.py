@@ -22,7 +22,11 @@ from fastapi import Depends
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
-from admin_platform.core.errors import AUTH_FORBIDDEN_BY_ROLE, AppError
+from admin_platform.core.errors import (
+    AUTH_ACCOUNT_DISABLED,
+    AUTH_FORBIDDEN_BY_ROLE,
+    AppError,
+)
 
 
 def get_permission_provider() -> PermissionProvider:
@@ -53,6 +57,17 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
         provider: Annotated[PermissionProvider, Depends(get_permission_provider)],
     ) -> CurrentUser:
         user_id = int(base_user.user_id)
+
+        # 账号状态请求期校验（spec §2.3「不绕过账号状态」+ Codex 深审）：持有效 token 但账号
+        # 停用（status != active）即使是超管 / 有角色也一律 403——放在超管短路之前，停用账号
+        # 不享任何短路。get_is_active 默认 True（内存 stub），真实 DbPermissionProvider 查 DB。
+        if not provider.get_is_active(user_id):
+            raise AppError(
+                code=AUTH_ACCOUNT_DISABLED,
+                title="Account disabled",
+                detail="账号已停用",
+                status_code=int(HTTPStatus.FORBIDDEN),
+            )
 
         # 超管短路：覆盖 RBAC + data_scope（ALL 范围）；登录已由 require_current_user 保证。
         if provider.get_is_super_admin(user_id):

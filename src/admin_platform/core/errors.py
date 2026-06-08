@@ -103,6 +103,9 @@ AUTH_TOKEN_INVALID = "auth.TOKEN_INVALID"  # noqa: S105
 AUTH_TOKEN_EXPIRED = "auth.TOKEN_EXPIRED"  # noqa: S105
 AUTH_FORBIDDEN_BY_ROLE = "auth.FORBIDDEN_BY_ROLE"
 AUTH_FORBIDDEN_BY_SCOPE = "auth.FORBIDDEN_BY_SCOPE"
+# 账号停用（请求期校验，Codex 深审）：持有效 token 但账号 status != active → 403。
+# 与 LOGIN_FAILED（登录期，401，防枚举）分开：此处账号身份已确认，是状态禁止而非凭证问题。
+AUTH_ACCOUNT_DISABLED = "auth.ACCOUNT_DISABLED"
 # 登录失败统一码（Task 6）：租户不存在/停用、用户不存在/停用、密码错一律此码 + 401，
 # 不区分以防账号枚举（spec 字面写 admin.LOGIN_FAILED，本仓归入 auth.* 体系，与
 # auth.TOKEN_* 一致；admin_platform.* 留给业务资源错误）。

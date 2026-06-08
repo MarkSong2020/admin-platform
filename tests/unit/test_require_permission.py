@@ -11,7 +11,11 @@ import pytest
 from admin_platform.authz.scope import ScopeType
 from admin_platform.authz.stub_providers import StubPermissionProvider
 from admin_platform.core.auth import CurrentUser
-from admin_platform.core.errors import AUTH_FORBIDDEN_BY_ROLE, AppError
+from admin_platform.core.errors import (
+    AUTH_ACCOUNT_DISABLED,
+    AUTH_FORBIDDEN_BY_ROLE,
+    AppError,
+)
 from admin_platform.core.permissions import get_permission_provider, require_permission
 
 PERM = "system:user:list"
@@ -62,6 +66,28 @@ def test_empty_permissions_raises_403() -> None:
     dep = require_permission(PERM)
     with pytest.raises(AppError):
         dep(base_user=_user("4"), provider=StubPermissionProvider())
+
+
+def test_disabled_account_raises_403_even_for_super_admin() -> None:
+    """停用账号请求期校验（Codex 深审）：即使是超管，账号停用 → 403 ACCOUNT_DISABLED，
+    在超管短路之前拦截（不绕过账号状态）。"""
+    dep = require_permission(PERM)
+    provider = StubPermissionProvider(super_admins=frozenset({1}), inactive_users=frozenset({1}))
+    with pytest.raises(AppError) as exc_info:
+        dep(base_user=_user("1"), provider=provider)
+    assert exc_info.value.code == AUTH_ACCOUNT_DISABLED
+    assert exc_info.value.status_code == 403
+
+
+def test_disabled_account_raises_403_with_permission() -> None:
+    """停用账号即使持有该权限点也 403 ACCOUNT_DISABLED（账号状态先于权限点判定）。"""
+    dep = require_permission(PERM)
+    provider = StubPermissionProvider(
+        permissions={2: frozenset({PERM})}, inactive_users=frozenset({2})
+    )
+    with pytest.raises(AppError) as exc_info:
+        dep(base_user=_user("2"), provider=provider)
+    assert exc_info.value.code == AUTH_ACCOUNT_DISABLED
 
 
 def test_provider_not_wired_fail_closed() -> None:
