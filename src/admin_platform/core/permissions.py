@@ -20,7 +20,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from admin_platform.authz.permissions import ALL_PERMISSIONS
-from admin_platform.authz.providers import PermissionProvider
+from admin_platform.authz.providers import MenuProvider, PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
 from admin_platform.core.errors import (
@@ -44,6 +44,15 @@ def get_permission_provider() -> PermissionProvider:
     raise RuntimeError(
         "PermissionProvider 未接线（P1 机制就绪，待 RBAC 域落地后注入真实 Provider）"
     )
+
+
+def get_menu_provider() -> MenuProvider:
+    """FastAPI 依赖：MenuProvider 注入点（fail-closed，镜像 get_permission_provider）。
+
+    getRouters 端点（§6.1）的菜单树数据源；由组合根 ``main.py`` 经 ``dependency_overrides``
+    注入真实 ``DbMenuProvider``，未接线时抛错（不静默返回空菜单）。
+    """
+    raise RuntimeError("MenuProvider 未接线（待组合根注入 DbMenuProvider）")
 
 
 def require_permission(perm: str) -> Callable[..., CurrentUser]:
