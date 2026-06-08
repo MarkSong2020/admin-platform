@@ -156,6 +156,15 @@ async def test_get_missing_returns_404(client: AsyncClient) -> None:
     assert res.json()["type"] == "post.NOT_FOUND"
 
 
+async def test_patch_to_duplicate_code_returns_409(client: AsyncClient) -> None:
+    # Codex 深审：PATCH 改 code 撞已存在 code → 409（update 的 code 唯一预检，非仅 create）。
+    await _create(client, code="pm", name="项目经理")
+    other = await _create(client, code="dev", name="开发")
+    res = await client.patch(f"/api/v1/posts/{other}", json={"code": "pm"})
+    assert res.status_code == 409
+    assert res.json()["type"] == "post.CODE_DUPLICATE"
+
+
 # ---- 权限矩阵 5 端点 403（非超管、无权限）+ 超管短路放行 --------------------
 
 
@@ -222,6 +231,19 @@ async def test_set_and_list_user_posts(client: AsyncClient) -> None:
 
 
 # ---- 绑定全量替换并发 last-writer-wins（advisory lock 串行化，镜像 role F3）---
+
+
+async def test_delete_post_cascades_user_posts(client: AsyncClient) -> None:
+    # Codex 深审：FK ondelete=CASCADE —— 删岗位后 user_posts 绑定自动清理。
+    uid = await _seed_user(username="u-cascade")
+    pid = await _seed_post(code="cas")
+    async with db_session() as session:
+        await PostRepository(session).set_user_posts(uid, [pid])
+    res = await client.delete(f"/api/v1/posts/{pid}")
+    assert res.status_code == 204
+    async with db_session() as session:
+        posts = await PostRepository(session).list_posts_for_user(uid)
+    assert posts == []
 
 
 async def test_set_user_posts_concurrent_last_writer_wins(client: AsyncClient) -> None:
