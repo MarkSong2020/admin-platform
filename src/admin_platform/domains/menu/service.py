@@ -30,6 +30,8 @@ NOT_FOUND_CODE = "menu.NOT_FOUND"
 PARENT_NOT_FOUND_CODE = "menu.PARENT_NOT_FOUND"
 CYCLE_CODE = "menu.CYCLE"
 HAS_CHILDREN_CODE = "menu.HAS_CHILDREN"
+INVALID_PARENT_TYPE_CODE = "menu.INVALID_PARENT_TYPE"
+TYPE_HAS_CHILDREN_CODE = "menu.TYPE_HAS_CHILDREN"
 
 
 class MenuService:
@@ -56,8 +58,11 @@ class MenuService:
         return MenuRead.model_validate(row)
 
     async def create(self, payload: MenuCreate) -> MenuRead:
-        if payload.parent_id is not None and await self._repo.get(payload.parent_id) is None:
-            raise self._parent_not_found(payload.parent_id)
+        if payload.parent_id is not None:
+            parent = await self._repo.get(payload.parent_id)
+            if parent is None:
+                raise self._parent_not_found(payload.parent_id)
+            self._reject_button_parent(parent)
         row = await self._repo.create(payload)
         return MenuRead.model_validate(row)
 
@@ -65,13 +70,22 @@ class MenuService:
         existing = await self._repo.get(item_id)
         if existing is None:
             raise self._not_found(item_id)
-        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 防环
-        # 校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
+        # 改成按钮(F)前必须无子菜单：否则 build_routers 过滤 F 会让整段子树从路由树消失（F1/F5）。
+        if (
+            "menu_type" in payload.model_fields_set
+            and payload.menu_type == "F"
+            and await self._repo.count_children(item_id) > 0
+        ):
+            raise self._type_has_children(item_id)
+        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 类型 +
+        # 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
         new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else None
         if new_parent_id is not None:
             await self._repo.acquire_tree_lock()
-            if await self._repo.get(new_parent_id) is None:
+            parent = await self._repo.get(new_parent_id)
+            if parent is None:
                 raise self._parent_not_found(new_parent_id)
+            self._reject_button_parent(parent)
             await self._check_no_cycle(item_id, payload)
         row = await self._repo.update(item_id, payload)
         if row is None:  # 并发删除兜底：预检后被他人删除
@@ -99,6 +113,11 @@ class MenuService:
         descendants = await self._repo.list_descendant_menu_ids(item_id)
         if new_parent_id in descendants:
             raise self._cycle(item_id, new_parent_id)
+
+    def _reject_button_parent(self, parent: object) -> None:
+        """按钮(F)只承载 perms、不能作为父节点（对标若依：F 下不再挂子菜单）。"""
+        if getattr(parent, "menu_type", None) == "F":
+            raise self._invalid_parent_type(int(getattr(parent, "id", 0)))
 
     @staticmethod
     def _not_found(item_id: int) -> AppError:
@@ -133,5 +152,23 @@ class MenuService:
             code=HAS_CHILDREN_CODE,
             title="Menu has children",
             detail=f"菜单 id={item_id} 存在子菜单，禁止删除",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _invalid_parent_type(parent_id: int) -> AppError:
+        return AppError(
+            code=INVALID_PARENT_TYPE_CODE,
+            title="Button menu cannot be a parent",
+            detail=f"父菜单 id={parent_id} 是按钮(F)，不能作为父节点",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _type_has_children(item_id: int) -> AppError:
+        return AppError(
+            code=TYPE_HAS_CHILDREN_CODE,
+            title="Cannot change to button: menu has children",
+            detail=f"菜单 id={item_id} 有子菜单，不能改成按钮(F)",
             status_code=409,
         )

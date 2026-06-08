@@ -20,7 +20,6 @@ domains），但 domains 的**实现**可以反向依赖 authz 抽象 —— 这
 from __future__ import annotations
 
 from anyio.from_thread import run as run_in_host_loop
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.authz.providers import MenuNode, MenuProvider
 from admin_platform.db.session import db_session
@@ -77,21 +76,23 @@ class DbMenuProvider(MenuProvider):
     # ---- 异步内核（可直接 await 单测）----
 
     async def a_get_user_menu_tree(self, user_id: int) -> list[MenuNode]:
-        """超管取全部 active 菜单建树；非超管取经 role_menus 可见的 active 菜单建树。"""
+        """超管取全部 active 菜单建树；非超管取经 role_menus 可见的 active 菜单建树。
+
+        账号状态校验（Codex 深审 F1 + spec §2.3 不绕过账号状态）：停用 / 不存在账号不下发
+        任何菜单 —— 撤权（停用账号）后旧 token 不应再经 getRouters 看到菜单树。先一次性查
+        user，active 校验覆盖超管 + 非超管两条路径。
+        """
         async with db_session() as session:
+            user = await UserRepository(session).get(user_id)
+            if user is None or user.status != "active":
+                return []
             menu_repo = MenuRepository(session)
-            if await self._a_is_super_admin(session, user_id):
+            if user.is_super_admin:
                 menus = await menu_repo.list_all_active()
             else:
                 visible_ids = await menu_repo.list_menu_ids_for_user(user_id)
                 menus = await menu_repo.list_active_by_ids(visible_ids)
             return assemble_menu_forest(menus)
-
-    @staticmethod
-    async def _a_is_super_admin(session: AsyncSession, user_id: int) -> bool:
-        """查 ``users.is_super_admin AND status=active``；用户不存在视作非超管（安全 deny）。"""
-        user = await UserRepository(session).get(user_id)
-        return bool(user is not None and user.is_super_admin and user.status == "active")
 
     # ---- 失效语义（P1 无缓存，no-op；接口先冻结，P2 接 Redis 时实现）----
 
