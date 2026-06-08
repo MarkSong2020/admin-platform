@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from admin_platform.audit.emit import build_audit_event, emit_audit
+from admin_platform.audit.events import AuditActor, AuditResult, AuditTarget
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AUTH_LOGIN_FAILED, AppError
 from admin_platform.core.security import issue_access_token, verify_password
@@ -50,6 +52,21 @@ async def login(username: str, password: str) -> LoginResponse:
         password_ok = verify_password(password, password_hash)
 
         if active_user is None or not password_ok:
+            # 审计：登录失败（spec §13.3 三类事件之一）。防枚举——不暴露「用户是否存在」，
+            # 只把尝试的 username 记进 target.display；actor 留空（尚未确立身份）。
+            emit_audit(
+                build_audit_event(
+                    event_type="login_failed",
+                    action="auth.login",
+                    title="登录失败",
+                    actor=AuditActor(),
+                    target=AuditTarget(type="user", display=username),
+                    result=AuditResult(
+                        status="failure", http_status=401, error_code=AUTH_LOGIN_FAILED
+                    ),
+                    risk_level="medium",
+                )
+            )
             raise _login_failed()
 
         token = issue_access_token(user_id=active_user.id, username=active_user.username)
