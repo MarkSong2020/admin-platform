@@ -122,9 +122,10 @@ class Settings(BaseSettings):
             "/openapi.json",
             "/api/v1/auth/login",
             # P1.4：refresh 时 access 可能已过期（这正是 refresh 目的）；logout 凭 refresh token
-            # 撤销，无需 access。故两者免 token（校验在 refresh token 本身）。
+            # 撤销，无需 access；captcha 在登录前获取。故均免 token（校验在 token / 验证码本身）。
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
+            "/api/v1/auth/captcha",
         ]
     )
     # access token 存活时长（秒）。P0 只签发 access token，不做 refresh，
@@ -141,6 +142,15 @@ class Settings(BaseSettings):
     auth_refresh_absolute_ttl_seconds: int = Field(default=2592000, ge=300)  # 30d
     # 并发登录上限：按 family 数（一次登录=一 family）。⚠️ 数值待用户确认（decision-log §3）。
     auth_refresh_max_sessions_per_user: int = Field(default=5, ge=1)
+
+    # ---- P1.4 验证码 + 登录限流（依赖 Redis；Q14 联动，decision-log §1.4/1.5）----
+    auth_captcha_ttl_seconds: int = Field(default=120, ge=30)  # 验证码 Redis TTL
+    # 登录失败限流（组合维度 user+ip）。⚠️ 阈值/锁定数值待确认（decision-log §3）。
+    auth_login_fail_window_seconds: int = Field(default=600, ge=60)  # 失败计数窗口
+    auth_login_captcha_threshold: int = Field(default=3, ge=1)  # 失败≥此 → 要求验证码
+    auth_login_lock_threshold: int = Field(default=5, ge=1)  # 失败≥此 → 账号软锁
+    auth_login_lock_seconds: int = Field(default=600, ge=60)  # 软锁时长
+    auth_login_ip_limit: int = Field(default=30, ge=1)  # IP 维度窗口上限 → 429
 
     @field_validator("database_url")
     @classmethod

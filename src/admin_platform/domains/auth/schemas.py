@@ -10,6 +10,18 @@ class LoginRequest(BaseModel):
 
     username: str = Field(max_length=64, description="用户名（全局唯一）")
     password: str = Field(max_length=256, description="明文密码")
+    captcha_id: str | None = Field(
+        default=None, max_length=64, description="验证码ID（失败N次后需要）"
+    )
+    captcha_answer: str | None = Field(default=None, max_length=16, description="验证码答案")
+
+
+class CaptchaResponse(BaseModel):
+    """验证码响应（算术文本，spec §1.4）。"""
+
+    captcha_id: str = Field(description="验证码ID（登录时回传）")
+    question: str = Field(description="算术题（如 '3 + 5 = ?'）")
+    expires_in: int = Field(description="验证码存活秒数")
 
 
 class LoginResponse(BaseModel):
