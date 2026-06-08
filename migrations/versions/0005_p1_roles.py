@@ -117,9 +117,12 @@ def upgrade() -> None:
     op.create_foreign_key(
         "fk_users_dept", "users", "depts", ["dept_id"], ["id"], ondelete="SET NULL"
     )
+    # dept_id 索引（Codex 深审）：部门删除 SET NULL 定位用户行 + data_scope 本部门按 dept_id 查。
+    op.create_index("ix_users_dept_id", "users", ["dept_id"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_index("ix_users_dept_id", table_name="users")
     op.drop_constraint("fk_users_dept", "users", type_="foreignkey")
     op.drop_column("users", "dept_id")
     op.drop_index("ix_role_depts_role", table_name="role_depts")

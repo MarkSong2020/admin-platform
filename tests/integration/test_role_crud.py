@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -247,9 +248,14 @@ async def test_effective_scope_self_sets_include_self(client: AsyncClient) -> No
 # ---- sync→async 桥（真 HTTP 路径，真实 DbPermissionProvider）----------------
 
 
-async def _seed_user(*, username: str, is_super_admin: bool) -> int:
+async def _seed_user(*, username: str, is_super_admin: bool, status: str = "active") -> int:
     async with db_session() as session:
-        user = User(username=username, password_hash="x", is_super_admin=is_super_admin)
+        user = User(
+            username=username,
+            password_hash="x",
+            is_super_admin=is_super_admin,
+            status=status,
+        )
         session.add(user)
         await session.flush()
         return user.id
@@ -285,3 +291,58 @@ async def test_real_provider_non_superadmin_bridge_denies() -> None:
     assert res.status_code == 403
     assert res.json()["type"] == "auth.FORBIDDEN_BY_ROLE"
     await dispose_engine()
+
+
+async def test_real_provider_disabled_superadmin_denied() -> None:
+    # Codex 深审 F4 / spec §2.3：停用账号即使 is_super_admin=True 也不享超管短路 → 403。
+    uid = await _seed_user(username="root-disabled", is_super_admin=True, status="disabled")
+    async with _build_real_provider_client(uid) as c:
+        res = await c.get("/api/v1/roles")
+    assert res.status_code == 403
+    await dispose_engine()
+
+
+# ---- Codex 深审 F1：停用角色不参与授权（O2 归一前已被排除）-------------------
+
+
+async def test_effective_scope_excludes_disabled_role(client: AsyncClient) -> None:
+    # 一个 disabled 且 data_scope=all 的角色不得触发整体 ALL（停用即撤权，不留后门）。
+    async with db_session() as session:
+        user = User(username="u-disabled-role", password_hash="x")
+        session.add(user)
+        disabled_all = Role(name="da", code="da", data_scope="all", status="disabled")
+        session.add(disabled_all)
+        await session.flush()
+        uid, rid = user.id, disabled_all.id
+        await RoleRepository(session).set_user_roles(uid, [rid])
+    scope = await _effective_scope(uid)
+    assert scope.scope_type is not ScopeType.ALL
+    assert scope.visible_dept_ids == frozenset()
+    assert scope.include_self is False
+
+
+# ---- Codex 深审 F3：绑定全量替换并发 last-writer-wins（advisory lock 串行化）---
+
+
+async def test_set_user_roles_concurrent_last_writer_wins(client: AsyncClient) -> None:
+    # 两请求并发把同一 user 的角色分别替换为 [r1] / [r2]：advisory lock 串行化后最终恰好
+    # 一个角色（last-writer-wins），而非并集 [r1, r2]，也不撞 uq_user_roles。
+    async with db_session() as session:
+        user = User(username="u-concurrent", password_hash="x")
+        session.add(user)
+        r1 = Role(name="r1", code="cc1", data_scope="self")
+        r2 = Role(name="r2", code="cc2", data_scope="self")
+        session.add_all([r1, r2])
+        await session.flush()
+        uid, rid1, rid2 = user.id, r1.id, r2.id
+
+    async def _replace(role_id: int) -> None:
+        async with db_session() as session:
+            await RoleRepository(session).set_user_roles(uid, [role_id])
+
+    await asyncio.gather(_replace(rid1), _replace(rid2))
+
+    async with db_session() as session:
+        roles = await RoleRepository(session).list_roles_for_user(uid)
+    assert len(roles) == 1
+    assert roles[0].id in {rid1, rid2}

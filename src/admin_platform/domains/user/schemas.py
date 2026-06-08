@@ -20,6 +20,7 @@ class UserCreate(BaseModel):
         min_length=1, max_length=256, description="明文密码（入库前 argon2 哈希）"
     )
     nickname: str = Field(default="", max_length=64, description="昵称")
+    dept_id: int | None = Field(default=None, description="所属部门ID(None=未分配)")
 
 
 class UserUpdate(BaseModel):
@@ -31,6 +32,7 @@ class UserUpdate(BaseModel):
     password: str | None = Field(
         default=None, min_length=1, max_length=256, description="传值则改密（重新哈希）"
     )
+    dept_id: int | None = Field(default=None, description="所属部门ID(None=未分配)")
 
 
 class UserRead(BaseModel):
@@ -42,6 +44,7 @@ class UserRead(BaseModel):
     nickname: str
     status: str
     is_super_admin: bool
+    dept_id: int | None
 
 
 class UserPage(BaseModel):

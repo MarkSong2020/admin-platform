@@ -43,6 +43,7 @@ class UserRepository:
             username=payload.username,
             password_hash=password_hash,
             nickname=payload.nickname,
+            dept_id=payload.dept_id,
         )
         self._session.add(obj)
         await self._session.flush()
