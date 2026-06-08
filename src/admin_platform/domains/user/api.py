@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
@@ -34,11 +35,11 @@ PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:user:{action}：list/query/add/edit/remove。
-ListGuard = Annotated[CurrentUser, Depends(require_permission("system:user:list"))]
-QueryGuard = Annotated[CurrentUser, Depends(require_permission("system:user:query"))]
-AddGuard = Annotated[CurrentUser, Depends(require_permission("system:user:add"))]
-EditGuard = Annotated[CurrentUser, Depends(require_permission("system:user:edit"))]
-RemoveGuard = Annotated[CurrentUser, Depends(require_permission("system:user:remove"))]
+ListGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_USER_LIST))]
+QueryGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_USER_QUERY))]
+AddGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_USER_ADD))]
+EditGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_USER_EDIT))]
+RemoveGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_USER_REMOVE))]
 
 # 受守卫端点都可能返回 401（未登录）/ 403（缺权限）—— 声明进 OpenAPI。
 AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {

@@ -33,6 +33,8 @@ _EXTRA_FIELDS = (
     "path",
     "status_code",
     "duration_ms",
+    # 审计事件（spec §13.3）：emit_audit 把 audit_event.v1 嵌在此字段，JSON 日志整体输出。
+    "audit_event",
 )
 
 

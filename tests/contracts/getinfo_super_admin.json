@@ -1,0 +1,12 @@
+{
+  "user": {
+    "id": 1,
+    "username": "root",
+    "nickname": "超级管理员",
+    "status": "active",
+    "is_super_admin": true,
+    "dept_id": null
+  },
+  "roles": ["superadmin"],
+  "permissions": ["*:*:*"]
+}
