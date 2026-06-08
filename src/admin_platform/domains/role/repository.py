@@ -8,11 +8,17 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.domains.role.models import Role, RoleDept, UserRole
 from admin_platform.domains.role.schemas import RoleCreate, RoleUpdate
+
+# pg_advisory_xact_lock 的稳定 key —— 串行化绑定表「先删后插」的全量替换（Codex 深审 F3）：
+# 并发两请求替换同一目标时，避免最终变成两请求的并集 / 撞 uq。事务级锁，提交/回滚自动释放。
+# 与 dept 的 _DEPT_TREE_LOCK_KEY(478221) 取不同值避免跨域互锁。绑定是低频管理写，全局串行可接受。
+_USER_ROLES_LOCK_KEY = 478231  # 串行化 user_roles 替换
+_ROLE_DEPTS_LOCK_KEY = 478232  # 串行化 role_depts 替换
 
 
 class RoleRepository:
@@ -65,11 +71,17 @@ class RoleRepository:
     # ---- RBAC 关联查询（供 provider O2 归一）----------------------------------
 
     async def list_roles_for_user(self, user_id: int) -> list[Role]:
-        """用户拥有的全部角色（JOIN ``user_roles``，各带 data_scope）。"""
+        """用户拥有的**生效**角色（JOIN ``user_roles``，各带 data_scope）。
+
+        只返回 ``status == "active"`` 的角色（Codex 深审 F1）：停用角色不参与授权——
+        否则一个 disabled 且 ``data_scope="all"`` 的角色仍会触发 O2 整体 ALL，形成
+        「停用即撤权」失效的隐藏后门（对标若依停用角色不授权）。授权读取的唯一入口
+        在此过滤，provider / 未来 get_user_permissions 都拿不到停用角色。
+        """
         stmt = (
             select(Role)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id)
+            .where(UserRole.user_id == user_id, Role.status == "active")
             .order_by(Role.id)
         )
         result = await self._session.execute(stmt)
@@ -84,7 +96,15 @@ class RoleRepository:
     # ---- 绑定写（全量替换，先删后插）----------------------------------------
 
     async def set_user_roles(self, user_id: int, role_ids: list[int]) -> None:
-        """全量替换用户的角色绑定（去重；空列表 = 解绑所有角色）。"""
+        """全量替换用户的角色绑定（去重；空列表 = 解绑所有角色）。
+
+        先取事务级 advisory lock 串行化「先删后插」（Codex 深审 F3）：并发两请求替换
+        同一/不同用户的绑定时，避免最终落成两请求的并集或撞 ``uq_user_roles``。提交/回滚
+        自动释放锁。
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_USER_ROLES_LOCK_KEY)
+        )
         await self._session.execute(delete(UserRole).where(UserRole.user_id == user_id))
         await self._session.flush()
         for role_id in dict.fromkeys(role_ids):
@@ -92,7 +112,13 @@ class RoleRepository:
         await self._session.flush()
 
     async def set_role_depts(self, role_id: int, dept_ids: list[int]) -> None:
-        """全量替换角色的自定义部门绑定（去重；空列表 = 清空自定义部门）。"""
+        """全量替换角色的自定义部门绑定（去重；空列表 = 清空自定义部门）。
+
+        同 ``set_user_roles``：事务级 advisory lock 串行化「先删后插」（Codex 深审 F3）。
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_ROLE_DEPTS_LOCK_KEY)
+        )
         await self._session.execute(delete(RoleDept).where(RoleDept.role_id == role_id))
         await self._session.flush()
         for dept_id in dict.fromkeys(dept_ids):

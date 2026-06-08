@@ -103,10 +103,15 @@ class DbPermissionProvider(PermissionProvider):
     # ---- 异步内核（可直接 await 单测）----
 
     async def a_get_is_super_admin(self, user_id: int) -> bool:
-        """查 ``users.is_super_admin``（信任根布尔）；用户不存在视作非超管（安全 deny）。"""
+        """查 ``users.is_super_admin``（信任根布尔）；用户不存在视作非超管（安全 deny）。
+
+        额外校验账号状态（Codex 深审 F4 + spec §2.3「超管短路不绕过账号状态」）：停用账号
+        （``status != "active"``）即使 ``is_super_admin=True`` 也**不**短路 —— 否则被停用的超管
+        在 token 过期前仍能凭旧 token 走短路通过所有权限校验。
+        """
         async with db_session() as session:
             user = await UserRepository(session).get(user_id)
-            return bool(user.is_super_admin) if user is not None else False
+            return bool(user is not None and user.is_super_admin and user.status == "active")
 
     async def a_get_effective_data_scope(self, user_id: int) -> DataScope:
         """开 session 装配三个 repository，调 ``compute_effective_data_scope`` 做 O2 归一。"""

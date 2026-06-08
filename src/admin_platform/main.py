@@ -21,8 +21,11 @@ from admin_platform.core.idempotency import IdempotencyMiddleware, RedisIdempote
 from admin_platform.core.logging import configure_logging
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.observability import init_observability, shutdown_observability
+from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine, get_engine
 from admin_platform.domains.dept.api import router as dept_router
+from admin_platform.domains.role.api import router as role_router
+from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.user.api import router as user_router
 
 # ADR 0001 §1：这些状态码上的错误响应必须符合 ProblemDetail 形状。
@@ -166,7 +169,12 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(user_router)
     app.include_router(dept_router)
+    app.include_router(role_router)
     # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
+    # RBAC PermissionProvider 接线（组合根）：core/permissions.get_permission_provider 默认
+    # fail-closed 抛错（M2 占位），此处经 dependency_overrides 注入真实 DB 版 DbPermissionProvider。
+    # 在组合根注入而非让 core import domains —— 避免 core→domains 耦合（M2 设计意图）。
+    app.dependency_overrides[get_permission_provider] = DbPermissionProvider
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app
 
