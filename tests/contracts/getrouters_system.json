@@ -1,0 +1,22 @@
+[
+  {
+    "name": "System",
+    "path": "/system",
+    "hidden": false,
+    "component": "Layout",
+    "redirect": "noRedirect",
+    "alwaysShow": true,
+    "meta": {"title": "系统管理", "icon": "system", "noCache": false, "link": null},
+    "children": [
+      {
+        "name": "User",
+        "path": "user",
+        "hidden": false,
+        "component": "system/user/index",
+        "redirect": null,
+        "alwaysShow": false,
+        "meta": {"title": "用户管理", "icon": "user", "noCache": false, "link": null}
+      }
+    ]
+  }
+]

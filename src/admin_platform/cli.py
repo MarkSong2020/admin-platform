@@ -33,6 +33,7 @@ from admin_platform.core.security import hash_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.user.models import User
+from admin_platform.rbac.seed import SeedResult, seed_rbac
 
 _ACTIVE = "active"
 _MIN_PASSWORD_LEN = 12
@@ -103,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
         "create-super-admin", help="创建超级管理员（密码从 ADMIN_BOOTSTRAP_PASSWORD 读）"
     )
     create_parser.add_argument("--username", required=True)
+    rbac_parser = subparsers.add_parser("rbac", help="RBAC 数据管理")
+    rbac_sub = rbac_parser.add_subparsers(dest="rbac_command", required=True)
+    rbac_sub.add_parser("seed", help="幂等 seed 内置菜单/权限/角色（spec §13.1，可重跑）")
     args = parser.parse_args(argv)
 
     if args.command == "create-super-admin":
@@ -117,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"created super admin: id={user_id} username={args.username}")
         return 0
+    if args.command == "rbac" and args.rbac_command == "seed":
+        result = asyncio.run(_run_seed())
+        print(
+            f"rbac seed ok: roles={result.roles_upserted} "
+            f"menus_upserted={result.menus_upserted} menus_pruned={result.menus_pruned}"
+        )
+        return 0
     return 2  # 不可达：argparse required=True 已挡住无子命令
 
 
@@ -124,6 +135,15 @@ async def _run_create(username: str) -> int:
     """main 的 async 包装：创建后释放 engine（CLI 进程一次性使用）。"""
     try:
         return await create_super_admin(username)
+    finally:
+        await dispose_engine()
+
+
+async def _run_seed() -> SeedResult:
+    """main 的 async 包装：幂等 seed RBAC manifest 后释放 engine。"""
+    try:
+        async with db_session() as session:
+            return await seed_rbac(session)
     finally:
         await dispose_engine()
 

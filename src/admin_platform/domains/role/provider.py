@@ -94,6 +94,9 @@ class DbPermissionProvider(PermissionProvider):
     def get_is_active(self, user_id: int) -> bool:
         return run_in_host_loop(self.a_get_is_active, user_id)
 
+    def get_user_role_codes(self, user_id: int) -> frozenset[str]:
+        return run_in_host_loop(self.a_get_user_role_codes, user_id)
+
     def get_is_super_admin(self, user_id: int) -> bool:
         return run_in_host_loop(self.a_get_is_super_admin, user_id)
 
@@ -141,6 +144,12 @@ class DbPermissionProvider(PermissionProvider):
         """
         async with db_session() as session:
             return await MenuRepository(session).list_perms_for_user(user_id)
+
+    async def a_get_user_role_codes(self, user_id: int) -> frozenset[str]:
+        """用户生效角色的 code 集（getInfo 展示，§6.1）；停用角色不计（list_roles_for_user 已滤）。"""
+        async with db_session() as session:
+            roles = await RoleRepository(session).list_roles_for_user(user_id)
+            return frozenset(r.code for r in roles)
 
     # ---- 失效语义（P1 无缓存，no-op；接口先冻结，P2 接 Redis 时实现）----
 

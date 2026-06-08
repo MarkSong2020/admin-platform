@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from admin_platform.api.v1.auth import router as auth_router
 from admin_platform.api.v1.health import router as health_router
+from admin_platform.api.v1.rbac import router as rbac_router
 from admin_platform.core.auth import AuthMiddleware, get_auth_config
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import ProblemDetail, register_exception_handlers
@@ -21,10 +22,11 @@ from admin_platform.core.idempotency import IdempotencyMiddleware, RedisIdempote
 from admin_platform.core.logging import configure_logging
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.observability import init_observability, shutdown_observability
-from admin_platform.core.permissions import get_permission_provider
+from admin_platform.core.permissions import get_menu_provider, get_permission_provider
 from admin_platform.db.engine import dispose_engine, get_engine
 from admin_platform.domains.dept.api import router as dept_router
 from admin_platform.domains.menu.api import router as menu_router
+from admin_platform.domains.menu.provider import DbMenuProvider
 from admin_platform.domains.post.api import router as post_router
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.provider import DbPermissionProvider
@@ -174,11 +176,13 @@ def create_app() -> FastAPI:
     app.include_router(role_router)
     app.include_router(menu_router)
     app.include_router(post_router)
+    app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
     # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
-    # RBAC PermissionProvider 接线（组合根）：core/permissions.get_permission_provider 默认
-    # fail-closed 抛错（M2 占位），此处经 dependency_overrides 注入真实 DB 版 DbPermissionProvider。
-    # 在组合根注入而非让 core import domains —— 避免 core→domains 耦合（M2 设计意图）。
+    # RBAC Provider 接线（组合根）：core 的 get_permission_provider / get_menu_provider 默认
+    # fail-closed 抛错（占位），此处经 dependency_overrides 注入真实 DB 版 Provider。
+    # 在组合根注入而非让 core import domains —— 避免 core→domains 耦合。
     app.dependency_overrides[get_permission_provider] = DbPermissionProvider
+    app.dependency_overrides[get_menu_provider] = DbMenuProvider
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app
 
