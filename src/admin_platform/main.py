@@ -25,6 +25,7 @@ from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine, get_engine
 from admin_platform.domains.dept.api import router as dept_router
 from admin_platform.domains.menu.api import router as menu_router
+from admin_platform.domains.post.api import router as post_router
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.user.api import router as user_router
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(dept_router)
     app.include_router(role_router)
     app.include_router(menu_router)
+    app.include_router(post_router)
     # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
     # RBAC PermissionProvider 接线（组合根）：core/permissions.get_permission_provider 默认
     # fail-closed 抛错（M2 占位），此处经 dependency_overrides 注入真实 DB 版 DbPermissionProvider。
