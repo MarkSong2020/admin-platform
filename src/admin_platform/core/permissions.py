@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from admin_platform.authz.permissions import ALL_PERMISSIONS
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
@@ -27,6 +28,10 @@ from admin_platform.core.errors import (
     AUTH_FORBIDDEN_BY_ROLE,
     AppError,
 )
+
+# 路由实际使用的权限点集（require_permission 调用时登记，spec §13.2 三组集合之②）。
+# 装饰器在各 api 模块 import 时执行 → 导入全部域 api 后本集合即「路由用集」，供契约机检。
+USED_PERMISSIONS: set[str] = set()
 
 
 def get_permission_provider() -> PermissionProvider:
@@ -51,6 +56,14 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
             user: CurrentUser = Depends(require_permission("system:user:list")),
         ): ...
     """
+
+    # registry 真相源校验（spec §13.2）：路由只能用已注册的权限点，否则 fail-fast（防悬空 /
+    # 拼错权限点变成永远无人拥有的死守卫）。同时登记到 USED_PERMISSIONS 供三组集合契约机检。
+    if perm not in ALL_PERMISSIONS:
+        raise ValueError(
+            f"未注册的权限点 {perm!r}：必须先在 authz.permissions.Permissions 声明（spec §13.2）"
+        )
+    USED_PERMISSIONS.add(perm)
 
     def _dep(
         base_user: Annotated[CurrentUser, Depends(require_current_user)],
