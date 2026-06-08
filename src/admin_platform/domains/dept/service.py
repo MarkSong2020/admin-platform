@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
-from admin_platform.authz.scope import DataScope, ScopeType
-from admin_platform.core.errors import AppError
+from admin_platform.authz.data_scope import is_dept_visible
+from admin_platform.authz.scope import DataScope
+from admin_platform.core.errors import AUTH_FORBIDDEN_BY_SCOPE, AppError
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.dept.schemas import (
     DeptCreate,
@@ -57,19 +58,16 @@ class DeptService:
 
     async def get(self, item_id: int, *, scope: DataScope | None = None) -> DeptRead:
         row = await self._repo.get(item_id)
-        if row is None:
-            raise self._not_found(item_id)
         # 数据权限（Codex 深审 F5）：非超管按 data_scope 限制可读部门——不可见时返回 NOT_FOUND
         # （不泄露存在性，与 list 同口径）。scope=None / ALL（超管 api 层）不限制。
-        if (
-            scope is not None
-            and scope.scope_type is not ScopeType.ALL
-            and row.id not in scope.visible_dept_ids
-        ):
+        if row is None or (scope is not None and not is_dept_visible(scope, row.id)):
             raise self._not_found(item_id)
         return DeptRead.model_validate(row)
 
-    async def create(self, payload: DeptCreate) -> DeptRead:
+    async def create(self, payload: DeptCreate, *, scope: DataScope | None = None) -> DeptRead:
+        # 数据权限写侧：非超管只能在可见父部门下建子部门（建根 parent=None 需 ALL，否则 403）。
+        if scope is not None and not is_dept_visible(scope, payload.parent_id):
+            raise self._forbidden_scope()
         if payload.parent_id is not None and await self._repo.get(payload.parent_id) is None:
             raise self._parent_not_found(payload.parent_id)
         if await self._repo.find_by_code(payload.code) is not None:
@@ -77,27 +75,32 @@ class DeptService:
         row = await self._repo.create(payload)
         return DeptRead.model_validate(row)
 
-    async def update(self, item_id: int, payload: DeptUpdate) -> DeptRead:
+    async def update(
+        self, item_id: int, payload: DeptUpdate, *, scope: DataScope | None = None
+    ) -> DeptRead:
         existing = await self._repo.get(item_id)
-        if existing is None:
+        if existing is None or (scope is not None and not is_dept_visible(scope, existing.id)):
+            # 数据权限不可见 = 当作不存在（不泄露存在性）。
             raise self._not_found(item_id)
         await self._check_code_unique(existing, payload)
-        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 防环
-        # 校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
+        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 数据范围 +
+        # 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
         new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else None
         if new_parent_id is not None:
             await self._repo.acquire_tree_lock()
             if await self._repo.get(new_parent_id) is None:
                 raise self._parent_not_found(new_parent_id)
+            if scope is not None and not is_dept_visible(scope, new_parent_id):
+                raise self._forbidden_scope()  # 移到数据范围外的父部门 → 403
             await self._check_no_cycle(item_id, payload)
         row = await self._repo.update(item_id, payload)
         if row is None:  # 并发删除兜底：预检后被他人删除
             raise self._not_found(item_id)
         return DeptRead.model_validate(row)
 
-    async def delete(self, item_id: int) -> None:
+    async def delete(self, item_id: int, *, scope: DataScope | None = None) -> None:
         row = await self._repo.get(item_id)
-        if row is None:
+        if row is None or (scope is not None and not is_dept_visible(scope, row.id)):
             raise self._not_found(item_id)
         # 树写串行化：锁内重新查子部门，避免并发把子部门移走后误判可删（与 DB RESTRICT 一致，给友好 409）。
         await self._repo.acquire_tree_lock()
@@ -169,4 +172,13 @@ class DeptService:
             title="Dept has children",
             detail=f"部门 id={item_id} 存在子部门，禁止删除",
             status_code=409,
+        )
+
+    @staticmethod
+    def _forbidden_scope() -> AppError:
+        return AppError(
+            code=AUTH_FORBIDDEN_BY_SCOPE,
+            title="Forbidden by data scope",
+            detail="目标部门不在你的数据权限范围内",
+            status_code=403,
         )

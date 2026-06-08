@@ -53,7 +53,7 @@ class _SuperAdminProvider(PermissionProvider):
 
 
 class _LimitedProvider(PermissionProvider):
-    """非超管 stub：有 system:dept:list/query 权限，data_scope 限定可见部门集合（CUSTOM_DEPT）。"""
+    """非超管 stub：有 system:dept:* 权限点，data_scope 限定可见部门集合（CUSTOM_DEPT）。"""
 
     def __init__(self, *, visible: frozenset[int]) -> None:
         self._visible = visible
@@ -62,7 +62,15 @@ class _LimitedProvider(PermissionProvider):
         return False
 
     def get_user_permissions(self, user_id: int) -> frozenset[str]:
-        return frozenset({"system:dept:list", "system:dept:query"})
+        return frozenset(
+            {
+                "system:dept:list",
+                "system:dept:query",
+                "system:dept:add",
+                "system:dept:edit",
+                "system:dept:remove",
+            }
+        )
 
     def get_effective_data_scope(self, user_id: int) -> DataScope:
         return DataScope(ScopeType.CUSTOM_DEPT, user_id=user_id, visible_dept_ids=self._visible)
@@ -245,6 +253,27 @@ async def test_get_data_scope_limits_non_superadmin(client: AsyncClient) -> None
         invisible = await lc.get(f"/api/v1/depts/{b}")
         assert invisible.status_code == 404
         assert invisible.json()["type"] == "dept.NOT_FOUND"
+
+
+async def test_write_side_data_scope_limits_non_superadmin(client: AsyncClient) -> None:
+    # Codex 系统级 PK：写侧也按 data_scope —— 非超管只能在可见部门内增/改/删。
+    a = await _create(client, code="A", name="A")  # 可见
+    b = await _create(client, code="B", name="B")  # 不可见
+    async with _build_client(_LimitedProvider(visible=frozenset({a})), user_id="2") as lc:
+        # 可见父 A 下建子 → 201
+        ok = await lc.post("/api/v1/depts", json={"name": "子", "code": "A1", "parent_id": a})
+        assert ok.status_code == 201, ok.text
+        # 不可见父 B 下建子 → 403 auth.FORBIDDEN_BY_SCOPE
+        forbidden = await lc.post("/api/v1/depts", json={"name": "x", "code": "X", "parent_id": b})
+        assert forbidden.status_code == 403
+        assert forbidden.json()["type"] == "auth.FORBIDDEN_BY_SCOPE"
+        # 建根部门（parent=None）非超管 → 403（建根需 ALL）
+        assert (
+            await lc.post("/api/v1/depts", json={"name": "根", "code": "ROOT2"})
+        ).status_code == 403
+        # 改 / 删不可见部门 B → 404（不泄露存在性）
+        assert (await lc.patch(f"/api/v1/depts/{b}", json={"name": "y"})).status_code == 404
+        assert (await lc.delete(f"/api/v1/depts/{b}")).status_code == 404
 
 
 async def test_create_nonexistent_parent_returns_404(client: AsyncClient) -> None:

@@ -64,9 +64,10 @@ POST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 
 @router.get("", operation_id="users_list", response_model=UserPage, responses=AUTH_ERROR_RESPONSES)
 async def list_users(
-    svc: ServiceDep, _user: ListGuard, page: PageQ = 1, size: SizeQ = 20
+    svc: ServiceDep, user: ListGuard, page: PageQ = 1, size: SizeQ = 20
 ) -> UserPage:
-    return await svc.list_(page=page, size=size)
+    # 非超管按 data_scope 过滤可见用户（用户按所属部门可见）；超管 data_scope=ALL 不过滤。
+    return await svc.list_(page=page, size=size, scope=user.data_scope)
 
 
 @router.get(
@@ -75,8 +76,8 @@ async def list_users(
     response_model=UserRead,
     responses=NOT_FOUND_RESPONSE,
 )
-async def get_user(user_id: int, svc: ServiceDep, _user: QueryGuard) -> UserRead:
-    return await svc.get(user_id)
+async def get_user(user_id: int, svc: ServiceDep, user: QueryGuard) -> UserRead:
+    return await svc.get(user_id, scope=user.data_scope)
 
 
 @router.post(
@@ -87,8 +88,8 @@ async def get_user(user_id: int, svc: ServiceDep, _user: QueryGuard) -> UserRead
     responses=POST_ERROR_RESPONSES,
 )
 @idempotent
-async def create_user(payload: UserCreate, svc: ServiceDep, _user: AddGuard) -> UserRead:
-    return await svc.create(payload)
+async def create_user(payload: UserCreate, svc: ServiceDep, user: AddGuard) -> UserRead:
+    return await svc.create(payload, scope=user.data_scope)
 
 
 @router.patch(
@@ -98,9 +99,9 @@ async def create_user(payload: UserCreate, svc: ServiceDep, _user: AddGuard) -> 
     responses=PATCH_ERROR_RESPONSES,
 )
 async def update_user(
-    user_id: int, payload: UserUpdate, svc: ServiceDep, _user: EditGuard
+    user_id: int, payload: UserUpdate, svc: ServiceDep, user: EditGuard
 ) -> UserRead:
-    return await svc.update(user_id, payload)
+    return await svc.update(user_id, payload, scope=user.data_scope)
 
 
 @router.delete(
@@ -109,5 +110,5 @@ async def update_user(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=NOT_FOUND_RESPONSE,
 )
-async def delete_user(user_id: int, svc: ServiceDep, _user: RemoveGuard) -> None:
-    await svc.delete(user_id)
+async def delete_user(user_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
+    await svc.delete(user_id, scope=user.data_scope)

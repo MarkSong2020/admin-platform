@@ -54,10 +54,12 @@ class _StubRepo:
     async def get(self, user_id: int) -> User | None:
         return self.get_row
 
-    async def list_paginated(self, page: int, size: int) -> list[User]:
+    async def list_paginated(
+        self, page: int, size: int, *, scope: object | None = None
+    ) -> list[User]:
         return self.rows
 
-    async def count(self) -> int:
+    async def count(self, *, scope: object | None = None) -> int:
         return len(self.rows)
 
     async def count_super_admins(self) -> int:
@@ -118,7 +120,9 @@ async def test_list_returns_page() -> None:
 
 @pytest.mark.asyncio
 async def test_update_existing_returns_user() -> None:
-    out = await _svc(_StubRepo(updated=_user(5, "carol", nickname="Carol"))).update(
+    # update 现在总是先 get（数据权限可见性校验），故 stub 需提供 get_row（现有行）。
+    carol = _user(5, "carol", nickname="Carol")
+    out = await _svc(_StubRepo(get_row=carol, updated=carol)).update(
         5, UserUpdate(nickname="Carol")
     )
     assert out.id == 5
@@ -128,7 +132,8 @@ async def test_update_existing_returns_user() -> None:
 @pytest.mark.asyncio
 async def test_update_with_password_rehashes() -> None:
     # 覆盖 update 里 payload.password 非 None → hash_password 分支。
-    out = await _svc(_StubRepo(updated=_user(5, "carol"))).update(
+    carol = _user(5, "carol")
+    out = await _svc(_StubRepo(get_row=carol, updated=carol)).update(
         5, UserUpdate(password="new-strong-password")
     )
     assert out.id == 5

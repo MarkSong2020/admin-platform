@@ -113,8 +113,9 @@ async def get_dept(item_id: int, svc: ServiceDep, user: QueryGuard) -> DeptRead:
     responses=IDEMPOTENT_POST_ERROR_RESPONSES,
 )
 @idempotent
-async def create_dept(payload: DeptCreate, svc: ServiceDep, _user: AddGuard) -> DeptRead:
-    return await svc.create(payload)
+async def create_dept(payload: DeptCreate, svc: ServiceDep, user: AddGuard) -> DeptRead:
+    # 非超管只能在可见父部门下建子部门（数据权限写侧）；超管 data_scope=ALL 不限制。
+    return await svc.create(payload, scope=user.data_scope)
 
 
 @router.patch(
@@ -124,9 +125,9 @@ async def create_dept(payload: DeptCreate, svc: ServiceDep, _user: AddGuard) -> 
     responses=PATCH_ERROR_RESPONSES,
 )
 async def update_dept(
-    item_id: int, payload: DeptUpdate, svc: ServiceDep, _user: EditGuard
+    item_id: int, payload: DeptUpdate, svc: ServiceDep, user: EditGuard
 ) -> DeptRead:
-    return await svc.update(item_id, payload)
+    return await svc.update(item_id, payload, scope=user.data_scope)
 
 
 @router.delete(
@@ -135,5 +136,5 @@ async def update_dept(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=DELETE_ERROR_RESPONSES,
 )
-async def delete_dept(item_id: int, svc: ServiceDep, _user: RemoveGuard) -> None:
-    await svc.delete(item_id)
+async def delete_dept(item_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
+    await svc.delete(item_id, scope=user.data_scope)
