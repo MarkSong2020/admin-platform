@@ -32,6 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from admin_platform.core.security import hash_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth.repository import RefreshTokenRepository
 from admin_platform.domains.user.models import User
 from admin_platform.rbac.seed import SeedResult, seed_rbac
 
@@ -107,6 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     rbac_parser = subparsers.add_parser("rbac", help="RBAC 数据管理")
     rbac_sub = rbac_parser.add_subparsers(dest="rbac_command", required=True)
     rbac_sub.add_parser("seed", help="幂等 seed 内置菜单/权限/角色（spec §13.1，可重跑）")
+    auth_parser = subparsers.add_parser("auth", help="认证数据管理")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", required=True)
+    auth_sub.add_parser(
+        "cleanup-refresh-tokens", help="物理删除已过期 refresh token（P1.4，运维/cron 调度）"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "create-super-admin":
@@ -128,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
             f"menus_upserted={result.menus_upserted} menus_pruned={result.menus_pruned}"
         )
         return 0
+    if args.command == "auth" and args.auth_command == "cleanup-refresh-tokens":
+        deleted = asyncio.run(_run_cleanup_refresh_tokens())
+        print(f"cleanup-refresh-tokens ok: deleted={deleted}")
+        return 0
     return 2  # 不可达：argparse required=True 已挡住无子命令
 
 
@@ -144,6 +154,15 @@ async def _run_seed() -> SeedResult:
     try:
         async with db_session() as session:
             return await seed_rbac(session)
+    finally:
+        await dispose_engine()
+
+
+async def _run_cleanup_refresh_tokens() -> int:
+    """main 的 async 包装：物理删除已过期 refresh token 后释放 engine。"""
+    try:
+        async with db_session() as session:
+            return await RefreshTokenRepository(session).delete_expired()
     finally:
         await dispose_engine()
 

@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.audit.emit import build_audit_event, emit_audit
+from admin_platform.audit.events import AuditActor, AuditResult
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import (
     AUTH_REFRESH_TOKEN_INVALID,
@@ -127,6 +129,19 @@ async def rotate_refresh_token(session: AsyncSession, *, raw_token: str) -> Rota
     # reuse detection：已轮换过的 token 再被使用 → token theft，撤销整个 family。
     if row.rotated_to_jti is not None or row.revoked_reason == "reuse_detected":
         await repo.revoke_family(row.family_id, reason="reuse_detected", now=now)
+        # 审计：token theft 高风险信号（spec §13.3，audit_event.v1 EventType 演进）。
+        emit_audit(
+            build_audit_event(
+                event_type="refresh_reused",
+                action="auth.refresh",
+                title="refresh token 重用检测",
+                actor=AuditActor(user_id=row.user_id),
+                result=AuditResult(
+                    status="denied", http_status=401, error_code=AUTH_REFRESH_TOKEN_REUSED
+                ),
+                risk_level="high",
+            )
+        )
         raise AppError(
             code=AUTH_REFRESH_TOKEN_REUSED,
             title="Refresh token reused",
