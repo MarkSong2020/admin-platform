@@ -111,6 +111,11 @@ markers = [
 [tool.coverage.run]
 source = ["src"]
 branch = true
+# repository.py 是薄 SQL 数据访问层：CI fast lane（make coverage = unit+api）故意 DB-free，
+# 结构上覆盖不到真实 DB 查询（含集成的全量覆盖实测 96%，repository 各 93%+）。仓库覆盖改由
+# integration 测（make test-integration）+ DoD §9「每域强制集成测」保障，从 fast-lane coverage
+# gate omit，避免 DB-bound 业务域增多时门禁随结构性盲区误降（2026-06-08 menu 域落地时与用户确认）。
+omit = ["*/repository.py"]
 
 [tool.coverage.report]
 show_missing = true

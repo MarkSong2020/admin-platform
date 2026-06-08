@@ -15,15 +15,26 @@ from admin_platform.authz.scope import DataScope
 
 @dataclass(frozen=True)
 class MenuNode:
-    """动态菜单节点（菜单树最小形态，供前端动态路由 / 按钮权限渲染）。
+    """动态菜单节点（菜单树，供前端动态路由 / 按钮权限渲染），是 ``getRouters`` payload 的数据源。
 
-    ``perms`` 为该节点对应的权限标识（按钮 / 菜单级），目录类节点可为 None。
+    字段为 ``getRouters`` 映射（``routers.build_routers``）所需的全部菜单元数据：
+      * ``menu_type`` —— ``M`` 目录 / ``C`` 菜单 / ``F`` 按钮；按钮不进路由树（只承载 ``perms``）。
+      * ``component`` —— 前端组件路径（目录无 component → ``Layout``，由映射层补默认）。
+      * ``perms`` —— 该节点对应的权限标识（按钮 / 菜单级），目录类节点可为 None。
+      * ``icon`` —— 菜单图标（映射到 ``meta.icon``）。
+      * ``visible`` —— 是否在侧边栏显示（``getRouters`` 的 ``hidden = not visible``）。
+
+    可选字段都带默认值，纯展示型调用（如测试）只填 ``id/name/path`` 即可构造。
     """
 
     id: int
     name: str
     path: str
+    menu_type: str = "C"
+    component: str | None = None
     perms: str | None = None
+    icon: str = ""
+    visible: bool = True
     children: tuple[MenuNode, ...] = ()
 
 
