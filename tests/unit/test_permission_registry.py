@@ -16,6 +16,7 @@ import re
 import admin_platform.domains as _domains_pkg
 from admin_platform.authz.permissions import ALL_PERMISSIONS, FRONTEND_ONLY, Permissions
 from admin_platform.core.permissions import USED_PERMISSIONS
+from admin_platform.rbac.seed import MENU_TREE, SeedMenu
 
 _PERM_RE = re.compile(r"^system:[a-z]+:[a-z]+$")
 
@@ -58,4 +59,25 @@ def test_registry_has_no_dangling_perm() -> None:
     dangling = ALL_PERMISSIONS - USED_PERMISSIONS - FRONTEND_ONLY
     assert not dangling, (
         f"registry 有悬空权限点（无任何路由使用且未列入 FRONTEND_ONLY）：{dangling}"
+    )
+
+
+def test_permission_menu_contract() -> None:
+    """三组集合之③：seed manifest 菜单 perms 与 registry 一致（§13.2，纯 manifest 走查，DB-free）。"""
+
+    def walk(nodes: tuple[SeedMenu, ...]) -> set[str]:
+        out: set[str] = set()
+        for n in nodes:
+            if n.perms:
+                out.add(n.perms)
+            out |= walk(n.children)
+        return out
+
+    seed_perms = walk(MENU_TREE)
+    assert seed_perms <= ALL_PERMISSIONS, (
+        f"seed 菜单引用了未注册权限点：{seed_perms - ALL_PERMISSIONS}"
+    )
+    # 超管 / 全授权角色被分配全部内置菜单后应拿到所有后端权限点 → seed 须覆盖全 registry。
+    assert seed_perms == ALL_PERMISSIONS, (
+        f"registry 有权限点未被任何 seed 菜单承载（前端无入口授予）：{ALL_PERMISSIONS - seed_perms}"
     )

@@ -25,6 +25,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +44,13 @@ class Menu(Base, IdMixin, TimestampMixin):
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_menus_not_self_parent"),
         # 按父节点取子节点并排序的复合索引（建树 / 同级排序的主查询路径）。
         Index("ix_menus_parent_sort", "parent_id", "sort_order", "id"),
+        # seed_key 部分唯一（仅非空）：rbac seed 幂等 upsert 的锚点（§13.1），保证内置菜单唯一。
+        Index(
+            "uq_menus_seed_key",
+            "seed_key",
+            unique=True,
+            postgresql_where=text("seed_key IS NOT NULL"),
+        ),
     )
 
     parent_id: Mapped[int | None] = mapped_column(
@@ -67,6 +75,9 @@ class Menu(Base, IdMixin, TimestampMixin):
     )
     status: Mapped[str] = mapped_column(
         String(16), default="active", comment="状态(active/disabled)"
+    )
+    seed_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="seed稳定键(非空=内置菜单,NULL=用户自建)"
     )
 
 
