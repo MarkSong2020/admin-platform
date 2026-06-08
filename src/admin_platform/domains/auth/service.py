@@ -17,6 +17,12 @@ from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AUTH_LOGIN_FAILED, AppError
 from admin_platform.core.security import issue_access_token, verify_password
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth.refresh_service import (
+    enforce_concurrency_limit,
+    issue_refresh_token,
+    revoke_refresh_token,
+    rotate_refresh_token,
+)
 from admin_platform.domains.auth.schemas import LoginResponse
 from admin_platform.domains.user.models import User
 
@@ -70,8 +76,41 @@ async def login(username: str, password: str) -> LoginResponse:
             raise _login_failed()
 
         token = issue_access_token(user_id=active_user.id, username=active_user.username)
+        # P1.4：签发 refresh token（新 family）+ 并发上限淘汰最旧 family（同事务）。
+        # pepper 未配时降级不发 refresh（向后兼容，同 auth_enabled/idempotency 的可选风格）——
+        # 配了 APP_AUTH_REFRESH_TOKEN_PEPPER 才启用 refresh flow。
+        issued = None
+        if get_settings().auth_refresh_token_pepper:
+            issued = await issue_refresh_token(session, user_id=active_user.id)
+            await enforce_concurrency_limit(session, user_id=active_user.id)
 
     return LoginResponse(
         access_token=token,
         expires_in=get_settings().auth_access_token_ttl_seconds,
+        refresh_token=issued.token if issued is not None else None,
+        refresh_expires_in=issued.expires_in if issued is not None else None,
     )
+
+
+async def refresh(raw_token: str) -> LoginResponse:
+    """轮换 refresh token → 新 access + 新 refresh（spec 2026-06-09 §1.3）。"""
+    async with db_session() as session:
+        result = await rotate_refresh_token(session, raw_token=raw_token)
+        user = await session.get(User, result.user_id)
+        if user is None or user.status != _ACTIVE:
+            # 用户已删/停用：撤销该 family 并拒绝（不签新 access）。
+            await revoke_refresh_token(session, raw_token=raw_token)
+            raise _login_failed()
+        access = issue_access_token(user_id=user.id, username=user.username)
+    return LoginResponse(
+        access_token=access,
+        expires_in=get_settings().auth_access_token_ttl_seconds,
+        refresh_token=result.refresh.token,
+        refresh_expires_in=result.refresh.expires_in,
+    )
+
+
+async def logout(raw_token: str) -> None:
+    """登出：按 refresh token 撤销其整个 family（幂等，token 非法也返回成功）。"""
+    async with db_session() as session:
+        await revoke_refresh_token(session, raw_token=raw_token)

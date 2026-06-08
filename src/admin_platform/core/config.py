@@ -121,6 +121,10 @@ class Settings(BaseSettings):
             "/docs",
             "/openapi.json",
             "/api/v1/auth/login",
+            # P1.4：refresh 时 access 可能已过期（这正是 refresh 目的）；logout 凭 refresh token
+            # 撤销，无需 access。故两者免 token（校验在 refresh token 本身）。
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
         ]
     )
     # access token 存活时长（秒）。P0 只签发 access token，不做 refresh，
