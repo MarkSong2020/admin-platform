@@ -171,6 +171,23 @@ async def test_move_into_descendant_rejected(client: AsyncClient) -> None:
     assert res.json()["type"] == "menu.CYCLE"
 
 
+async def test_create_under_button_parent_rejected(client: AsyncClient) -> None:
+    # Codex 深审 F5：按钮(F)不能作为父节点（否则 build_routers 过滤 F 致子树消失）。
+    btn = await _create(client, name="新增按钮", menu_type="F")
+    res = await client.post("/api/v1/menus", json={"name": "x", "menu_type": "C", "parent_id": btn})
+    assert res.status_code == 409
+    assert res.json()["type"] == "menu.INVALID_PARENT_TYPE"
+
+
+async def test_change_to_button_with_children_rejected(client: AsyncClient) -> None:
+    # Codex 深审 F5：有子菜单的目录/菜单不能改成按钮(F)。
+    cat = await _create(client, name="目录", menu_type="M")
+    await _create(client, name="子菜单", menu_type="C", parent_id=cat)
+    res = await client.patch(f"/api/v1/menus/{cat}", json={"menu_type": "F"})
+    assert res.status_code == 409
+    assert res.json()["type"] == "menu.TYPE_HAS_CHILDREN"
+
+
 # ---- 权限矩阵 5 端点 403（非超管、无权限）----------------------------------
 
 
@@ -243,6 +260,19 @@ async def test_superadmin_tree_sees_all_active_excludes_disabled(client: AsyncCl
     # 顶层只有「系统」目录，其下只有 active 的「用户」（停用页被排除）。
     assert [n.name for n in tree] == ["系统"]
     assert [c.name for c in tree[0].children] == ["用户"]
+
+
+async def test_disabled_user_gets_empty_tree() -> None:
+    # Codex 深审 F1 / spec §2.3：停用账号经 getRouters 不下发任何菜单（撤权后旧 token 不再可见）。
+    cat = await _seed_menu(name="系统", menu_type="M")
+    granted = await _seed_menu(name="用户", menu_type="C", parent_id=cat, perms="system:user:list")
+    uid = await _seed_user_role_menus(menu_ids=[cat, granted])
+    async with db_session() as session:
+        user = await session.get(User, uid)
+        assert user is not None
+        user.status = "disabled"
+    tree = await DbMenuProvider().a_get_user_menu_tree(uid)
+    assert tree == []
 
 
 async def test_non_super_tree_limited_by_role_menus() -> None:
