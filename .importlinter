@@ -29,6 +29,10 @@ layers =
     repository
 containers =
     admin_platform.domains.user
+    admin_platform.domains.dept
+    admin_platform.domains.role
+    admin_platform.domains.menu
+    admin_platform.domains.post
 
 [importlinter:contract:api-not-repository]
 name = C2 api must not import repository (composition root lives in deps.py)
@@ -82,4 +86,20 @@ source_modules =
     admin_platform.domains.*.models
 forbidden_modules =
     pydantic
+allow_indirect_imports = True
+
+# C8（authz-not-domains-core）：authz 是 RBAC 横切基础设施的被依赖方（纯类型值对象，无 IO）。
+#   它必须保持「叶子基座」地位——禁止直接 import domains 与 core，避免循环依赖
+#   （spec 2026-06-05-p1.0-rbac-mechanism §4 data_scope）。authz 自身与其子模块都受约束。
+[importlinter:contract:authz-not-domains-core]
+name = C8 authz must not import domains or core (pure base layer, avoid circular dep)
+type = forbidden
+source_modules =
+    admin_platform.authz
+    admin_platform.authz.*
+forbidden_modules =
+    admin_platform.domains
+    admin_platform.domains.*
+    admin_platform.core
+    admin_platform.core.*
 allow_indirect_imports = True

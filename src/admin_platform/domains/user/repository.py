@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.authz.data_scope import apply_data_scope
+from admin_platform.authz.scope import DataScope
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.schemas import UserCreate, UserUpdate
 
@@ -13,14 +15,23 @@ class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_paginated(self, page: int, size: int) -> list[User]:
+    async def list_paginated(
+        self, page: int, size: int, *, scope: DataScope | None = None
+    ) -> list[User]:
         offset = (page - 1) * size
-        stmt = select(User).offset(offset).limit(size).order_by(User.id)
+        stmt = select(User)
+        if scope is not None:
+            # 用户按所属部门过滤；SELF 段 = 本人记录（owner_col=User.id，即 row.id==当前用户）。
+            stmt = apply_data_scope(stmt, scope, dept_col=User.dept_id, owner_col=User.id)
+        stmt = stmt.offset(offset).limit(size).order_by(User.id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count(self) -> int:
-        result = await self._session.execute(select(func.count()).select_from(User))
+    async def count(self, *, scope: DataScope | None = None) -> int:
+        stmt = select(func.count()).select_from(User)
+        if scope is not None:
+            stmt = apply_data_scope(stmt, scope, dept_col=User.dept_id, owner_col=User.id)
+        result = await self._session.execute(stmt)
         return int(result.scalar_one())
 
     async def count_super_admins(self) -> int:
@@ -43,6 +54,7 @@ class UserRepository:
             username=payload.username,
             password_hash=password_hash,
             nickname=payload.nickname,
+            dept_id=payload.dept_id,
         )
         self._session.add(obj)
         await self._session.flush()

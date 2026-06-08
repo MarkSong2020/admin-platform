@@ -34,6 +34,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from admin_platform.authz.scope import DataScope
 from admin_platform.core import security
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AUTH_TOKEN_EXPIRED, AUTH_TOKEN_INVALID, AppError
@@ -79,11 +80,25 @@ def get_auth_config() -> AuthConfig:
 
 @dataclass(frozen=True, slots=True)
 class CurrentUser:
-    """从 JWT claims 提取的用户上下文，由 ``get_current_user()`` 注入。"""
+    """当前请求的用户上下文。
+
+    基础字段（``user_id`` / ``sub`` / ``scope``）由 ``get_optional_current_user`` /
+    ``require_current_user`` 从 JWT claims 注入。RBAC 权限上下文
+    （``is_super_admin`` / ``roles`` / ``permissions`` / ``dept_id`` / ``data_scope``）
+    **不进 JWT**（spec §3.1）：由 ``require_permission`` 依赖在请求时经
+    ``PermissionProvider`` 查 DB 填充（Q8：不缓存、改权限立即生效）；未填充时
+    保持安全默认空值（无权限、无数据范围）。
+    """
 
     user_id: str  # sub claim
     sub: str = field(compare=False)  # 等于 user_id，保留给习惯 sub 字段的调用方
     scope: str = ""
+    # ---- RBAC 权限上下文（不来自 token，由权限依赖查 DB 填充；默认安全空值）----
+    is_super_admin: bool = False
+    roles: frozenset[str] = frozenset()
+    permissions: frozenset[str] = frozenset()
+    dept_id: int | None = None
+    data_scope: DataScope | None = None
 
 
 # ---- AuthMiddleware ----
