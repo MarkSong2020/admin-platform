@@ -28,6 +28,7 @@ from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.models import User
+from admin_platform.main import create_app
 from admin_platform.rbac.seed import seed_rbac
 
 pytestmark = pytest.mark.integration
@@ -70,6 +71,15 @@ async def _seed_user(*, username: str, is_super_admin: bool = False, status: str
         session.add(user)
         await session.flush()
         return user.id
+
+
+def test_endpoints_mounted_in_create_app() -> None:
+    # Codex 风险5：回归验证 getInfo/getRouters 真挂进生产 create_app() + MenuProvider override。
+    app = create_app()
+    paths = {getattr(r, "path", "") for r in app.routes}
+    assert "/api/v1/auth/user-info" in paths
+    assert "/api/v1/menus/routers" in paths
+    assert app.dependency_overrides.get(get_menu_provider) is DbMenuProvider
 
 
 async def test_user_info_requires_auth() -> None:
@@ -134,6 +144,16 @@ async def test_non_super_user_info_derives_real() -> None:
     assert body["roles"] == ["ops"]
     assert body["permissions"] == ["system:user:query"]
     assert body["user"]["is_super_admin"] is False
+    await dispose_engine()
+
+
+async def test_disabled_account_user_info_forbidden() -> None:
+    # 停用账号 getInfo → 403（与 getRouters 空树 / require_permission 同口径，spec §2.3）。
+    admin_id = await _seed_user(username="root", is_super_admin=True, status="disabled")
+    async with _client(str(admin_id)) as c:
+        res = await c.get("/api/v1/auth/user-info")
+    assert res.status_code == 403
+    assert res.json()["type"] == "auth.ACCOUNT_DISABLED"
     await dispose_engine()
 
 

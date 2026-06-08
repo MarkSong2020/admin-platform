@@ -16,12 +16,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.authz.permissions import Permissions
 from admin_platform.domains.menu.models import Menu
 from admin_platform.domains.role.models import Role
+
+# pg_advisory_xact_lock 的稳定 key —— 串行化 seed 全过程（Codex 系统级 PK）：防两个并发
+# `rbac seed`（多实例部署初始化）同时从空库启动时撞 roles.code / menus.seed_key 唯一约束。
+# 事务级锁，提交/回滚自动释放。取与各域绑定锁（478221-478251）不同的值避免互锁。
+_SEED_LOCK_KEY = 478261
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,10 @@ MENU_TREE: tuple[SeedMenu, ...] = (
 )
 
 # superadmin 展示角色：解决前端漂移（§2.4），**不作信任根**（信任根 = is_super_admin 布尔）。
-ROLES: tuple[SeedRole, ...] = (SeedRole(code="superadmin", name="超级管理员", data_scope="all"),)
+# data_scope 取最小 "self"（非 "all"）——它是纯展示对象（getInfo 只读其 code），不该参与
+# 授权归一（Codex 系统级 PK）：若普通用户误绑该角色，"all" 会让 compute_effective_data_scope
+# 直接放大到全量数据范围；用 "self" 则即使误绑也不扩数据权限。真超管走 is_super_admin 短路。
+ROLES: tuple[SeedRole, ...] = (SeedRole(code="superadmin", name="超级管理员", data_scope="self"),)
 
 
 @dataclass
@@ -160,6 +168,9 @@ class SeedResult:
 async def seed_rbac(session: AsyncSession) -> SeedResult:
     """幂等 apply manifest（菜单按 seed_key、角色按 code），返回统计。重跑结果一致。"""
     result = SeedResult()
+
+    # 0) advisory lock 串行化整个 seed（并发重跑防撞唯一约束，Codex 系统级 PK）。
+    await session.execute(text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_SEED_LOCK_KEY))
 
     # 1) 角色：按 code upsert（用户自建角色 code 不同 → 不碰）。
     for sr in ROLES:
