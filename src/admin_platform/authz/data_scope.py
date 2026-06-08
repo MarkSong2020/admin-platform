@@ -43,3 +43,17 @@ def apply_data_scope(
     if len(conditions) == 1:
         return stmt.where(conditions[0])
     return stmt.where(or_(*conditions))
+
+
+def is_dept_visible(scope: DataScope, dept_id: int | None) -> bool:
+    """单对象 / 写侧的部门可见性判定（内存版，非 SQL where）。
+
+    ``scope_type == ALL`` 放行；否则要求 ``dept_id`` 落在归一后的 ``visible_dept_ids`` 内。
+    用于按 id 的读取（get）与写入（create/update/delete）校验目标资源所属部门是否在数据
+    范围内（``apply_data_scope`` 管 list 的 SQL 过滤，本函数管单行/写侧的内存判定）。
+    不含 ``include_self`` 归属判定 —— 归属（owner==user）语义按对象类型在调用点单独处理
+    （如 user 行的「本人」= ``row.id == scope.user_id``）。
+    """
+    if scope.scope_type is ScopeType.ALL:
+        return True
+    return dept_id is not None and dept_id in scope.visible_dept_ids

@@ -12,10 +12,12 @@
 
 - [`depts`](#depts)（11 列）
 - [`menus`](#menus)（13 列）
+- [`posts`](#posts)（7 列）
 - [`roles`](#roles)（8 列）
 - [`role_depts`](#role_depts)（5 列）
 - [`role_menus`](#role_menus)（5 列）
 - [`users`](#users)（9 列）
+- [`user_posts`](#user_posts)（5 列）
 - [`user_roles`](#user_roles)（5 列）
 
 ## 表结构
@@ -68,6 +70,24 @@
 
 - FK `None`：(parent_id) → menus.id
 - INDEX `ix_menus_parent_sort`：(parent_id, sort_order, id)
+
+### `posts`
+
+> 来源 model：`admin_platform.domains.post.models.Post`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `name` | VARCHAR(64) | NOT NULL | — | 岗位名称 |  |
+| `code` | VARCHAR(64) | NOT NULL | — | 岗位编码 |  |
+| `sort_order` | INTEGER | NOT NULL | `0` | 显示顺序 |  |
+| `status` | VARCHAR(16) | NOT NULL | `'active'` | 状态(active/disabled) |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE `uq_posts_code`：(code)
 
 ### `roles`
 
@@ -150,6 +170,26 @@
 - FK `None`：(dept_id) → depts.id
 - INDEX `ix_users_dept_id`：(dept_id)
 - INDEX UNIQUE `uq_users_one_super_admin`：(is_super_admin)
+
+### `user_posts`
+
+> 来源 model：`admin_platform.domains.post.models.UserPost`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `user_id` | BIGINT | NOT NULL | — | 用户ID |  |
+| `post_id` | BIGINT | NOT NULL | — | 岗位ID |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE `uq_user_posts`：(user_id, post_id)
+- FK `None`：(user_id) → users.id
+- FK `None`：(post_id) → posts.id
+- INDEX `ix_user_posts_post`：(post_id)
+- INDEX `ix_user_posts_user`：(user_id)
 
 ### `user_roles`
 
