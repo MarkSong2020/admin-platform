@@ -33,6 +33,8 @@ from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.dept.models import Dept
+from admin_platform.domains.menu.models import Menu
+from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.provider import DbPermissionProvider
@@ -95,7 +97,10 @@ def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncC
 async def _wipe() -> None:
     async with db_session() as session:
         await session.execute(
-            text("TRUNCATE TABLE user_roles, role_depts, roles, users, depts CASCADE")
+            text(
+                "TRUNCATE TABLE role_menus, menus, user_roles, role_depts, roles, users, depts"
+                " CASCADE"
+            )
         )
 
 
@@ -284,12 +289,32 @@ async def test_real_provider_superadmin_bridge_allows() -> None:
 
 
 async def test_real_provider_non_superadmin_bridge_denies() -> None:
-    # 真实 provider：非超管经桥查 DB → False；get_user_permissions=frozenset() → 默认 deny 403。
+    # 真实 provider：非超管经桥查 DB → False；无任何角色 → 派生空权限集 → 默认 deny 403。
     uid = await _seed_user(username="plain", is_super_admin=False)
     async with _build_real_provider_client(uid) as c:
         res = await c.get("/api/v1/roles")
     assert res.status_code == 403
     assert res.json()["type"] == "auth.FORBIDDEN_BY_ROLE"
+    await dispose_engine()
+
+
+async def test_real_provider_perms_derived_from_role_menus() -> None:
+    # ME1 接线核心：非超管经 角色→role_menus→menu.perms 派生出 system:role:list →
+    # 经真实 get_user_permissions（桥查 DB）放行受守卫的 GET /api/v1/roles → 200。
+    async with db_session() as session:
+        user = User(username="rbac-user", password_hash="x")
+        session.add(user)
+        menu = Menu(name="角色查询", menu_type="C", perms="system:role:list")
+        session.add(menu)
+        role = Role(name="r", code="rbac-role", data_scope="self", status="active")
+        session.add(role)
+        await session.flush()
+        await MenuRepository(session).set_role_menus(role.id, [menu.id])
+        await RoleRepository(session).set_user_roles(user.id, [role.id])
+        uid = user.id
+    async with _build_real_provider_client(uid) as c:
+        res = await c.get("/api/v1/roles")
+    assert res.status_code == 200, res.text
     await dispose_engine()
 
 

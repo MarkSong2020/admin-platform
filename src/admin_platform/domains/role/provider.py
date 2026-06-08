@@ -26,6 +26,7 @@ from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.db.session import db_session
 from admin_platform.domains.dept.repository import DeptRepository
+from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.repository import UserRepository
 
@@ -97,8 +98,7 @@ class DbPermissionProvider(PermissionProvider):
         return run_in_host_loop(self.a_get_is_super_admin, user_id)
 
     def get_user_permissions(self, user_id: int) -> frozenset[str]:
-        # R1：权限标识来自 menu.perms（ME1 实现），此处先返回空集（无需查 DB / 桥接）。
-        return frozenset()
+        return run_in_host_loop(self.a_get_user_permissions, user_id)
 
     def get_effective_data_scope(self, user_id: int) -> DataScope:
         return run_in_host_loop(self.a_get_effective_data_scope, user_id)
@@ -131,6 +131,16 @@ class DbPermissionProvider(PermissionProvider):
                 role_repo=RoleRepository(session),
                 dept_repo=DeptRepository(session),
             )
+
+    async def a_get_user_permissions(self, user_id: int) -> frozenset[str]:
+        """从用户生效角色的 ``role_menus`` → ``menus.perms`` 派生权限标识集（ME1 接线）。
+
+        权限真相源仍是端点的 ``require_permission`` 声明（spec §13.2，DB 菜单不反推保护）；
+        本方法只回答「该用户经角色被授予了哪些权限标识」。停用角色 / 停用菜单不贡献
+        （``MenuRepository.list_perms_for_user`` 内 JOIN 已滤 ``status=active``）。
+        """
+        async with db_session() as session:
+            return await MenuRepository(session).list_perms_for_user(user_id)
 
     # ---- 失效语义（P1 无缓存，no-op；接口先冻结，P2 接 Redis 时实现）----
 
