@@ -34,6 +34,7 @@ from admin_platform.db.base import Base
 from admin_platform.domains.user.models import User  # noqa: F401
 from admin_platform.domains.dept.models import Dept  # noqa: F401
 from admin_platform.domains.role.models import Role  # noqa: F401
+from admin_platform.domains.menu.models import Menu  # noqa: F401
 
 # ----------------------------------------------------------------------------
 
