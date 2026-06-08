@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends
@@ -20,7 +21,7 @@ from fastapi import APIRouter, Depends
 from admin_platform.api.v1.rbac_schemas import UserInfoResponse, UserInfoUser
 from admin_platform.authz.permissions import SUPER_ADMIN_WILDCARD
 from admin_platform.core.auth import CurrentUser, require_current_user
-from admin_platform.core.errors import ProblemDetail
+from admin_platform.core.errors import AUTH_ACCOUNT_DISABLED, AppError, ProblemDetail
 from admin_platform.core.permissions import get_menu_provider, get_permission_provider
 from admin_platform.domains.menu.provider import DbMenuProvider
 from admin_platform.domains.menu.routers import RouterVO, build_routers
@@ -33,6 +34,10 @@ router = APIRouter(tags=["rbac"])
 CurrentUserDep = Annotated[CurrentUser, Depends(require_current_user)]
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 _AUTH_ERRORS: dict[int | str, dict[str, object]] = {401: {"model": ProblemDetail}}
+_AUTH_ERRORS_WITH_403: dict[int | str, dict[str, object]] = {
+    401: {"model": ProblemDetail},
+    403: {"model": ProblemDetail},
+}
 
 # 超管展示角色（§2.4）：合成固定 code，避免前端因 DB 角色缺失而漂移。
 _SUPER_ADMIN_ROLE = "superadmin"
@@ -42,16 +47,28 @@ _SUPER_ADMIN_ROLE = "superadmin"
     "/api/v1/auth/user-info",
     operation_id="auth_user_info",
     response_model=UserInfoResponse,
-    responses=_AUTH_ERRORS,
+    responses=_AUTH_ERRORS_WITH_403,
 )
 async def get_info(
     current: CurrentUserDep,
     svc: UserServiceDep,
     provider: Annotated[object, Depends(get_permission_provider)],
 ) -> UserInfoResponse:
-    """getInfo（§6.1）：当前用户 + 角色 code + 权限标识。超管合成 ["superadmin"] / ["*:*:*"]。"""
+    """getInfo（§6.1）：当前用户 + 角色 code + 权限标识。超管合成 ["superadmin"] / ["*:*:*"]。
+
+    账号状态校验（spec §2.3 不绕账号状态，与 require_permission / getRouters 同口径）：停用账号
+    即使持有效 token 也 403 ACCOUNT_DISABLED，不下发任何角色/权限（否则前端凭旧 token 仍显示
+    已撤权的菜单/按钮）。
+    """
     user_id = int(current.user_id)
     db_provider = cast("DbPermissionProvider", provider)
+    if not await db_provider.a_get_is_active(user_id):
+        raise AppError(
+            code=AUTH_ACCOUNT_DISABLED,
+            title="Account disabled",
+            detail="账号已停用",
+            status_code=int(HTTPStatus.FORBIDDEN),
+        )
     user = await svc.get(user_id)  # 看自己永远可见（无 scope）
     if await db_provider.a_get_is_super_admin(user_id):
         roles = [_SUPER_ADMIN_ROLE]
