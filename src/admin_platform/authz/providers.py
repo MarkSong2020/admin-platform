@@ -30,6 +30,15 @@ class MenuNode:
 class PermissionProvider(ABC):
     """用户权限标识与数据范围的来源。P1 每次直查 DB，不缓存（Q8）。"""
 
+    def get_is_active(self, user_id: int) -> bool:
+        """账号是否可用（``users.status == "active"``），供 ``require_permission`` 请求期校验。
+
+        **非抽象**：默认返回 True —— 内存 stub（测试）建模的就是活跃用户，无需逐个实现。
+        真实 DB 版 Provider **必须覆盖**做 DB 查询：停用账号即使持有效 token / 角色也应被
+        拒绝（Codex 深审 + spec §2.3「不绕过账号状态」）。
+        """
+        return True
+
     @abstractmethod
     def get_is_super_admin(self, user_id: int) -> bool:
         """用户是否超级管理员（信任根布尔，对应 ``users.is_super_admin``）。

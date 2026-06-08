@@ -295,10 +295,12 @@ async def test_real_provider_non_superadmin_bridge_denies() -> None:
 
 async def test_real_provider_disabled_superadmin_denied() -> None:
     # Codex 深审 F4 / spec §2.3：停用账号即使 is_super_admin=True 也不享超管短路 → 403。
+    # 走真实 DbPermissionProvider.get_is_active 桥（请求期查 DB status）→ ACCOUNT_DISABLED。
     uid = await _seed_user(username="root-disabled", is_super_admin=True, status="disabled")
     async with _build_real_provider_client(uid) as c:
         res = await c.get("/api/v1/roles")
     assert res.status_code == 403
+    assert res.json()["type"] == "auth.ACCOUNT_DISABLED"
     await dispose_engine()
 
 

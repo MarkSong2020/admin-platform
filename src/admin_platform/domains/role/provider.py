@@ -90,6 +90,9 @@ class DbPermissionProvider(PermissionProvider):
 
     # ---- 同步接口（require_permission 依赖在 threadpool worker 线程调用）----
 
+    def get_is_active(self, user_id: int) -> bool:
+        return run_in_host_loop(self.a_get_is_active, user_id)
+
     def get_is_super_admin(self, user_id: int) -> bool:
         return run_in_host_loop(self.a_get_is_super_admin, user_id)
 
@@ -101,6 +104,12 @@ class DbPermissionProvider(PermissionProvider):
         return run_in_host_loop(self.a_get_effective_data_scope, user_id)
 
     # ---- 异步内核（可直接 await 单测）----
+
+    async def a_get_is_active(self, user_id: int) -> bool:
+        """查 ``users.status == "active"``（请求期账号状态校验）；用户不存在视作停用（安全 deny）。"""
+        async with db_session() as session:
+            user = await UserRepository(session).get(user_id)
+            return bool(user is not None and user.status == "active")
 
     async def a_get_is_super_admin(self, user_id: int) -> bool:
         """查 ``users.is_super_admin``（信任根布尔）；用户不存在视作非超管（安全 deny）。

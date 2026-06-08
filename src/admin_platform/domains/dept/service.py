@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from admin_platform.authz.scope import DataScope
+from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.errors import AppError
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.dept.schemas import (
@@ -55,9 +55,17 @@ class DeptService:
             total_pages=total_pages,
         )
 
-    async def get(self, item_id: int) -> DeptRead:
+    async def get(self, item_id: int, *, scope: DataScope | None = None) -> DeptRead:
         row = await self._repo.get(item_id)
         if row is None:
+            raise self._not_found(item_id)
+        # 数据权限（Codex 深审 F5）：非超管按 data_scope 限制可读部门——不可见时返回 NOT_FOUND
+        # （不泄露存在性，与 list 同口径）。scope=None / ALL（超管 api 层）不限制。
+        if (
+            scope is not None
+            and scope.scope_type is not ScopeType.ALL
+            and row.id not in scope.visible_dept_ids
+        ):
             raise self._not_found(item_id)
         return DeptRead.model_validate(row)
 

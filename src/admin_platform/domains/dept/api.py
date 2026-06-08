@@ -96,8 +96,9 @@ async def list_depts(
     response_model=DeptRead,
     responses=GET_ERROR_RESPONSES,
 )
-async def get_dept(item_id: int, svc: ServiceDep, _user: QueryGuard) -> DeptRead:
-    return await svc.get(item_id)
+async def get_dept(item_id: int, svc: ServiceDep, user: QueryGuard) -> DeptRead:
+    # 非超管按 data_scope 限制可读部门（防按 id 越权读不可见部门）；超管 data_scope=ALL 不限制。
+    return await svc.get(item_id, scope=user.data_scope)
 
 
 # ADR §11：POST 默认幂等 —— 调用方可以用同一个 Idempotency-Key header 安全
