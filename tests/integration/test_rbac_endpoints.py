@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -27,6 +28,7 @@ from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.role.repository import RoleRepository
+from admin_platform.domains.user.api import router as user_router
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
 from admin_platform.rbac.seed import seed_rbac
@@ -165,4 +167,31 @@ async def test_disabled_account_routers_empty() -> None:
         res = await c.get("/api/v1/menus/routers")
     assert res.status_code == 200
     assert res.json() == []  # 停用账号不下发菜单（spec §2.3 / Codex F1）
+    await dispose_engine()
+
+
+# ---- 审计 hook 端到端（spec §13.3）：403 真实触发 audit_event.v1 ----
+
+
+async def test_permission_denied_emits_audit(caplog) -> None:  # type: ignore[no-untyped-def]
+    uid = await _seed_user(username="plain")  # 非超管、无权限 → 403
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+    app.include_router(user_router)
+    app.dependency_overrides[get_permission_provider] = DbPermissionProvider
+    app.dependency_overrides[require_current_user] = lambda: CurrentUser(
+        user_id=str(uid), sub=str(uid)
+    )
+    with caplog.at_level(logging.INFO, logger="admin_platform.audit"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            res = await c.get("/api/v1/users")
+    assert res.status_code == 403
+    audit_recs = [r for r in caplog.records if r.name == "admin_platform.audit"]
+    assert audit_recs, "403 未产出审计事件"
+    ev = audit_recs[-1].audit_event  # type: ignore[attr-defined]
+    assert ev["schema_version"] == "audit_event.v1"
+    assert ev["event_type"] == "permission_denied"
+    assert ev["result"]["error_code"] == "auth.FORBIDDEN_BY_ROLE"
+    assert ev["actor"]["user_id"] == uid
     await dispose_engine()

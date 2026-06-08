@@ -19,6 +19,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from admin_platform.audit.emit import build_audit_event, emit_audit
+from admin_platform.audit.events import AuditActor, AuditResult
 from admin_platform.authz.permissions import ALL_PERMISSIONS
 from admin_platform.authz.providers import MenuProvider, PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -74,6 +76,22 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
         )
     USED_PERMISSIONS.add(perm)
 
+    def _emit_denied(user_id: int, error_code: str) -> None:
+        """审计：权限拒绝（spec §13.3 三类事件之一）。超管不绕审计（§2.3）。最小 hook，
+        request 段（method/path/ip）留 P2 中间件补；emit 失败不阻断主流程（见 emit_audit）。"""
+        emit_audit(
+            build_audit_event(
+                event_type="permission_denied",
+                action=perm,
+                title="权限拒绝",
+                actor=AuditActor(user_id=user_id),
+                result=AuditResult(
+                    status="denied", http_status=int(HTTPStatus.FORBIDDEN), error_code=error_code
+                ),
+                risk_level="medium",
+            )
+        )
+
     def _dep(
         base_user: Annotated[CurrentUser, Depends(require_current_user)],
         provider: Annotated[PermissionProvider, Depends(get_permission_provider)],
@@ -84,6 +102,7 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
         # 停用（status != active）即使是超管 / 有角色也一律 403——放在超管短路之前，停用账号
         # 不享任何短路。get_is_active 默认 True（内存 stub），真实 DbPermissionProvider 查 DB。
         if not provider.get_is_active(user_id):
+            _emit_denied(user_id, AUTH_ACCOUNT_DISABLED)
             raise AppError(
                 code=AUTH_ACCOUNT_DISABLED,
                 title="Account disabled",
@@ -102,6 +121,7 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
         # 默认 deny：未显式拥有该权限点即拒绝。
         permissions = provider.get_user_permissions(user_id)
         if perm not in permissions:
+            _emit_denied(user_id, AUTH_FORBIDDEN_BY_ROLE)
             raise AppError(
                 code=AUTH_FORBIDDEN_BY_ROLE,
                 title="Forbidden",
