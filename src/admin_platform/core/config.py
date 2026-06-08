@@ -128,6 +128,16 @@ class Settings(BaseSettings):
     # 下放 P1（须存 jti+hash 才能撤销）。下限 60s —— 比这更短令牌还没用就过期。
     auth_access_token_ttl_seconds: int = Field(default=7200, ge=60)
 
+    # ---- P1.4 登录增强：refresh token（opaque + HMAC 落库可撤销，spec 2026-06-09）----
+    # pepper：HMAC-SHA256(pepper, secret) 的密钥，独立于 auth_jwt_secret（泄露隔离）。
+    # 空时签发/校验 refresh fail-fast（同 jwt_secret 处理，拒绝空密钥）。
+    auth_refresh_token_pepper: str = ""
+    # refresh token 双 TTL：idle（滑动，每次轮换续期）+ absolute（硬上限，不可续）。
+    auth_refresh_idle_ttl_seconds: int = Field(default=604800, ge=300)  # 7d
+    auth_refresh_absolute_ttl_seconds: int = Field(default=2592000, ge=300)  # 30d
+    # 并发登录上限：按 family 数（一次登录=一 family）。⚠️ 数值待用户确认（decision-log §3）。
+    auth_refresh_max_sessions_per_user: int = Field(default=5, ge=1)
+
     @field_validator("database_url")
     @classmethod
     def _validate_database_url_scheme(cls, value: str) -> str:
