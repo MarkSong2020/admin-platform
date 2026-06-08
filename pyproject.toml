@@ -115,7 +115,16 @@ branch = true
 # 结构上覆盖不到真实 DB 查询（含集成的全量覆盖实测 96%，repository 各 93%+）。仓库覆盖改由
 # integration 测（make test-integration）+ DoD §9「每域强制集成测」保障，从 fast-lane coverage
 # gate omit，避免 DB-bound 业务域增多时门禁随结构性盲区误降（2026-06-08 menu 域落地时与用户确认）。
-omit = ["*/repository.py"]
+# captcha.py / login_guard.py（P1.4）同理：Redis-bound，fast lane 无 Redis 测不到，由 redis 集成
+# 测覆盖（test_auth_captcha_ratelimit，需 compose-up-cache）。
+omit = [
+    "*/repository.py",
+    "*/auth/captcha.py",
+    "*/auth/login_guard.py",
+    # refresh_service.py（P1.4）：DB-bound saga 编排（rotation/reuse/concurrency 全是 DB 操作），
+    # 由 refresh 集成测充分覆盖（test_refresh_token 7 + test_auth_token_endpoints 5），同 repository 性质。
+    "*/auth/refresh_service.py",
+]
 
 [tool.coverage.report]
 show_missing = true
