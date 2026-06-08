@@ -50,6 +50,14 @@ class PermissionProvider(ABC):
         """
         return True
 
+    def get_user_role_codes(self, user_id: int) -> frozenset[str]:
+        """用户经**生效角色**拥有的角色 code 集（getInfo 展示用，§6.1）。
+
+        **非抽象**：默认空集（内存 stub 不建模角色）；真实 DB 版 Provider 覆盖查 user_roles→roles。
+        非安全判定（只用于前端展示）——后端授权只认 permissions + is_super_admin。
+        """
+        return frozenset()
+
     @abstractmethod
     def get_is_super_admin(self, user_id: int) -> bool:
         """用户是否超级管理员（信任根布尔，对应 ``users.is_super_admin``）。
