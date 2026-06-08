@@ -9,7 +9,13 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+# 账号状态取值（与其余 RBAC 域同源：dept/role/menu/post 都是 active/disabled）。
+# provider/login 只认 "active" → 其余值视作停用；用 Literal + DB CheckConstraint 防脏状态。
+StatusValue = Literal["active", "disabled"]
 
 
 class UserCreate(BaseModel):
@@ -20,6 +26,7 @@ class UserCreate(BaseModel):
         min_length=1, max_length=256, description="明文密码（入库前 argon2 哈希）"
     )
     nickname: str = Field(default="", max_length=64, description="昵称")
+    dept_id: int | None = Field(default=None, description="所属部门ID(None=未分配)")
 
 
 class UserUpdate(BaseModel):
@@ -27,10 +34,11 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
     nickname: str | None = Field(default=None, max_length=64)
-    status: str | None = Field(default=None, max_length=16, description="active / disabled 等")
+    status: StatusValue | None = Field(default=None, description="账号状态（active / disabled）")
     password: str | None = Field(
         default=None, min_length=1, max_length=256, description="传值则改密（重新哈希）"
     )
+    dept_id: int | None = Field(default=None, description="所属部门ID(None=未分配)")
 
 
 class UserRead(BaseModel):
@@ -42,6 +50,7 @@ class UserRead(BaseModel):
     nickname: str
     status: str
     is_super_admin: bool
+    dept_id: int | None
 
 
 class UserPage(BaseModel):

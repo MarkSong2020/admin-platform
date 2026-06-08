@@ -527,15 +527,12 @@ TEMPLATE_MODELS = dedent('''\
 
     from __future__ import annotations
 
-    from datetime import datetime
-
-    from sqlalchemy import DateTime, func
     from sqlalchemy.orm import Mapped, mapped_column
 
-    from {service}.db.base import Base
+    from {service}.db.base import Base, IdMixin, TimestampMixin
 
 
-    class {Name}(Base):
+    class {Name}(Base, IdMixin, TimestampMixin):
         __tablename__ = "{plural}"
 
         # __table_args__ —— 在这里声明索引和约束，例如：
@@ -550,14 +547,9 @@ TEMPLATE_MODELS = dedent('''\
         # 事后补复合索引需要 Alembic migration + 在热表上做停机规划。
         __table_args__ = ()
 
-        id: Mapped[int] = mapped_column(primary_key=True)
-        name: Mapped[str] = mapped_column()
-        gmt_create: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-        gmt_modified: Mapped[datetime] = mapped_column(
-            DateTime(timezone=True),
-            server_default=func.now(),
-            onupdate=func.now(),
-        )
+        # IdMixin 提供 id（BIGINT 主键）、TimestampMixin 提供 created_at/updated_at（均带 comment）。
+        # 业务列必带中文 comment（机检门禁 tests/unit/test_column_comments.py）。
+        name: Mapped[str] = mapped_column(comment="名称")
 ''')
 
 

@@ -1,0 +1,1 @@
+"""Role domain 包。"""
