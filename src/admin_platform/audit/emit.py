@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from admin_platform.audit.context import current_request_context
+from admin_platform.audit.context import append_audit_event, current_request_context
 from admin_platform.audit.events import (
     AuditActor,
     AuditEvent,
@@ -67,6 +67,7 @@ def emit_audit(event: AuditEvent) -> None:
     """把审计事件落结构化日志（一行 JSON 嵌在 ``audit_event`` 字段，见 core.logging 白名单）。
 
     P1 最小 hook —— 失败不抛（审计不应阻断主流程）：日志器异常吞掉只记一条 warning。
+    **同步 logger sink 是 durable 底线**；P2 持久化走 ``record_audit``（logger + DB）。
     """
     try:
         _audit_logger.info(
@@ -75,6 +76,9 @@ def emit_audit(event: AuditEvent) -> None:
         )
     except Exception:  # 审计落地失败绝不阻断业务主流程
         _audit_logger.warning("audit emit failed", exc_info=True)
+    # P2：追加进请求级缓冲，响应后由中间件 flush 落库（独立 session 批量）。无缓冲
+    # （CLI/单测/后台任务）= no-op，退化为仅 logger（durable 底线）。append 永不抛。
+    append_audit_event(event)
 
 
 def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/target/result/metadata），全命名 kwargs 可放宽
@@ -92,6 +96,7 @@ def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/targe
 
     成功 / 失败都记（失败带 ``error_code``，不阻断原业务错误）；``metadata`` 只放非敏感差异
     摘要（password/token 等再经 ``redact_metadata`` deny-list 兜底剔除）。risk_level 固定 medium。
+    P2：``emit_audit`` 同步 logger + 追加请求缓冲（响应后中间件落库），保持同步、调用点不变。
     """
     emit_audit(
         build_audit_event(
