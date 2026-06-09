@@ -22,8 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = "audit_event.v1"
 
 # refresh_reused（P1.4）：refresh token 重用检测命中 = token theft 信号，高风险审计事件。
+# login_success（P2）：登录成功，让审计 envelope 覆盖完整登录活动（compliance 常要成功登录留痕）。
 # v1 EventType 演进（decision-log 2026-06-09 §3）—— schema_version 不变，枚举扩展向后兼容。
-EventType = Literal["permission_denied", "login_failed", "rbac_write", "refresh_reused"]
+EventType = Literal[
+    "permission_denied", "login_failed", "rbac_write", "refresh_reused", "login_success"
+]
 RiskLevel = Literal["low", "medium", "high"]
 
 # 敏感 key（小写包含匹配）——命中即从 metadata 剔除，永不进审计（deny-list）。

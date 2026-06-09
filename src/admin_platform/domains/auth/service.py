@@ -27,6 +27,7 @@ from admin_platform.core.security import issue_access_token, verify_password
 from admin_platform.db.session import db_session
 from admin_platform.domains.auth import login_guard
 from admin_platform.domains.auth.captcha import generate_captcha, verify_captcha
+from admin_platform.domains.auth.login_log import record_login_attempt
 from admin_platform.domains.auth.refresh_service import (
     issue_login_refresh,
     revoke_refresh_token,
@@ -69,6 +70,21 @@ def _emit_login_failed(username: str, *, risk_level: RiskLevel = "medium") -> No
     )
 
 
+def _emit_login_success(user_id: int, username: str) -> None:
+    """登录成功审计（P2：让 envelope 覆盖完整登录活动，compliance 常要成功登录留痕）。"""
+    emit_audit(
+        build_audit_event(
+            event_type="login_success",
+            action="auth.login",
+            title="登录成功",
+            actor=AuditActor(user_id=user_id, username=username),
+            target=AuditTarget(type="user", id=str(user_id), display=username),
+            result=AuditResult(status="success", http_status=200),
+            risk_level="low",
+        )
+    )
+
+
 async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下文，命名 kwargs，用例层可放宽
     username: str,
     password: str,
@@ -89,6 +105,9 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
     if redis is not None:
         decision = await login_guard.pre_check(redis, username=username, client_ip=client_ip)
         if decision.ip_rate_limited:
+            await record_login_attempt(
+                username=username, status="rate_limited", reason_code=AUTH_LOGIN_RATE_LIMITED
+            )
             raise AppError(
                 code=AUTH_LOGIN_RATE_LIMITED,
                 title="Too many attempts",
@@ -103,9 +122,15 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
             # 审计（Workflow 深审）：锁定窗口内的持续尝试正是暴力破解最该留痕的时刻，
             # 不能因「对客户端防枚举不暴露锁定状态」而连内部审计一起省略。risk 升 high。
             _emit_login_failed(username, risk_level="high")
+            await record_login_attempt(
+                username=username, status="locked", reason_code=AUTH_LOGIN_FAILED
+            )
             raise _login_failed()
         # 失败达阈值 → 要求验证码（Q14：失败 N 次后才要，非首登必填）。
         if decision.require_captcha and not await verify_captcha(redis, captcha_id, captcha_answer):
+            await record_login_attempt(
+                username=username, status="captcha_required", reason_code=AUTH_CAPTCHA_REQUIRED
+            )
             raise AppError(
                 code=AUTH_CAPTCHA_REQUIRED,
                 title="Captcha required",
@@ -129,6 +154,12 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
             if redis is not None:
                 await login_guard.record_failure(redis, username=username, client_ip=client_ip)
             _emit_login_failed(username)
+            await record_login_attempt(
+                username=username,
+                status="failure",
+                reason_code=AUTH_LOGIN_FAILED,
+                user_id=active_user.id if active_user is not None else None,
+            )
             raise _login_failed()
 
         token = issue_access_token(user_id=active_user.id, username=active_user.username)
@@ -143,6 +174,12 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
     # 登录成功：清失败计数 + 解软锁（spec §1.5）。
     if redis is not None:
         await login_guard.clear_on_success(redis, username=username, client_ip=client_ip)
+
+    # P2：成功审计 + 登录日志（均在业务事务提交后落，时点正确）。
+    _emit_login_success(active_user.id, active_user.username)
+    await record_login_attempt(
+        username=active_user.username, status="success", user_id=active_user.id
+    )
 
     return LoginResponse(
         access_token=token,
