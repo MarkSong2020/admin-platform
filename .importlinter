@@ -34,6 +34,9 @@ containers =
     admin_platform.domains.menu
     admin_platform.domains.post
     admin_platform.domains.monitor
+    admin_platform.domains.notice
+    admin_platform.domains.config
+    admin_platform.domains.dict
 
 [importlinter:contract:api-not-repository]
 name = C2 api must not import repository (composition root lives in deps.py)

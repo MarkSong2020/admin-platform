@@ -25,10 +25,13 @@ from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.observability import init_observability, shutdown_observability
 from admin_platform.core.permissions import get_menu_provider, get_permission_provider
 from admin_platform.db.engine import dispose_engine, get_engine
+from admin_platform.domains.config.api import router as config_router
 from admin_platform.domains.dept.api import router as dept_router
+from admin_platform.domains.dict.api import router as dict_router
 from admin_platform.domains.menu.api import router as menu_router
 from admin_platform.domains.menu.provider import DbMenuProvider
 from admin_platform.domains.monitor.api import router as monitor_router
+from admin_platform.domains.notice.api import router as notice_router
 from admin_platform.domains.post.api import router as post_router
 from admin_platform.domains.rbac_binding.api import router as rbac_binding_router
 from admin_platform.domains.role.api import router as role_router
@@ -196,6 +199,9 @@ def create_app() -> FastAPI:
     app.include_router(role_router)
     app.include_router(menu_router)
     app.include_router(post_router)
+    app.include_router(dict_router)  # P3 运营配置：字典管理（类型 + 数据）
+    app.include_router(config_router)  # P3 运营配置：参数设置
+    app.include_router(notice_router)  # P3 运营配置：通知公告
     app.include_router(monitor_router)  # P2 系统监控：操作日志 / 登录日志只读查询
     app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
     app.include_router(
