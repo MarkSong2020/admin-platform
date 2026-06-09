@@ -1,0 +1,1 @@
+"""Dict domain 包。"""
