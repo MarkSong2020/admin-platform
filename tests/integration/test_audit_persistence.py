@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -19,7 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from admin_platform.audit.emit import build_audit_event
+from admin_platform.audit.emit import build_audit_event, record_audit_committed
 from admin_platform.audit.events import AuditEvent, AuditResult
 from admin_platform.audit.models import AuditEventLog
 from admin_platform.audit.sink import DbAuditSink, configure_audit_sink, persist_audit_in_session
@@ -29,7 +30,7 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import PermissionProvider, get_permission_provider
 from admin_platform.db.engine import dispose_engine
-from admin_platform.db.session import db_session
+from admin_platform.db.session import _request_session_var, db_session
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.models import Role
 
@@ -239,3 +240,32 @@ async def test_in_tx_audit_does_not_swallow_business_flush_error() -> None:
         async with db_session() as session:
             session.add(Role(name="r2", code="dupcode", status="active"))
             await persist_audit_in_session(session, _success_event())
+
+
+async def test_no_false_success_log_when_business_flush_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Round-3 审查 R3-1：record_audit_committed 先 persist（含前置业务 flush）后 logger。业务 flush
+    # 抛错时，logger sink 也不应留假成功审计（否则 DB 没假行但日志有，logger 底线被污染）。
+    async with db_session() as seed:
+        seed.add(Role(name="seed", code="dup_log", status="active"))
+        await seed.flush()
+
+    with pytest.raises(IntegrityError):
+        async with db_session() as session:
+            session.add(
+                Role(name="conflict", code="dup_log", status="active")
+            )  # pending，flush 必失败
+            token = _request_session_var.set(session)
+            try:
+                with caplog.at_level(logging.INFO, logger="admin_platform.audit"):
+                    await record_audit_committed(_success_event())
+            finally:
+                _request_session_var.reset(token)
+
+    success_logs = [
+        e
+        for r in caplog.records
+        if (e := getattr(r, "audit_event", None)) and e.get("result", {}).get("status") == "success"
+    ]
+    assert success_logs == []  # 业务错在 logger 之前上抛，无假成功日志

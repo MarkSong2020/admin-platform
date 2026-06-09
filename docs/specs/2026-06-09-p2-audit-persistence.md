@@ -257,3 +257,16 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 | R2-4 | 测试未覆盖业务 savepoint 与 audit savepoint 交错（saga）| Medium | 现状 service 不用嵌套 savepoint；test-gap 记此，saga 落地时补 |
 
 **收敛**：R2-2 修复（强化 F1 方案 B），R2-1 判 by-design，R2-3/4 记排期。无新阻断。
+
+### 8.2 Round-3 收敛确认审查处置（Codex high + 1 视角 subagent，2026-06-09）
+
+终扫。subagent 6 域独立终扫判「收敛、无新发现」。Codex 命中 1 个真新发现（R3-1，与 R2-2 直接相关）：
+
+| # | 发现 | 严重度 | 处置 |
+|---|---|---|---|
+| R3-1 | `record_audit_committed` 先 `_emit_to_logger` 后 `persist`；R2-2 场景业务 flush 抛错时 DB 无假行但 **logger 已写 success** → logger sink 残留假成功 | Important | ✅ **persist 先于 logger**：业务 flush 在 logger 之前上抛，logger 也不留假成功。测试 `test_no_false_success_log_when_business_flush_fails` |
+| R3-2 | rbac_binding 只捕 AppError，IntegrityError 竞态不补 failure 审计（与 audited_write 口径不一致）| Medium | **near-unreachable**：binding 写 `pg_advisory_xact_lock` 串行化 + 输入 dedup，并发唯一冲突基本被挡；属低价值口径项，记此不动 P1.5 代码 |
+| R3-3 | 连接级故障（非约束错）下「审计不连累业务」承诺过强 | nuance | 文档化：savepoint 隔离的是审计 insert 自身的约束/数据错；连接级故障业务事务本就不可续，非审计独有 |
+| R3-4 | 失败/拒绝缓冲崩溃丢失窗口 | 已知 | §3.5 已记，P3 outbox |
+
+**收敛判定**：Round-1→3 发现数 4→1(+by-design)→1(+near-unreachable)，逐轮递减；R3-1 修复并测试；R3-2/3/4 判 near-unreachable / nuance / 已知。**3 轮（Codex high ×3 + subagent ×6）收敛**，无剩余阻断/应修项。基线 `make check` 391 ✓ / 8 契约 KEPT / `make test-integration` 136 ✓ / 迁移零漂移。
