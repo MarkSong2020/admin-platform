@@ -18,6 +18,18 @@ OPERATION_ID_RE = re.compile(
 )  # 允许单 token（healthz）；业务 {plural}_{action}
 PROBLEM_REF = "#/components/schemas/ProblemDetail"
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
+# 公开路径（OpenAPI security=[]）：health/就绪探针 + auth 端点（登录前无 token）。
+_PUBLIC_PATHS = frozenset(
+    {
+        "/healthz",
+        "/readyz",
+        "/startupz",
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/captcha",
+    }
+)
 
 
 def _spec() -> dict:
@@ -56,6 +68,17 @@ def _rule_error_problem_detail_ref(method: str, path: str, op: dict) -> list[str
         if ref != PROBLEM_REF:  # 含 ref=None（4xx/5xx 缺 ProblemDetail schema 也算违规）
             out.append(f"{method.upper()} {path}: {code} schema {ref} != ProblemDetail")
     return out
+
+
+def _rule_security_declared(method: str, path: str, op: dict) -> list[str]:
+    # Codex 深审：逐 operation 标注 security —— 受保护 ``bearerAuth``，公开路径显式 ``[]``。
+    sec = op.get("security")
+    expected: list[dict] = [] if path in _PUBLIC_PATHS else [{"bearerAuth": []}]
+    if sec != expected:
+        return [
+            f"{method.upper()} {path}: security {sec} != {expected}（受保护应 bearerAuth/公开应 []）"
+        ]
+    return []
 
 
 # ---- spec-scope 规则：check(spec) -> list[str] -----------------------------
@@ -102,6 +125,7 @@ OPERATION_RULES = {
     "api.operation_id.snake_case": _rule_operation_id_snake_case,
     "api.operation.tags.required": _rule_tags_required,
     "api.error.problem_detail_ref": _rule_error_problem_detail_ref,
+    "api.operation.security_declared": _rule_security_declared,
 }
 SPEC_RULES = {
     "api.operation_id.unique": _rule_operation_id_unique,
@@ -140,6 +164,13 @@ def test_probe_camel_case_operation_id_is_caught() -> None:
     op = {"operationId": "badOpId", "tags": ["x"]}
     assert _rule_operation_id_snake_case("get", "/__synthetic", op), (
         "snake_case 规则没抓到 camelCase operationId —— 规则失效（空绿）"
+    )
+
+
+def test_probe_missing_security_on_protected_is_caught() -> None:
+    op = {"operationId": "x", "tags": ["x"]}  # 受保护路径但无 security
+    assert _rule_security_declared("get", "/api/v1/users", op), (
+        "security 规则没抓到受保护 operation 缺 bearerAuth —— 规则失效（空绿）"
     )
 
 

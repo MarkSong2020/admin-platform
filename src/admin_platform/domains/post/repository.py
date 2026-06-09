@@ -94,3 +94,18 @@ class PostRepository:
         for post_id in dict.fromkeys(post_ids):
             self._session.add(UserPost(user_id=user_id, post_id=post_id))
         await self._session.flush()
+
+    async def list_existing_ids(self, ids: list[int]) -> set[int]:
+        """返回 ``ids`` 中实际存在的 post 子集（绑定前 all-or-nothing 校验用；空入参返回空集）。"""
+        if not ids:
+            return set()
+        result = await self._session.execute(select(Post.id).where(Post.id.in_(ids)))
+        return {int(i) for i in result.scalars().all()}
+
+    async def list_post_ids_for_user(self, user_id: int) -> list[int]:
+        """用户已绑定的岗位 id（管理端回显用）。按 id 有序。"""
+        stmt = (
+            select(UserPost.post_id).where(UserPost.user_id == user_id).order_by(UserPost.post_id)
+        )
+        result = await self._session.execute(stmt)
+        return [int(i) for i in result.scalars().all()]

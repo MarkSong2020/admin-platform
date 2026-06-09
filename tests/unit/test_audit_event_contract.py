@@ -86,6 +86,23 @@ def test_redact_metadata_drops_sensitive_keys() -> None:
     assert cleaned == {"username": "alice", "dept_id": 3}
 
 
+def test_redact_metadata_recurses_into_nested() -> None:
+    # Codex 深审：嵌套 dict / list 里的敏感 key 也剔除（仅清顶层会漏 P2 写审计的嵌套 payload）。
+    cleaned, redacted = redact_metadata(
+        {
+            "changes": {"password": "x", "nickname": "bob"},
+            "items": [{"token": "t", "id": 1}, {"id": 2}],
+            "ok": "kept",
+        }
+    )
+    assert redacted is True
+    assert cleaned == {
+        "changes": {"nickname": "bob"},
+        "items": [{"id": 1}, {"id": 2}],
+        "ok": "kept",
+    }
+
+
 def test_no_sensitive_field_in_event_dump() -> None:
     # 即使把敏感数据塞进 metadata，构造后 dump 的 JSON 里也不能出现敏感值。
     ev = build_audit_event(

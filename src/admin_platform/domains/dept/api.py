@@ -25,6 +25,7 @@ from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
+from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.dept.deps import get_dept_service
 from admin_platform.domains.dept.schemas import (
     DeptCreate,
@@ -116,7 +117,14 @@ async def get_dept(item_id: int, svc: ServiceDep, user: QueryGuard) -> DeptRead:
 @idempotent
 async def create_dept(payload: DeptCreate, svc: ServiceDep, user: AddGuard) -> DeptRead:
     # 非超管只能在可见父部门下建子部门（数据权限写侧）；超管 data_scope=ALL 不限制。
-    return await svc.create(payload, scope=user.data_scope)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_DEPT_ADD,
+        "dept",
+        coro=svc.create(payload, scope=user.data_scope),
+        display=lambda d: d.code,
+        success_status=201,
+    )
 
 
 @router.patch(
@@ -128,7 +136,14 @@ async def create_dept(payload: DeptCreate, svc: ServiceDep, user: AddGuard) -> D
 async def update_dept(
     item_id: int, payload: DeptUpdate, svc: ServiceDep, user: EditGuard
 ) -> DeptRead:
-    return await svc.update(item_id, payload, scope=user.data_scope)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_DEPT_EDIT,
+        "dept",
+        coro=svc.update(item_id, payload, scope=user.data_scope),
+        target_id=item_id,
+        display=lambda d: d.code,
+    )
 
 
 @router.delete(
@@ -138,4 +153,10 @@ async def update_dept(
     responses=DELETE_ERROR_RESPONSES,
 )
 async def delete_dept(item_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
-    await svc.delete(item_id, scope=user.data_scope)
+    await audited_write(
+        user,
+        Permissions.SYSTEM_DEPT_REMOVE,
+        "dept",
+        coro=svc.delete(item_id, scope=user.data_scope),
+        target_id=item_id,
+    )

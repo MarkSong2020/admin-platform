@@ -3,6 +3,10 @@
 P1.4 用算术文本（如 "3 + 5 = ?"），规避图形库新依赖（符合 P0 spec「避免 Pillow」）。图形
 base64 留 P6 前端阶段。Redis key ``auth:captcha:{id}`` 存答案，TTL 短；校验**无论对错都消费**
 （删 key），防同一 captcha 暴力试答。
+
+答案**明文存储**（Codex 深审评估后保留，非疏漏）：算术答案空间极小（2..18），HMAC/hash 也能
+被枚举反解、无实质防护（security theater）；真正防线是短 TTL（默认 120s）+ 一次性消费 + Redis
+访问控制。Redis 泄露属基础设施失陷，不在验证码层兜底（decision-log 2026-06-09 §6）。
 """
 
 from __future__ import annotations

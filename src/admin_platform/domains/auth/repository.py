@@ -10,15 +10,29 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.domains.auth.models import RefreshToken
+
+# per-user refresh 签发 advisory lock 命名空间（与 dept 478221 / role 478231-2 / menu 478241-2 /
+# post 478251 的单 bigint 锁隔离：本锁用 (ns, user_id) 双 int4 形式，不会跨域互锁）。
+_REFRESH_USER_LOCK_NS = 478260
 
 
 class RefreshTokenRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def acquire_user_lock(self, user_id: int) -> None:
+        """per-user 事务级 advisory lock —— 串行化同一用户的并发登录「签新 family + 上限检查」临界区
+        （Codex 深审 F）：否则多并发登录各签 family、互不可见对方未提交 family，可超 max_sessions。
+        提交/回滚自动释放。"""
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :uid)").bindparams(
+                ns=_REFRESH_USER_LOCK_NS, uid=user_id
+            )
+        )
 
     async def create(  # noqa: PLR0913 —— refresh token 字段多且全命名 kwargs，数据访问层可放宽
         self,

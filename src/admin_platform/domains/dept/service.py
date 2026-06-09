@@ -83,16 +83,21 @@ class DeptService:
             # 数据权限不可见 = 当作不存在（不泄露存在性）。
             raise self._not_found(item_id)
         await self._check_code_unique(existing, payload)
-        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 数据范围 +
-        # 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
-        new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else None
-        if new_parent_id is not None:
+        # 移动校验：payload 显式包含 parent_id（含移到根 None）即进树写串行化 —— 先拿 advisory
+        # lock，锁内做数据范围 + 父存在 + 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动
+        # A→B、B→A 各自都过、提交后成环）。⚠️ 必须覆盖 parent_id=None（Codex 深审越权）：否则
+        # 非超管显式把可见部门提升到根可绕过「建根需 ALL」不变式（与 create 数据范围校验同口径）。
+        if "parent_id" in payload.model_fields_set:
+            new_parent_id = payload.parent_id
             await self._repo.acquire_tree_lock()
-            if await self._repo.get(new_parent_id) is None:
-                raise self._parent_not_found(new_parent_id)
+            # 数据权限写侧：目标父（含根 None）必须在范围内。is_dept_visible(scope, None) 对非 ALL
+            # 返回 False → 非超管移到根 403；先校验 scope（403 先于 404），不泄露范围外父部门存在性。
             if scope is not None and not is_dept_visible(scope, new_parent_id):
-                raise self._forbidden_scope()  # 移到数据范围外的父部门 → 403
-            await self._check_no_cycle(item_id, payload)
+                raise self._forbidden_scope()
+            if new_parent_id is not None:
+                if await self._repo.get(new_parent_id) is None:
+                    raise self._parent_not_found(new_parent_id)
+                await self._check_no_cycle(item_id, payload)
         row = await self._repo.update(item_id, payload)
         if row is None:  # 并发删除兜底：预检后被他人删除
             raise self._not_found(item_id)

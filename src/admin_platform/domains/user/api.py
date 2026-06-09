@@ -24,6 +24,7 @@ from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
+from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.user.deps import get_user_service
 from admin_platform.domains.user.schemas import UserCreate, UserPage, UserRead, UserUpdate
 from admin_platform.domains.user.service import UserService
@@ -90,7 +91,14 @@ async def get_user(user_id: int, svc: ServiceDep, user: QueryGuard) -> UserRead:
 )
 @idempotent
 async def create_user(payload: UserCreate, svc: ServiceDep, user: AddGuard) -> UserRead:
-    return await svc.create(payload, scope=user.data_scope)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_USER_ADD,
+        "user",
+        coro=svc.create(payload, scope=user.data_scope),
+        display=lambda u: u.username,
+        success_status=201,
+    )
 
 
 @router.patch(
@@ -102,7 +110,14 @@ async def create_user(payload: UserCreate, svc: ServiceDep, user: AddGuard) -> U
 async def update_user(
     user_id: int, payload: UserUpdate, svc: ServiceDep, user: EditGuard
 ) -> UserRead:
-    return await svc.update(user_id, payload, scope=user.data_scope)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_USER_EDIT,
+        "user",
+        coro=svc.update(user_id, payload, scope=user.data_scope),
+        target_id=user_id,
+        display=lambda u: u.username,
+    )
 
 
 @router.delete(
@@ -112,4 +127,10 @@ async def update_user(
     responses=NOT_FOUND_RESPONSE,
 )
 async def delete_user(user_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
-    await svc.delete(user_id, scope=user.data_scope)
+    await audited_write(
+        user,
+        Permissions.SYSTEM_USER_REMOVE,
+        "user",
+        coro=svc.delete(user_id, scope=user.data_scope),
+        target_id=user_id,
+    )

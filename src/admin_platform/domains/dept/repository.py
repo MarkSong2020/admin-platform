@@ -125,8 +125,18 @@ class DeptRepository:
             .cte("dept_ancestors", recursive=True)
         )
         tree = tree.union_all(
-            select(Dept.id, Dept.parent_id, tree.c.depth + 1).where(Dept.id == tree.c.parent_id)
+            # depth cap（镜像 list_descendant_dept_ids）：坏数据成环时防递归 CTE 死循环。
+            select(Dept.id, Dept.parent_id, tree.c.depth + 1).where(
+                Dept.id == tree.c.parent_id, tree.c.depth < _MAX_DEPT_DEPTH
+            )
         )
         stmt = select(tree.c.id).where(tree.c.id != dept_id).order_by(tree.c.depth.desc())
         result = await self._session.execute(stmt)
         return [int(row) for row in result.scalars().all()]
+
+    async def list_existing_ids(self, ids: list[int]) -> set[int]:
+        """返回 ``ids`` 中实际存在的 dept 子集（绑定前 all-or-nothing 校验用；空入参返回空集）。"""
+        if not ids:
+            return set()
+        result = await self._session.execute(select(Dept.id).where(Dept.id.in_(ids)))
+        return {int(i) for i in result.scalars().all()}

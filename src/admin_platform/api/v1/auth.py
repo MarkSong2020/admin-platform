@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Request, status
 from redis.asyncio import Redis
 
+from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AppError, ProblemDetail
 from admin_platform.domains.auth.schemas import (
     CaptchaResponse,
@@ -35,8 +36,14 @@ _REFRESH_FAILED_RESPONSE: dict[int | str, dict[str, object]] = {401: {"model": P
 _CAPTCHA_RESPONSE: dict[int | str, dict[str, object]] = {503: {"model": ProblemDetail}}
 
 
-def _require_redis(request: Request) -> Redis | None:
-    """从 app.state 取 Redis（idempotency_enabled 时存在）；未部署则 None（限流/验证码降级）。"""
+def _login_guard_redis(request: Request) -> Redis | None:
+    """登录防护用 Redis：仅 ``auth_login_guard_enabled`` 时返回（与 idempotency 解耦，Codex 深审）。
+
+    返回 None ⟺ 登录防护未启用 → login 跳过限流/验证码、captcha 端点 503。guard 启用时
+    main.py 已按 guard_enabled 创建 Redis；startup_eager 时不可达 → fail-fast。
+    """
+    if not get_settings().auth_login_guard_enabled:
+        return None
     return getattr(request.app.state, "redis", None)
 
 
@@ -52,19 +59,19 @@ async def login_endpoint(payload: LoginRequest, request: Request) -> LoginRespon
         captcha_id=payload.captcha_id,
         captcha_answer=payload.captcha_answer,
         client_ip=_client_ip(request),
-        redis=_require_redis(request),
+        redis=_login_guard_redis(request),
     )
 
 
 @router.get("/captcha", operation_id="auth_captcha", responses=_CAPTCHA_RESPONSE)
 async def captcha_endpoint(request: Request) -> CaptchaResponse:
-    """生成算术验证码（spec §1.4）。Redis 未部署 → 503（验证码功能不可用）。"""
-    redis: Annotated[Redis | None, "from app.state"] = _require_redis(request)
+    """生成算术验证码（spec §1.4）。登录防护未启用 → 503（验证码功能不可用）。"""
+    redis: Annotated[Redis | None, "from app.state"] = _login_guard_redis(request)
     if redis is None:
         raise AppError(
             code="framework.SERVICE_UNAVAILABLE",
             title="Captcha unavailable",
-            detail="验证码服务未启用（需配置 Redis）",
+            detail="验证码服务未启用（需 APP_AUTH_LOGIN_GUARD_ENABLED=true + 配置 Redis）",
             status_code=int(HTTPStatus.SERVICE_UNAVAILABLE),
         )
     return await issue_captcha(redis)

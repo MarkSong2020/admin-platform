@@ -16,9 +16,9 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — 单租户回归完成，进 P1 RBAC）
+## 当前阶段（v0.0.1 — P1 RBAC + 登录增强已落地，P1.5 加固中）
 
-`make check` 202 ✓ / `make test-integration` 24 selected（19 passed / 5 redis skipped）✓ / `make coverage` 门槛 85%。
+`make check` 378 ✓ / `make coverage` 门槛 85%（`make test-integration` 需本地 DB + Redis）。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
@@ -26,8 +26,10 @@
 |---|---|
 | P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 | ✓ |
 | P0.9 单租户回归：拆多租户（tenant_filter/TenantMixin/tenants 表/上下文/隔离）→ 对标 RuoYi 本体 | ✓ |
-| P1 RBAC：角色/菜单/部门/岗位 + 数据权限 + 登录增强（refresh/验证码） | 下一步 |
-| P2+ 审计日志 / 字典参数 / 监控任务 / Vue 前端 | 待做 |
+| P1 RBAC：部门/角色/菜单/岗位 + 数据权限 + getInfo/getRouters + audit_event.v1 | ✓ |
+| P1.4 登录增强：refresh 轮换 + 验证码 + 登录限流 | ✓ |
+| P1.5 安全加固：dept 越权 / 登录防护默认 / 绑定 API + 审计织入 / route 契约 / refresh lock | ✓ |
+| P2+ 审计持久化 / 字典参数 / 监控任务 / Vue 前端 | 待做 |
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
@@ -35,7 +37,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：P1 RBAC（角色/菜单/部门/岗位 + RuoYi 风格数据权限，参考 RuoYi-Vue3-FastAPI；具体表结构设计拉 Codex PK）。
+下一步：P2（审计持久化 + 登录日志 / 字典参数 / Vue 前端）。P1.5 加固已落地（绑定 API / rbac_write 审计织入 / dept 越权 / 登录防护默认 / route 契约 / refresh lock / CTE cap）；排期项（Provider 批量上下文 / 跨域耦合 / access TTL）见 [`docs/specs/2026-06-09-p1.5-rbac-binding-audit.md`](./docs/specs/2026-06-09-p1.5-rbac-binding-audit.md) §7。
 
 ## AI 工作约束
 

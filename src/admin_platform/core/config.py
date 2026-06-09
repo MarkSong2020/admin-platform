@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     auth_refresh_max_sessions_per_user: int = Field(default=5, ge=1)
 
     # ---- P1.4 验证码 + 登录限流（依赖 Redis；Q14 联动，decision-log §1.4/1.5）----
+    # 登录防护总开关（验证码 + 限流），**独立于 idempotency**（Codex 深审：原先二者共用
+    # app.state.redis，关幂等会静默关防护）。默认 False 向后兼容；⚠️ 生产开 auth 强烈建议
+    # 同开本项 + 配 Redis + APP_STARTUP_EAGER_CONNECT=true（开启后 Redis 不可达 → startup
+    # fail-fast；运行时 Redis 抖动则 fail-closed 要求验证码，不静默放行）。
+    auth_login_guard_enabled: bool = False
     auth_captcha_ttl_seconds: int = Field(default=120, ge=30)  # 验证码 Redis TTL
     # 登录失败限流（组合维度 user+ip）。⚠️ 阈值/锁定数值待确认（decision-log §3）。
     auth_login_fail_window_seconds: int = Field(default=600, ge=60)  # 失败计数窗口

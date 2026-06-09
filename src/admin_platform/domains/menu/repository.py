@@ -182,3 +182,18 @@ class MenuRepository:
         for menu_id in dict.fromkeys(menu_ids):
             self._session.add(RoleMenu(role_id=role_id, menu_id=menu_id))
         await self._session.flush()
+
+    async def list_existing_ids(self, ids: list[int]) -> set[int]:
+        """返回 ``ids`` 中实际存在的 menu 子集（绑定前 all-or-nothing 校验用；空入参返回空集）。"""
+        if not ids:
+            return set()
+        result = await self._session.execute(select(Menu.id).where(Menu.id.in_(ids)))
+        return {int(i) for i in result.scalars().all()}
+
+    async def list_menu_ids_for_role(self, role_id: int) -> list[int]:
+        """角色已绑定的菜单 id（管理端回显用）。按 id 有序。"""
+        stmt = (
+            select(RoleMenu.menu_id).where(RoleMenu.role_id == role_id).order_by(RoleMenu.menu_id)
+        )
+        result = await self._session.execute(stmt)
+        return [int(i) for i in result.scalars().all()]

@@ -23,6 +23,7 @@ from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
+from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.post.deps import get_post_service
 from admin_platform.domains.post.schemas import (
     PostCreate,
@@ -108,8 +109,15 @@ async def get_post(item_id: int, svc: ServiceDep, _user: QueryGuard) -> PostRead
     responses=IDEMPOTENT_POST_ERROR_RESPONSES,
 )
 @idempotent
-async def create_post(payload: PostCreate, svc: ServiceDep, _user: AddGuard) -> PostRead:
-    return await svc.create(payload)
+async def create_post(payload: PostCreate, svc: ServiceDep, user: AddGuard) -> PostRead:
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_POST_ADD,
+        "post",
+        coro=svc.create(payload),
+        display=lambda p: p.code,
+        success_status=201,
+    )
 
 
 @router.patch(
@@ -119,9 +127,16 @@ async def create_post(payload: PostCreate, svc: ServiceDep, _user: AddGuard) -> 
     responses=PATCH_ERROR_RESPONSES,
 )
 async def update_post(
-    item_id: int, payload: PostUpdate, svc: ServiceDep, _user: EditGuard
+    item_id: int, payload: PostUpdate, svc: ServiceDep, user: EditGuard
 ) -> PostRead:
-    return await svc.update(item_id, payload)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_POST_EDIT,
+        "post",
+        coro=svc.update(item_id, payload),
+        target_id=item_id,
+        display=lambda p: p.code,
+    )
 
 
 @router.delete(
@@ -130,5 +145,11 @@ async def update_post(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=DELETE_ERROR_RESPONSES,
 )
-async def delete_post(item_id: int, svc: ServiceDep, _user: RemoveGuard) -> None:
-    await svc.delete(item_id)
+async def delete_post(item_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
+    await audited_write(
+        user,
+        Permissions.SYSTEM_POST_REMOVE,
+        "post",
+        coro=svc.delete(item_id),
+        target_id=item_id,
+    )

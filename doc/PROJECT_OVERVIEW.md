@@ -7,18 +7,15 @@
 ## 一页讲清
 
 ```
-┌─────────────────────── HTTP 入站 ───────────────────────┐
+┌────────────────── HTTP 入站（外层 → 内层）──────────────────┐
 │                                                          │
-│   CORS middleware ──► IdempotencyMiddleware              │
-│      (whitelist)        (Redis cache, @idempotent only)  │
-│                                                          │
-│             ──► RequestIDMiddleware                      │
-│                   (X-Request-ID + W3C traceparent)       │
-│                                                          │
-│             ──► [routes]                                 │
-│                                                          │
-│             ──► register_exception_handlers              │
-│                   (AppError → ProblemDetail RFC 9457)    │
+│   RequestIDMiddleware  (X-Request-ID + W3C traceparent)  │
+│     ──► CORS middleware       (whitelist)                │
+│     ──► AuthMiddleware        (JWT，auth_enabled 时)      │
+│     ──► IdempotencyMiddleware (Redis cache, @idempotent) │
+│     ──► [routes]                                         │
+│     ──► register_exception_handlers                      │
+│           (AppError → ProblemDetail RFC 9457)            │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
 
@@ -33,11 +30,11 @@
   └── models.py     SQLAlchemy 2.x typed mapping （含 --with-model 时）
 ```
 
-## 现状（v0.0.1 — 单租户回归完成，对标 RuoYi）
+## 现状（v0.0.1 — P1 RBAC + 登录增强已落地，对标 RuoYi）
 
-- **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。进度：JWT 认证 + Argon2 密码 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归（拆多租户）✓；下一步 P1 RBAC。对标路线图 → [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)
+- **应用版本**：`v0.0.1`（`pyproject.toml [project].version`）。进度：JWT 认证 + Argon2 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归 ✓；P1 RBAC（部门/角色/菜单/岗位 + RuoYi 数据权限 + getInfo/getRouters + audit_event.v1）✓；P1.4 登录增强（refresh 轮换/验证码/限流）✓；进行中 P1.5 安全加固。对标路线图 → [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)
 - **方向变更（2026-06-05）**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi 本体。多租户机制（`TenantMixin` / `tenant_filter` / `tenants` 表）已拆除，背景见 [`architecture/MULTI_TENANCY.md`](./architecture/MULTI_TENANCY.md) 废弃说明
-- **测试**：`make check` 202 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%
+- **测试**：`make check` 378 ✓（unit + api，ruff + pyright + pytest）/ `make coverage` 门槛 85%（v0.0.1 起已接入 CI fast lane 强制）
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
 - **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncpg + argon2-cffi（密码哈希）+ PyJWT
 - **脚手架 lineage**：generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 继承自模板 v0.5.3。示例域 `domains/todo`/`domains/tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)
@@ -62,6 +59,7 @@
 make init                          # uv sync --all-extras --dev
 make dev                           # http://127.0.0.1:8000/healthz
 make check                         # ruff format + ruff check + pyright + pytest (no integration)
+make coverage                      # pytest --cov（fail_under 85%；CI fast lane 强制）
 make new-module name=order         # 生成 5 层业务模块
 make new-module name=product with-model=1   # 含 ORM model
 make smoke-generator               # 改 generator 后 E2E 烟测（new-module + check + cleanup）

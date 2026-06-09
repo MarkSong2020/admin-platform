@@ -28,8 +28,7 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.auth import login_guard
 from admin_platform.domains.auth.captcha import generate_captcha, verify_captcha
 from admin_platform.domains.auth.refresh_service import (
-    enforce_concurrency_limit,
-    issue_refresh_token,
+    issue_login_refresh,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -65,8 +64,9 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
     """校验 (username, password)，成功返回 access token（+ refresh，P1.4）。
 
     ``redis`` 非空时启用验证码 + 限流（Q14）：IP 超限 → 429；账号软锁 / 失败达阈值要求验证码
-    （未提供有效验证码）→ ``auth.CAPTCHA_REQUIRED``；其余失败累加计数。``redis`` 为空（未部署
-    Redis）则跳过限流/验证码（向后兼容，同 refresh pepper 降级）。
+    （未提供有效验证码）→ ``auth.CAPTCHA_REQUIRED``；其余失败累加计数。``redis`` 是否非空由 api 层
+    ``_login_guard_redis`` 按 ``auth_login_guard_enabled`` 决定（与 idempotency 解耦，Codex 深审）：
+    guard 关 → None → 跳过限流/验证码。
     """
     # 限流前置（spec §1.5）：在密码校验前判定，防撞库放大 argon2 成本。
     if redis is not None:
@@ -131,8 +131,8 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
         # 配了 APP_AUTH_REFRESH_TOKEN_PEPPER 才启用 refresh flow。
         issued = None
         if get_settings().auth_refresh_token_pepper:
-            issued = await issue_refresh_token(session, user_id=active_user.id)
-            await enforce_concurrency_limit(session, user_id=active_user.id)
+            # per-user lock 串行化签发 + 上限（Codex 深审 F，防并发登录超 max_sessions）。
+            issued = await issue_login_refresh(session, user_id=active_user.id)
 
     # 登录成功：清失败计数 + 解软锁（spec §1.5）。
     if redis is not None:
