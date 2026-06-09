@@ -41,11 +41,26 @@
 
 端点：`GET /api/v1/monitor/online`（`system:online:list`）+ `DELETE /api/v1/monitor/online/{session_id}`（`system:online:remove`，path UUID 校验 → 422）。
 
-## 4. P4c 定时任务（Codex PK 收敛后定稿）
+## 4. P4c 定时任务（Codex PK medium 收敛 + 人值守拍板）
 
-> **待 Codex PK（medium，2026-06-10）收敛**。开放决策：① 调度库（APScheduler vs Celery beat）；② **多 worker 执行安全（roadmap P4 红线）**：单 worker / PG advisory lock / Redis 锁；③ 任务定义安全（预注册 job-registry vs RuoYi 任意调用串 = RCE 隐患）；④ 任务 + 执行日志数据模型；⑤ 调度器生命周期（main.py lifespan，基础设施红线）。
->
-> 裁决处置表 + 数据模型 + 实现待 PK 结果回填。
+> 命中多红线（main.py 基础设施 / 新依赖 APScheduler / 多 worker「P4 拍板」/ 新迁移），经 Codex PK
+> medium 收敛 + 用户拍板（提交 P4a/P4b 后做 P4c；时区 **Asia/Shanghai**）。
+
+落 `domains/scheduled_task` 五层 + 4 个「装备」模块（registry/executor/cron/scheduler）+ 迁移 0016。
+
+| 决策 | 取舍（Codex PK §1-5）|
+|---|---|
+| 调度库 | **APScheduler `AsyncIOScheduler`**（roadmap 已定，轻），反对 Celery beat（需 broker/worker 整套异步平台，超 DoD）。显式 `max_instances=1/coalesce=False/misfire_grace`，**不用 SQLAlchemyJobStore**（序列化 callable 与安全模型冲突） |
+| 任务定义安全 | **代码侧 `JobHandlerRegistry` 白名单**：DB 只存 `handler_key`+`params_json`，schema 无 `call_target/command/shell` 等任意调用字段，service create/update/run 三处强制 `registry.get` 命中 + params 过 handler Pydantic schema——**反 RuoYi 任意调用串（RCE）** |
+| **多 worker 安全（红线，两层）** | ① 进程级 **leader election**（`pg_try_advisory_lock(478270)` 专用连接，仅 leader 起 scheduler）；② 任务级 **DB execution claim**（`scheduled_task_logs (task_id, scheduled_at) WHERE schedule` partial unique，兜 failover 双触发）。`_fire` 的 scheduled_at 截断到分钟保 failover 同 tick 同值 |
+| executor | **两段 session**：claim（建 running 日志）先提交 → handler 事务外跑（不长持事务）→ result 写终态。手动并发靠任务行 `SELECT FOR UPDATE` 串行化（manual 无 partial unique）；orphan running 靠 `count_running` stale 阈值过滤不冻任务 |
+| cron | 仅 5 字段标准 crontab（`from_crontab`，校验器=调度构造器），拒 6/7 字段 + Quartz `?L W#`；6 字段秒级 dow 约定冲突留排期。next_run 仅单条算（list 不算，防永不触发 cron 的 lookahead 阻塞） |
+| 数据模型 | `scheduled_tasks`（name 唯一 / handler_key / params jsonb / cron / status / allow_concurrent / misfire / timeout / last_run）+ `scheduled_task_logs`（execution_id uuid / trigger schedule·manual / status 6 态 / FK SET NULL 保留历史 / partial unique claim） |
+| 生命周期 | main.py lifespan：`scheduler_enabled` 默认 **False**（本地/CI/单测不起，CRUD+手动触发不依赖）；start/stop 经 AsyncExitStack（LIFO：stop 先于 dispose_engine）；优雅 drain（grace 秒等 in-flight）；`_loop` 异常守护防僵尸 leader |
+
+端点：`/api/v1/monitor/jobs` 下 list/get/create/update/delete + `/{id}/run`（手动触发）+ `/handlers`（可选 handler）+ `/logs`（执行日志）。perms `system:job:list/query/add/edit/remove/run`。内置 handler：noop / echo / cleanup_expired_refresh_tokens。
+
+**非目标 / 排期**：6 字段秒级 cron；SIGKILL 后显式启动恢复（标 abandoned，已有 stale 过滤兜底不冻调度）；自动重试；独立 scheduler 进程；**stale 过滤的固有权衡**——治「孤儿冻死任务」必然重开一个等于「timeout↔实际完成」间隙的并发窗口（handler 实跑超过 `timeout_seconds` 且 `wait_for` 尚未 trip 时，`count_running` 漏算它），极小 timeout 下可能短暂违反 `allow_concurrent=False`；彻底消除需显式启动恢复（标 abandoned），留后续。
 
 ## 5. 权限与机检（三集合一致：registry == 路由用 == seed 菜单）
 
@@ -54,7 +69,7 @@
 | 服务监控 | `system:server:list` | monitor:server（C，只读单视图） |
 | 缓存监控 | `system:cache:list` | monitor:cache（C，只读单视图） |
 | 在线用户 | `system:online:list` / `system:online:remove` | monitor:online（C）+ 强制下线（F） |
-| 定时任务 | 待 P4c | 待 P4c |
+| 定时任务 | `system:job:list/query/add/edit/remove/run` | monitor:job（C）+ 查/增/改/删/执行（F） |
 
 机检：`test_permission_registry`（三集合相等 + 正则 `^system:[a-z]+:[a-z]+$`）/ `test_route_auth_contract`（非公开路由必有守卫）/ `test_rbac_endpoints`（系统监控子节点数）。
 
@@ -80,9 +95,22 @@
 | 并发已撤销仍记 success 审计 | 低 | 终态一致、RuoYi 不区分，**跳过**（避免过度设计） |
 | core/ 放宽兼容性 / admin-only / 无信息泄露 / 跨域写无遗漏 auth 副作用 | — | grep 13 调用点验证零行为变更，无需改 |
 
-### P4c
+### P4c（Codex PK medium + 4 视角 subagent loop，2 轮收敛，2026-06-10）
 
-待 P4c 实现后补。
+Codex PK 收敛架构（裁决：自动执行需 leader election + DB claim 兼具；命中升级 → 人值守拍板）。round-1 4 视角发现 + round-2 验证：
+
+| 发现 | 严重度 | 处置 |
+|---|---|---|
+| 手动触发并发 **TOCTOU**（count_running 检查与 claim INSERT 间无锁，manual 无 partial unique 兜底） | 高 | 任务行 `SELECT FOR UPDATE` 串行化（覆盖 manual+schedule 全组合） |
+| orphan running 永久冻结任务调度（崩溃遗留 running 被永远算"在跑"） | 中 | `count_running` 加 stale 阈值（`started_at >= now - timeout/3600s`）过滤 |
+| `_loop` 无异常防护 → 僵尸 leader（持锁 + 停调度 + 无 failover） | 中 | loop 体包 try/except + log，下周期重试 |
+| **executor 失败链路（handler 抛异常/超时/下线）零覆盖**（omit 但 integration 也没覆盖失败） | 严重 | 补集成测试（自定义 registry 注入 raise/slow handler），验证 omit 正当 |
+| "合法但永不触发" cron（2月30日）→ next_run ~4 年 lookahead 阻塞，list 批量放大 | 中 | next_run 仅单条算（list 不算，消除放大） |
+| `_StubExecutor` 不返回 None（偏离真实 `ExecutionOutcome \| None` 契约） | 中 | 补 None 变体单测 → manual_run 409；claim 并发断言加强（败者走 None 非异常） |
+| `_try_acquire_leader` 异常路径连接泄漏 / `scheduler_shutdown_grace_seconds` 死配置 / 列注释"5或6字段"不准 / reconcile 删·坏cron 未测 | 低 | conn close 守护 / 实现优雅 drain 用上 grace / 改"5字段标准crontab" / 补 reconcile 测试 |
+| RCE 封死（schema+service+executor 三层）/ cron·tz·SQL 注入 / 分层 C1-C8 / 迁移零漂移 / 权限三集合 / 跨域 import 无循环 / lifespan LIFO | — | 验证正确，无需改 |
+
+> round-2 验证（探针打真 DB）：6 条修复全部正确收敛、无回归/无死锁/无连接泄漏/不吞 CancelledError（FOR UPDATE 串行化手动并发 2路→1+1·4路→1+3、drain 双分支实测、list next_run 全 None）。executor 95% / scheduler 83% 实测覆盖。唯一 [低] 观察 = stale 过滤固有权衡（已入排期，见 §4 非目标），不阻塞放行。
 
 ## 7. 验证（实现后跑）
 
