@@ -133,3 +133,72 @@ async def test_wrong_captcha_rejected_after_threshold(client: AsyncClient) -> No
     )
     assert res.status_code == 403
     assert res.json()["type"] == "auth.CAPTCHA_REQUIRED"
+
+
+# ---- Codex 复审安全回归 ----
+
+
+async def test_account_lock_not_bypassable_by_captcha(client: AsyncClient) -> None:
+    # Codex 复审：账号软锁后，即使验证码 + 密码都对也应统一 401（硬锁，不被验证码解）。
+    # 直接植入软锁（触发路径需「过 captcha 后持续错密码」，此处直测核心行为：锁→401 不被解）。
+    await _seed()
+    r = Redis.from_url(_REDIS_URL)
+    await r.setex("auth:lock:user:alice", get_settings().auth_login_lock_seconds, "1")
+    await r.aclose()
+    cap = (await client.get("/api/v1/auth/captcha")).json()
+    res = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": "alice",
+            "password": _PW,  # 正确密码
+            "captcha_id": cap["captcha_id"],
+            "captcha_answer": _solve(cap["question"]),  # 正确验证码
+        },
+    )
+    assert res.status_code == 401  # 锁定期内仍拒绝（不被验证码 + 正确密码解锁）
+    assert res.json()["type"] == "auth.LOGIN_FAILED"
+
+
+async def test_success_does_not_clear_ip_counter() -> None:
+    # Codex 复审：成功登录不清全局 IP 失败计数（防同源 IP 撞库绕过）。
+    r = Redis.from_url(_REDIS_URL)
+    # 直接植入 IP 失败计数
+    await r.set("auth:fail:ip:testclient", 7)
+    await r.aclose()
+    await _seed()
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testclient") as c:
+        ok = await c.post("/api/v1/auth/login", json={"username": "alice", "password": _PW})
+        assert ok.status_code == 200, ok.text
+    await dispose_engine()
+    # 成功登录后 IP 计数仍在（未被清零）
+    r = Redis.from_url(_REDIS_URL)
+    remaining = await r.get("auth:fail:ip:testclient")
+    await r.aclose()
+    assert remaining is not None and int(remaining) == 7
+
+
+async def test_captcha_one_time_use_consumed(client: AsyncClient) -> None:
+    # 验证码取一次后即消费（GETDEL 原子）：同 id 再校验失败。
+    await _seed()
+    threshold = get_settings().auth_login_captcha_threshold
+    for _ in range(threshold):
+        await client.post("/api/v1/auth/login", json={"username": "alice", "password": "wrong"})
+    cap = (await client.get("/api/v1/auth/captcha")).json()
+    answer = _solve(cap["question"])
+    # 第一次用：成功
+    first = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": "alice",
+            "password": _PW,
+            "captcha_id": cap["captcha_id"],
+            "captcha_answer": answer,
+        },
+    )
+    assert first.status_code == 200
+    # 直接验 Redis key 已删（一次性消费）
+    r = Redis.from_url(_REDIS_URL)
+    gone = await r.get(f"auth:captcha:{cap['captcha_id']}")
+    await r.aclose()
+    assert gone is None

@@ -78,9 +78,14 @@ async def record_failure(redis: Redis, *, username: str, client_ip: str | None) 
 
 
 async def clear_on_success(redis: Redis, *, username: str, client_ip: str | None) -> None:
-    """登录成功：清 combo 计数。保守保留 user 计数短期（撞库偶中不清零历史）—— P1.4 清 ip 与锁。"""
+    """登录成功：清**该账号**失败计数 + 解软锁（合法用户成功后不再要验证码）。
+
+    **不清全局 IP 计数**（Codex 复审安全修复）：否则攻击者持任一有效账号、周期性成功登录即可
+    清掉同源 IP 撞库计数，绕过 ``auth_login_ip_limit``。IP 维度计数只随窗口 TTL 自然过期。
+    """
+    _ = client_ip  # 故意不消费 —— IP 计数不在成功时清零（防同源撞库绕过）
     try:
-        await redis.delete(_FAIL_IP.format(client_ip)) if client_ip else None
+        await redis.delete(_FAIL_USER.format(username))
         await redis.delete(_LOCK_USER.format(username))
     except Exception:
         logger.warning("login_guard clear_on_success redis failed", exc_info=True)

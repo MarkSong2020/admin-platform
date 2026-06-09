@@ -79,9 +79,13 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
                 status_code=int(HTTPStatus.TOO_MANY_REQUESTS),
                 headers={"Retry-After": str(get_settings().auth_login_lock_seconds)},
             )
-        # 账号软锁 或 失败达阈值 → 要求验证码（Q14：失败 N 次后才要，非首登必填）。
-        needs_captcha = decision.account_locked or decision.require_captcha
-        if needs_captcha and not await verify_captcha(redis, captcha_id, captcha_answer):
+        # 账号软锁（Codex 复审修复）：硬锁 —— 锁定期内统一 401 LOGIN_FAILED（不被验证码解锁，
+        # 防枚举不暴露「锁定状态」）。decision-log「账号软锁 10min / 统一 401」。
+        if decision.account_locked:
+            await login_guard.record_failure(redis, username=username, client_ip=client_ip)
+            raise _login_failed()
+        # 失败达阈值 → 要求验证码（Q14：失败 N 次后才要，非首登必填）。
+        if decision.require_captcha and not await verify_captcha(redis, captcha_id, captcha_answer):
             raise AppError(
                 code=AUTH_CAPTCHA_REQUIRED,
                 title="Captcha required",
