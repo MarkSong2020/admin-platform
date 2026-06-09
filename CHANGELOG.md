@@ -28,6 +28,17 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P4a/P4b 监控：服务/缓存监控 + 在线用户（2026-06-10）
+
+[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) · 各经 3 视角对抗审查收敛
+
+- **服务监控** `GET /monitor/server`（`system:server:list`）：psutil 采 CPU/内存/磁盘/进程/负载；阻塞 syscall 整体下沉 `anyio.to_thread`（不阻塞事件循环），单分区读失败跳过不整体 500。新依赖 `psutil` + `types-psutil`
+- **缓存监控** `GET /monitor/cache`（`system:cache:list`）：Redis `INFO` **白名单** 12 字段（不回整 dict，不泄露 executable/config/复制密钥）+ 命令统计；`asyncio.wait_for(2s)` 超时 + 不可达**降级 `available=False`**（监控面板不跟着 500）
+- **在线用户** `GET /monitor/online`（`system:online:list`）+ `DELETE /monitor/online/{uuid}`（`system:online:remove`）：会话 = 活动 refresh token family 派生（roadmap §4），`login_time` 取 family **轮换原点**（min over 全部 token，非最近轮换）；分页 `family_id` tiebreaker；强制下线撤销 family 全部活动 token（镜像 `revoke_family`，reason=`forced_logout`），经 `audited_write` 织入 `rbac_write`（成功 + 失败 404 都记，target=会话 UUID + 用户名）。**仅撤 refresh**：access JWT 无状态，即时 denylist 触鉴权中间件留后续。无 IP/UA（P1.4 决策 refresh token 不落设备列，不反转）
+- **core 微调**：`audited_write.target_id` 放宽 `int|None`→`int|str|None`（`_opt` 本就 `str()`，零行为变更）承载 UUID 会话目标
+- 落 `domains/monitor`（系统监控 umbrella，复用 MonitorRepository 跨域读 auth/audit 先例）；新增 4 权限点 + seed 菜单 4 项；无新表（纯基础设施读 + 派生现有 auth_refresh_tokens）
+- 测试：`make check` 484 ✓ / 8 import 契约 KEPT / `make test-integration` 168 ✓ / `make coverage` 87.6%（collector.py / schemas.py 100%）
+
 ### P3 运营配置：字典 + 参数 + 通知公告（2026-06-09）
 
 分支 `p1-rbac` · [spec](./docs/specs/2026-06-09-p3-operational-config.md)（Codex high 数据模型 PK 收敛）
