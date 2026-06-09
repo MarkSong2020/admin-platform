@@ -53,6 +53,14 @@ class Permissions:
     SYSTEM_POST_EDIT: Final = "system:post:edit"
     SYSTEM_POST_REMOVE: Final = "system:post:remove"
 
+    # ---- system:operlog（操作/审计日志，对标 RuoYi sys_oper_log，只读）----
+    SYSTEM_OPERLOG_LIST: Final = "system:operlog:list"
+    SYSTEM_OPERLOG_QUERY: Final = "system:operlog:query"
+
+    # ---- system:logininfor（登录日志，对标 RuoYi sys_logininfor，只读）----
+    SYSTEM_LOGININFOR_LIST: Final = "system:logininfor:list"
+    SYSTEM_LOGININFOR_QUERY: Final = "system:logininfor:query"
+
 
 # registry 全集（自动从 Permissions 常量收集，frozenset 天然去重）。
 ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(

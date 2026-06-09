@@ -1,10 +1,15 @@
-"""Auth ORM 映射 — 表 ``auth_refresh_tokens``（P1.4 refresh token 落库可撤销）。
+"""Auth ORM 映射 — 表 ``auth_refresh_tokens``（P1.4）+ ``login_logs``（P2 登录日志）。
 
 opaque refresh token 的服务端状态（spec 2026-06-09 §1.2）：只存 ``token_hash``
 （HMAC-SHA256，不存明文）+ 轮换链（``family_id`` / ``rotated_to_jti``）+ 撤销标记。
 rotation + reuse detection（用已轮换 token → 撤销整个 family）+ 并发 family 上限的状态载体。
 
 device 信息（ip/ua）**只审计不强绑定校验**（后台 IP/UA 常变，强绑定误杀）—— P1.4 暂不落列。
+
+``LoginLog``（P2 §2.2，对标 RuoYi ``sys_logininfor``）：登录尝试历史，覆盖成功 + 所有失败模式
+（密码错 / 账号锁 / 限流 / 验证码）。与 ``audit_events`` 有意重叠（登录失败两处都有）——审计轨 vs
+登录历史，回答不同问题。``user_id`` **无 FK**（失败时可空 + 用户删后留存），``request_id`` 关联
+``audit_events``。
 """
 
 from __future__ import annotations
@@ -53,4 +58,37 @@ class RefreshToken(Base, IdMixin, TimestampMixin):
     )
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最后轮换时间(UTC)"
+    )
+
+
+class LoginLog(Base, IdMixin, TimestampMixin):
+    """登录日志（P2 §2.2，RuoYi ``sys_logininfor`` 对标）。append-only，每次登录尝试一条。"""
+
+    __tablename__ = "login_logs"
+
+    __table_args__ = (
+        # 查询主路径：按账号查历史、按用户查、按状态筛（失败/锁）、按时间倒序。
+        Index("ix_login_logs_username_time", "username", "login_at_utc"),
+        Index("ix_login_logs_user_time", "user_id", "login_at_utc"),
+        Index("ix_login_logs_status", "status"),
+        Index("ix_login_logs_login_at", "login_at_utc"),
+    )
+
+    username: Mapped[str] = mapped_column(String(64), comment="尝试登录的用户名")
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="用户ID(失败/不存在时可空,无FK)"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), comment="success/failure/locked/rate_limited/captcha_required"
+    )
+    reason_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="失败原因码(error_code)"
+    )
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="客户端IP")
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True, comment="User-Agent")
+    request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="请求ID(关联audit_events)"
+    )
+    login_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), comment="登录尝试时刻(UTC)"
     )
