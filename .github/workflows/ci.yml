@@ -43,6 +43,16 @@ jobs:
       - name: Quality gate (ruff + pyright + pytest -m "not integration")
         run: make check
 
+      # 无人值守地基（2026-06-05）：make check 是快车道（不含 coverage，保持
+      # 本地快速反馈），coverage 门槛（pyproject fail_under=85）此前只在手动
+      # make coverage 时通电 —— CI 与无人值守均不强制，agent 可写 0 覆盖的新
+      # 代码而 fast lane 全绿。此 step 让门槛在 CI 通电。
+      # ⚠️ 盲区：total coverage 会被高覆盖模块（schemas/models/config）掩盖
+      # 低覆盖的 repository / auth service；它只防整体退化，不证明安全路径已测。
+      # 关键路径（401/403/默认 deny/越权）靠负向测试守，不靠这条 total 门槛。
+      - name: Coverage gate (fail_under per pyproject [tool.coverage.report])
+        run: make coverage
+
       # v0.4.21: also run the `.pre-commit-config.yaml` hooks against the full
       # tree — `make check` covers ruff/pyright/pytest but not the standalone
       # pre-commit-hooks (check-yaml / check-toml / end-of-file-fixer /
