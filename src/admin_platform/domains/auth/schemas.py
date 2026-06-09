@@ -10,11 +10,37 @@ class LoginRequest(BaseModel):
 
     username: str = Field(max_length=64, description="用户名（全局唯一）")
     password: str = Field(max_length=256, description="明文密码")
+    captcha_id: str | None = Field(
+        default=None, max_length=64, description="验证码ID（失败N次后需要）"
+    )
+    captcha_answer: str | None = Field(default=None, max_length=16, description="验证码答案")
+
+
+class CaptchaResponse(BaseModel):
+    """验证码响应（算术文本，spec §1.4）。"""
+
+    captcha_id: str = Field(description="验证码ID（登录时回传）")
+    question: str = Field(description="算术题（如 '3 + 5 = ?'）")
+    expires_in: int = Field(description="验证码存活秒数")
 
 
 class LoginResponse(BaseModel):
-    """登录成功响应。P0 只发 access token，无 refresh。"""
+    """登录 / 轮换成功响应。P1.4 起含 refresh token（向后兼容新增可选字段）。"""
 
     access_token: str = Field(description="JWT access token")
     token_type: str = Field(default="bearer", description="RFC 6750 token 类型")
     expires_in: int = Field(description="access token 存活秒数")
+    refresh_token: str | None = Field(default=None, description="opaque refresh token（轮换用）")
+    refresh_expires_in: int | None = Field(default=None, description="refresh token 存活秒数")
+
+
+class RefreshRequest(BaseModel):
+    """轮换请求体。"""
+
+    refresh_token: str = Field(max_length=512, description="opaque refresh token")
+
+
+class LogoutRequest(BaseModel):
+    """登出请求体。``all_devices`` 预留（P1.4 暂按 family 撤销）。"""
+
+    refresh_token: str = Field(max_length=512, description="opaque refresh token")

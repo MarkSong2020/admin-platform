@@ -111,6 +111,18 @@ AUTH_ACCOUNT_DISABLED = "auth.ACCOUNT_DISABLED"
 # auth.TOKEN_* 一致；admin_platform.* 留给业务资源错误）。
 AUTH_LOGIN_FAILED = "auth.LOGIN_FAILED"
 
+# ---- P1.4 登录增强错误码（spec 2026-06-09）----
+# refresh token 无效/过期/查无（统一不暴露细节，防探测）。
+AUTH_REFRESH_TOKEN_INVALID = "auth.REFRESH_TOKEN_INVALID"  # noqa: S105
+# refresh token reuse 检测命中（已轮换 token 再用 → 整个 family 撤销，token theft 信号）。
+AUTH_REFRESH_TOKEN_REUSED = "auth.REFRESH_TOKEN_REUSED"  # noqa: S105
+# 登录失败达阈值，要求验证码（Q14：验证码作纵深，失败 N 次后触发，非首登必填）。
+AUTH_CAPTCHA_REQUIRED = "auth.CAPTCHA_REQUIRED"
+# 验证码错误 / 过期 / 已消费。
+AUTH_CAPTCHA_INVALID = "auth.CAPTCHA_INVALID"
+# IP 维度限流触发（429 + Retry-After）。账号软锁仍走统一 LOGIN_FAILED 防枚举。
+AUTH_LOGIN_RATE_LIMITED = "auth.LOGIN_RATE_LIMITED"
+
 
 # ----------------------------- IntegrityError 兜底映射 ----------------------------- #
 # 业务 service 的 find_by_xxx 预检与 DB 写之间存在 race 窗口：两个并发请求
