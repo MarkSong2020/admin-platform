@@ -6,6 +6,7 @@ Redis 不可用则整组 skip（本仓 Redis opt-in）。
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -160,6 +161,24 @@ async def test_account_lock_not_bypassable_by_captcha(client: AsyncClient) -> No
     )
     assert res.status_code == 401  # 锁定期内仍拒绝（不被验证码 + 正确密码解锁）
     assert res.json()["type"] == "auth.LOGIN_FAILED"
+
+
+async def test_account_lock_emits_login_failed_audit(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Workflow 深审：账号硬锁分支返回 401 也必须 emit login_failed 审计——锁定窗口内的持续
+    # 尝试正是暴力破解最该留痕的时刻，不能因「对客户端防枚举不暴露锁定」而连内部审计一起省略。
+    await _seed()
+    r = Redis.from_url(_REDIS_URL)
+    await r.setex("auth:lock:user:alice", get_settings().auth_login_lock_seconds, "1")
+    await r.aclose()
+    with caplog.at_level(logging.INFO, logger="admin_platform.audit"):
+        res = await client.post("/api/v1/auth/login", json={"username": "alice", "password": _PW})
+    assert res.status_code == 401
+    events = [getattr(rec, "audit_event", None) for rec in caplog.records]
+    login_failed = [e for e in events if e and e.get("event_type") == "login_failed"]
+    assert login_failed, "账号硬锁分支未 emit login_failed 审计"
+    assert login_failed[0]["risk_level"] == "high"  # 锁定窗口尝试升 high
 
 
 async def test_success_does_not_clear_ip_counter() -> None:

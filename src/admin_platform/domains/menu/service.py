@@ -59,6 +59,10 @@ class MenuService:
 
     async def create(self, payload: MenuCreate) -> MenuRead:
         if payload.parent_id is not None:
+            # 父类型校验在 tree-lock 内（Workflow 深审 TOCTOU）：与 update 把父「改成按钮 F」的
+            # count_children 校验互斥串行化——否则「在 X 下建子菜单」与「X 改成 F」并发交错，
+            # 各自快照都看不到对方，提交后造出「按钮带子菜单」，build_routers 过滤 F 吞掉整段子树。
+            await self._repo.acquire_tree_lock()
             parent = await self._repo.get(payload.parent_id)
             if parent is None:
                 raise self._parent_not_found(payload.parent_id)
@@ -70,18 +74,17 @@ class MenuService:
         existing = await self._repo.get(item_id)
         if existing is None:
             raise self._not_found(item_id)
-        # 改成按钮(F)前必须无子菜单：否则 build_routers 过滤 F 会让整段子树从路由树消失（F1/F5）。
-        if (
-            "menu_type" in payload.model_fields_set
-            and payload.menu_type == "F"
-            and await self._repo.count_children(item_id) > 0
-        ):
-            raise self._type_has_children(item_id)
-        # 移动（改 parent 到非 None）走树写串行化：先拿 advisory lock，锁内做 parent 存在 + 类型 +
-        # 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动 A→B、B→A 各自都过、提交后成环）。
+        changing_to_button = "menu_type" in payload.model_fields_set and payload.menu_type == "F"
         new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else None
-        if new_parent_id is not None:
+        # 任何改动树结构不变式的写（改成按钮 F / 移动到新父）都在同一 tree-lock 内校验，关掉
+        # TOCTOU 窗口：① 改 F 的 count_children 预检若在锁外，可与并发 create 子菜单交错造出
+        # 「按钮带子菜单」（Workflow 深审）；② 移动防环 _check_no_cycle 若在锁外，并发 A→B、B→A
+        # 各自都过、提交后成环。create 路径同样在锁内校验父类型，两侧串行化才真正关窗。
+        if changing_to_button or new_parent_id is not None:
             await self._repo.acquire_tree_lock()
+        if changing_to_button and await self._repo.count_children(item_id) > 0:
+            raise self._type_has_children(item_id)
+        if new_parent_id is not None:
             parent = await self._repo.get(new_parent_id)
             if parent is None:
                 raise self._parent_not_found(new_parent_id)

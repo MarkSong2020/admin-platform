@@ -4,8 +4,12 @@
 （decision-log 2026-06-09 §2：不新增 assign 分权，避免 registry 扩张）。actor 由 ``CurrentUser``
 构造 ``AuditActor`` 传入 service（不破坏分层：service 不碰 fastapi/CurrentUser）。
 
+提权防护（Codex 🔴-1，用户拍板「超管专属角色分配」2026-06-09）：**权限图谱写**（user-role /
+role-menu）在 service 内再加 ``is_super_admin`` gate——持 edit 权限点≠能改权限图谱，杜绝非超管
+自我提权。**数据范围写**（role-dept）/ **组织标签写**（user-post）仍按 data_scope 委派非超管。
+
 错误路径（``responses=``，SDK 生成器据此 emit 类型化错误）：
-  * 401 auth.TOKEN_INVALID / 403 auth.FORBIDDEN_BY_ROLE —— 鉴权 / 权限点
+  * 401 auth.TOKEN_INVALID / 403 auth.FORBIDDEN_BY_ROLE —— 鉴权 / 权限点 / 权限图谱写非超管
   * 404 {user,role}.NOT_FOUND —— 主体不存在 / 数据范围不可见
   * 422 *.<X>_IDS_INVALID —— 绑定 id 集合存在性校验失败（all-or-nothing）
   * 403 auth.FORBIDDEN_BY_SCOPE —— role-dept 绑定不可见部门（数据权限写侧）
@@ -166,5 +170,5 @@ async def bind_role_depts(
     response_model=BindingRead,
     responses=GET_ERROR_RESPONSES,
 )
-async def get_role_depts(role_id: int, svc: ServiceDep, _user: RoleQueryGuard) -> BindingRead:
-    return BindingRead(ids=await svc.get_role_depts(role_id))
+async def get_role_depts(role_id: int, svc: ServiceDep, user: RoleQueryGuard) -> BindingRead:
+    return BindingRead(ids=await svc.get_role_depts(role_id, scope=user.data_scope))
