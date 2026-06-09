@@ -143,18 +143,25 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 
 ---
 
-## 5. 登录日志织入点（D 配套）
+## 5. 登录日志织入点（D 配套）✅ 已实现（Phase 3）
 
-| 路径 | file:line | audit_logs（envelope）| login_logs | 备注 |
-|---|---|---|---|---|
-| 登录成功 | `service.py:134-152` | **新增** `login_success`（扩 EventType，向后兼容加值）| status=success | |
-| 密码错/账号不存在/停用 | `service.py:128-132` | 现有 login_failed | status=failure + reason | |
-| 账号软锁 | `service.py:101-106` | 现有 login_failed（high）| status=locked | |
-| 限流拒绝 | `service.py:89-98` | **新增**（login_failed 或 denied）| status=rate_limited | |
-| 验证码不通过 | `service.py:107-114` | 不 emit（非安全事件，仅挑战）| status=captcha_required | |
-| refresh 复用 | `refresh_service.py:141-155` | 现有 refresh_reused（token theft，high）| 不落 login_logs | |
+> **实现优化 vs 原 §5**：rate_limited / captcha_required **不再额外写 audit_events**——它们是登录流状态，
+> 全在 login_logs（本就是登录安全日志，可查），写进 audit_events 是与 login_logs 的冗余。audit_events
+> 保持聚焦 P1 定义的安全事件（login_failed 含 bad-cred/locked、refresh_reused）+ 新增 login_success。
+> login_logs 则记**全部 5 种结局**。登录日志写入用 `domains/auth/login_log.py record_login_attempt`
+> （独立 session、最佳努力、永不阻断登录；IP/UA/request_id 从 ContextVar 读）。
+
+| 路径 | audit_events | login_logs | 备注 |
+|---|---|---|---|
+| 登录成功 | **新增** `login_success`（扩 EventType，向后兼容）| status=success + user_id | 块外提交后落，时点正确 |
+| 密码错/账号不存在/停用 | 现有 login_failed | status=failure + reason（未知用户 user_id 空）| |
+| 账号软锁 | 现有 login_failed（high）| status=locked | |
+| 限流拒绝 | —（归 login_logs）| status=rate_limited | |
+| 验证码不通过 | —（非安全事件，仅挑战）| status=captcha_required | |
+| refresh 复用 | 现有 refresh_reused（token theft，high）| 不落 login_logs | |
 
 - **声明式 vs 显式**：oper-log 审计沿用现有 `audited_write`（api 层 declarative-ish，符合 roadmap「声明式注解非纯 middleware」红线）；登录日志 = 5 个分支结果点**显式写**（分支多、显式更清晰）。
+- **测试**：`test_login_log.py` 验收成功/失败各落 1 条 + IP/UA 非空 + 未知用户 user_id 空 + Redis-gated captcha 路径；audit_events 侧 login_success/login_failed 落库。
 
 ---
 
