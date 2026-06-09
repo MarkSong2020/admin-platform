@@ -19,13 +19,30 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from admin_platform.audit.events import AuditEvent
 from admin_platform.audit.models import AuditEventLog
 from admin_platform.db.session import db_session
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 _logger = logging.getLogger("admin_platform.audit")
+
+
+async def persist_audit_in_session(session: AsyncSession, event: AuditEvent) -> None:
+    """在给定（业务）session 内写审计行——成功审计与业务**原子提交**（review F1 修复，方案 B）。
+
+    用 ``begin_nested()`` SAVEPOINT 隔离：审计 insert 失败只回滚 savepoint，**不连累业务**（守
+    「审计写失败不阻断业务」）；审计行随外层业务事务一起 commit / rollback → commit 失败时审计
+    与业务一同回滚，不留假成功审计。**永不抛**。
+    """
+    try:
+        async with session.begin_nested():
+            session.add(AuditEventLog.from_envelope(event))
+    except Exception:  # 审计落库失败绝不阻断业务（SAVEPOINT 已回滚该 insert）
+        _logger.warning("in-tx audit persist failed", exc_info=True)
 
 
 class AuditSink(Protocol):

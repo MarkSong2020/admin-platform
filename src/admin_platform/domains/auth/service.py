@@ -138,6 +138,14 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
                 status_code=int(HTTPStatus.FORBIDDEN),
             )
 
+    # 块前声明（review F2：失败路径的 record_login_attempt 移出业务 session 块，避免在外层连接
+    # 仍持有时开第二个独立 session → 每次失败登录占 2 连接；登录日志独立 session 落在块外即可）。
+    login_failed = False
+    failed_user_id: int | None = None
+    success_user_id = 0
+    success_username = ""
+    token = ""
+    issued = None
     async with db_session() as session:
         user = (
             await session.execute(select(User).where(User.username == username))
@@ -154,32 +162,36 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
             if redis is not None:
                 await login_guard.record_failure(redis, username=username, client_ip=client_ip)
             _emit_login_failed(username)
-            await record_login_attempt(
-                username=username,
-                status="failure",
-                reason_code=AUTH_LOGIN_FAILED,
-                user_id=active_user.id if active_user is not None else None,
-            )
-            raise _login_failed()
+            failed_user_id = active_user.id if active_user is not None else None
+            login_failed = True
+        else:
+            success_user_id = active_user.id
+            success_username = active_user.username
+            token = issue_access_token(user_id=active_user.id, username=active_user.username)
+            # P1.4：签发 refresh token（新 family）+ 并发上限淘汰最旧 family（同事务）。
+            # pepper 未配时降级不发 refresh（向后兼容，同 auth_enabled/idempotency 的可选风格）——
+            # 配了 APP_AUTH_REFRESH_TOKEN_PEPPER 才启用 refresh flow。
+            if get_settings().auth_refresh_token_pepper:
+                # per-user lock 串行化签发 + 上限（Codex 深审 F，防并发登录超 max_sessions）。
+                issued = await issue_login_refresh(session, user_id=active_user.id)
 
-        token = issue_access_token(user_id=active_user.id, username=active_user.username)
-        # P1.4：签发 refresh token（新 family）+ 并发上限淘汰最旧 family（同事务）。
-        # pepper 未配时降级不发 refresh（向后兼容，同 auth_enabled/idempotency 的可选风格）——
-        # 配了 APP_AUTH_REFRESH_TOKEN_PEPPER 才启用 refresh flow。
-        issued = None
-        if get_settings().auth_refresh_token_pepper:
-            # per-user lock 串行化签发 + 上限（Codex 深审 F，防并发登录超 max_sessions）。
-            issued = await issue_login_refresh(session, user_id=active_user.id)
+    # 业务 session 块已退出（连接释放）。失败：块外落登录日志 + raise（审计已在块内 emit 进缓冲）。
+    if login_failed:
+        await record_login_attempt(
+            username=username,
+            status="failure",
+            reason_code=AUTH_LOGIN_FAILED,
+            user_id=failed_user_id,
+        )
+        raise _login_failed()
 
     # 登录成功：清失败计数 + 解软锁（spec §1.5）。
     if redis is not None:
         await login_guard.clear_on_success(redis, username=username, client_ip=client_ip)
 
     # P2：成功审计 + 登录日志（均在业务事务提交后落，时点正确）。
-    _emit_login_success(active_user.id, active_user.username)
-    await record_login_attempt(
-        username=active_user.username, status="success", user_id=active_user.id
-    )
+    _emit_login_success(success_user_id, success_username)
+    await record_login_attempt(username=success_username, status="success", user_id=success_user_id)
 
     return LoginResponse(
         access_token=token,

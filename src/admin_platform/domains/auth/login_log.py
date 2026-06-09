@@ -34,13 +34,14 @@ async def record_login_attempt(
         async with db_session() as session:
             session.add(
                 LoginLog(
-                    username=username,
+                    # 截断到列宽防溢出（review F3：超长 username/UA 入库会抛错丢日志）。
+                    username=username[:64],
                     user_id=user_id,
                     status=status,
-                    reason_code=reason_code,
-                    ip=ctx.ip,
-                    user_agent=ctx.user_agent,
-                    request_id=ctx.request_id,
+                    reason_code=reason_code[:64] if reason_code else None,
+                    ip=ctx.ip[:64] if ctx.ip else None,
+                    user_agent=ctx.user_agent[:512] if ctx.user_agent else None,
+                    request_id=ctx.request_id[:64] if ctx.request_id else None,
                     login_at_utc=datetime.now(UTC),
                 )
             )

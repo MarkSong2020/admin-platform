@@ -26,6 +26,16 @@ from admin_platform.audit.events import AuditEvent
 from admin_platform.db.base import Base, IdMixin, TimestampMixin
 
 
+def _trunc(value: str | None, maxlen: int) -> str | None:
+    """把入库 VARCHAR 列截断到列宽（审计 review F3：超长 UA/path 攻击者可控，PG VARCHAR 超长
+    是抛 StringDataRightTruncation 而非截断 → 会让整批 add_all 失败、连累同请求其它安全事件丢失）。
+    **完整原值仍存在 payload JSONB（无长度限制）里，故拆查询列截断零数据损失。**
+    """
+    if value is None:
+        return None
+    return value[:maxlen]
+
+
 class AuditEventLog(Base, IdMixin, TimestampMixin):
     """``audit_event.v1`` 持久化记录（``created_at`` = 落库时刻，``occurred_at`` = 事件时刻）。"""
 
@@ -98,28 +108,30 @@ class AuditEventLog(Base, IdMixin, TimestampMixin):
     @classmethod
     def from_envelope(cls, event: AuditEvent) -> AuditEventLog:
         """从 ``audit_event.v1`` envelope 构造持久化记录（拆查询列 + 存完整 payload）。"""
+        # 拆查询列截断到列宽防溢出（完整原值在 payload）；event_id/schema_version/枚举类列源自
+        # 服务端生成或固定枚举，不会超长，无需截断。
         return cls(
             event_id=event.event_id,
             schema_version=event.schema_version,
             event_type=event.event_type,
-            action=event.action,
-            title=event.title,
+            action=_trunc(event.action, 128),
+            title=_trunc(event.title, 256),
             occurred_at=datetime.fromisoformat(event.occurred_at_utc),
             actor_user_id=event.actor.user_id,
-            actor_username=event.actor.username,
+            actor_username=_trunc(event.actor.username, 64),
             actor_is_super_admin=event.actor.is_super_admin,
-            target_type=event.target.type,
-            target_id=event.target.id,
-            target_display=event.target.display,
-            request_id=event.request.request_id,
-            trace_id=event.request.trace_id,
-            method=event.request.method,
-            path=event.request.path,
-            ip=event.request.ip,
-            user_agent=event.request.user_agent,
+            target_type=_trunc(event.target.type, 64),
+            target_id=_trunc(event.target.id, 128),
+            target_display=_trunc(event.target.display, 255),
+            request_id=_trunc(event.request.request_id, 64),
+            trace_id=_trunc(event.request.trace_id, 64),
+            method=_trunc(event.request.method, 16),
+            path=_trunc(event.request.path, 512),
+            ip=_trunc(event.request.ip, 64),
+            user_agent=_trunc(event.request.user_agent, 512),
             result_status=event.result.status,
             result_http_status=event.result.http_status,
-            result_error_code=event.result.error_code,
+            result_error_code=_trunc(event.result.error_code, 128),
             duration_ms=event.duration_ms,
             risk_level=event.risk_level,
             metadata_json=event.metadata,

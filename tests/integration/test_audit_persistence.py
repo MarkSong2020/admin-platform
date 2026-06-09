@@ -18,8 +18,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 
+from admin_platform.audit.emit import build_audit_event
+from admin_platform.audit.events import AuditEvent, AuditResult
 from admin_platform.audit.models import AuditEventLog
-from admin_platform.audit.sink import DbAuditSink, configure_audit_sink
+from admin_platform.audit.sink import DbAuditSink, configure_audit_sink, persist_audit_in_session
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
 from admin_platform.core.errors import register_exception_handlers
@@ -164,3 +166,60 @@ async def test_permission_denied_persisted_from_sync_dependency() -> None:
     assert denied[0].result_http_status == 403
     # 同步线程池依赖里 build_audit_event 也读到了 request 段（context 复制进线程）。
     assert denied[0].path == "/api/v1/roles"
+
+
+async def test_oversized_user_agent_does_not_lose_audit() -> None:
+    # review F3：超长 UA（攻击者可控）会让 VARCHAR(512) insert 抛 StringDataRightTruncation，
+    # 连累整批 add_all 失败 → 审计静默丢失。截断防御：拆查询列截断、payload(JSONB) 留完整原值。
+    async with _client(_SuperProvider) as c:
+        created = await c.post(
+            "/api/v1/roles",
+            json={"name": "ua", "code": "ua"},
+            headers={"User-Agent": "X" * 5000},
+        )
+        assert created.status_code == 201, created.text
+
+    rows = await _audit_rows("rbac_write")
+    assert len(rows) == 1  # 审计未因超长 UA 丢失
+    assert rows[0].user_agent is not None
+    assert len(rows[0].user_agent) == 512  # 查询列截断到列宽
+    # 完整原值仍在 payload（无损取证，JSONB 无长度限制）。
+    assert len(rows[0].payload["request"]["user_agent"]) == 5000
+
+
+async def _audit_by_event_id(event_id: str) -> list[AuditEventLog]:
+    async with db_session() as session:
+        stmt = select(AuditEventLog).where(AuditEventLog.event_id == event_id)
+        return list((await session.execute(stmt)).scalars().all())
+
+
+def _success_event() -> AuditEvent:
+    return build_audit_event(
+        event_type="rbac_write",
+        action="system:role:add",
+        title="审计原子性",
+        result=AuditResult(status="success", http_status=201),
+    )
+
+
+async def test_success_audit_rolls_back_with_business_transaction() -> None:
+    # review F1 方案 B 核心不变式：成功审计经 SAVEPOINT 写在业务事务内 → 业务 ROLLBACK 时
+    # 审计**一同回滚**，不留假成功审计（commit 失败/业务回滚不产生「业务没生效却记 success」）。
+    event = _success_event()
+    try:
+        async with db_session() as session:
+            await persist_audit_in_session(session, event)
+            raise RuntimeError("强制外层事务回滚")
+    except RuntimeError:
+        pass
+    assert await _audit_by_event_id(event.event_id) == []
+
+
+async def test_success_audit_commits_with_business_transaction() -> None:
+    # 正向对照：业务事务正常提交 → 同事务内的成功审计随之落库（原子提交）。
+    event = _success_event()
+    async with db_session() as session:
+        await persist_audit_in_session(session, event)
+    rows = await _audit_by_event_id(event.event_id)
+    assert len(rows) == 1
+    assert rows[0].result_status == "success"
