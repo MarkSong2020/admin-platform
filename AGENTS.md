@@ -13,14 +13,16 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — 单租户回归完成，进 P1 RBAC）
+## 当前阶段（v0.0.1 — P1 RBAC + 登录增强已落地，P1.5 加固中）
 
-`make check` 202 ✓ / `make coverage` 门槛 85%。
+`make check` 378 ✓ / `make coverage` 门槛 85%。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 - P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 ✓
 - P0.9 单租户回归：拆多租户（tenant_filter/TenantMixin/tenants 表/上下文/隔离）→ 对标 RuoYi 本体 ✓
-- 下一步 P1 RBAC：角色/菜单/部门/岗位 + 数据权限（参考 RuoYi-Vue3-FastAPI）
+- P1 RBAC：部门/角色/菜单/岗位 + RuoYi 数据权限 + getInfo/getRouters + audit_event.v1 ✓
+- P1.4 登录增强：refresh 轮换 / 验证码 / 登录限流 ✓
+- 下一步 P1.5 安全加固：dept 越权 / 登录防护默认 / 绑定 API / 审计织入（源自 2026-06-09 多视角 review）
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi。背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md) 废弃说明 + roadmap §3。
 

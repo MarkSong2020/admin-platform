@@ -96,6 +96,17 @@ async def enforce_concurrency_limit(session: AsyncSession, *, user_id: int) -> N
         await repo.revoke_family(fam, reason="concurrency_limit", now=now)
 
 
+async def issue_login_refresh(session: AsyncSession, *, user_id: int) -> IssuedRefresh:
+    """登录签发 refresh —— per-user advisory lock 串行化「签新 family + 并发上限淘汰」临界区
+    （Codex 深审 F）：先拿锁再签发，关掉并发登录各自签 family 互不可见、超 max_sessions 的窗口。
+    """
+    repo = RefreshTokenRepository(session)
+    await repo.acquire_user_lock(user_id)
+    issued = await issue_refresh_token(session, user_id=user_id)
+    await enforce_concurrency_limit(session, user_id=user_id)
+    return issued
+
+
 @dataclass(frozen=True)
 class RotationResult:
     """轮换结果：新 refresh token + 关联 user_id（供签新 access token）。"""

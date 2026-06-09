@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from admin_platform.audit.events import (
     AuditActor,
@@ -72,3 +72,33 @@ def emit_audit(event: AuditEvent) -> None:
         )
     except Exception:  # 审计落地失败绝不阻断业务主流程
         _audit_logger.warning("audit emit failed", exc_info=True)
+
+
+def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/target/result/metadata），全命名 kwargs 可放宽
+    *,
+    actor: AuditActor,
+    action: str,
+    target: AuditTarget,
+    status: Literal["success", "failure"],
+    http_status: int,
+    error_code: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    title: str = "RBAC 写操作",
+) -> None:
+    """发射 ``rbac_write`` 审计（spec §13.3）——所有 RBAC 管理写（CRUD + 绑定）的统一入口。
+
+    成功 / 失败都记（失败带 ``error_code``，不阻断原业务错误）；``metadata`` 只放非敏感差异
+    摘要（password/token 等再经 ``redact_metadata`` deny-list 兜底剔除）。risk_level 固定 medium。
+    """
+    emit_audit(
+        build_audit_event(
+            event_type="rbac_write",
+            action=action,
+            title=title,
+            actor=actor,
+            target=target,
+            result=AuditResult(status=status, http_status=http_status, error_code=error_code),
+            risk_level="medium",
+            metadata=metadata,
+        )
+    )

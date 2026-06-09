@@ -124,6 +124,12 @@ omit = [
     # refresh_service.py（P1.4）：DB-bound saga 编排（rotation/reuse/concurrency 全是 DB 操作），
     # 由 refresh 集成测充分覆盖（test_refresh_token 7 + test_auth_token_endpoints 5），同 repository 性质。
     "*/auth/refresh_service.py",
+    # P1.5 绑定 + 审计织入：rbac_binding service（跨域绑定 saga，DB-bound）+ api（绑定 endpoint
+    # 仅 integration 测）+ core/rbac_audit（api 层审计织入 helper）；由 test_rbac_binding /
+    # test_rbac_crud_audit 集成测覆盖，同 repository 性质。
+    "*/domains/rbac_binding/service.py",
+    "*/domains/rbac_binding/api.py",
+    "*/core/rbac_audit.py",
 ]
 
 [tool.coverage.report]

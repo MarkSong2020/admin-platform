@@ -23,6 +23,7 @@ from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
+from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.role.deps import get_role_service
 from admin_platform.domains.role.schemas import (
     RoleCreate,
@@ -108,8 +109,15 @@ async def get_role(item_id: int, svc: ServiceDep, _user: QueryGuard) -> RoleRead
     responses=IDEMPOTENT_POST_ERROR_RESPONSES,
 )
 @idempotent
-async def create_role(payload: RoleCreate, svc: ServiceDep, _user: AddGuard) -> RoleRead:
-    return await svc.create(payload)
+async def create_role(payload: RoleCreate, svc: ServiceDep, user: AddGuard) -> RoleRead:
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_ROLE_ADD,
+        "role",
+        coro=svc.create(payload),
+        display=lambda r: r.code,
+        success_status=201,
+    )
 
 
 @router.patch(
@@ -119,9 +127,16 @@ async def create_role(payload: RoleCreate, svc: ServiceDep, _user: AddGuard) -> 
     responses=PATCH_ERROR_RESPONSES,
 )
 async def update_role(
-    item_id: int, payload: RoleUpdate, svc: ServiceDep, _user: EditGuard
+    item_id: int, payload: RoleUpdate, svc: ServiceDep, user: EditGuard
 ) -> RoleRead:
-    return await svc.update(item_id, payload)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_ROLE_EDIT,
+        "role",
+        coro=svc.update(item_id, payload),
+        target_id=item_id,
+        display=lambda r: r.code,
+    )
 
 
 @router.delete(
@@ -130,5 +145,11 @@ async def update_role(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=DELETE_ERROR_RESPONSES,
 )
-async def delete_role(item_id: int, svc: ServiceDep, _user: RemoveGuard) -> None:
-    await svc.delete(item_id)
+async def delete_role(item_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
+    await audited_write(
+        user,
+        Permissions.SYSTEM_ROLE_REMOVE,
+        "role",
+        coro=svc.delete(item_id),
+        target_id=item_id,
+    )

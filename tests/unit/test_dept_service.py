@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.errors import AppError
 from admin_platform.domains.dept.models import Dept
 from admin_platform.domains.dept.repository import DeptRepository
@@ -190,6 +191,27 @@ async def test_update_move_under_valid_parent_ok() -> None:
         3, DeptUpdate(parent_id=9)
     )
     assert out.parent_id == 9
+
+
+@pytest.mark.asyncio
+async def test_update_move_to_root_forbidden_for_non_all_scope() -> None:
+    # Codex 深审越权：非超管（CUSTOM_DEPT）把可见部门显式移到根（parent_id=None）→ 403。
+    # 堵 update parent=None 绕过数据范围（对齐 create 建根需 ALL 不变式）。
+    node = _dept(3, code="B", parent_id=2)
+    scope = DataScope(ScopeType.CUSTOM_DEPT, user_id=1, visible_dept_ids=frozenset({3}))
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(rows=[node])).update(3, DeptUpdate(parent_id=None), scope=scope)
+    assert exc.value.code == "auth.FORBIDDEN_BY_SCOPE"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_move_to_root_ok_for_all_scope() -> None:
+    # ALL scope（超管）显式移到根仍放行 —— 修复不误伤超管。
+    node = _dept(3, code="B", parent_id=2)
+    scope = DataScope(ScopeType.ALL, user_id=1)
+    out = await _svc(_StubRepo(rows=[node])).update(3, DeptUpdate(parent_id=None), scope=scope)
+    assert out.parent_id is None
 
 
 @pytest.mark.asyncio

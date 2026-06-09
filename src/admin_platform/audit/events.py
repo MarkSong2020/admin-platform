@@ -41,17 +41,41 @@ _DENY_KEYS = (
 
 
 def redact_metadata(raw: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
-    """剔除 ``raw`` 中命中 deny-list 的 key（大小写不敏感），返回 (清洁 dict, 是否脱敏过)。"""
+    """剔除 ``raw`` 中命中 deny-list 的 key（大小写不敏感），返回 (清洁 dict, 是否脱敏过)。
+
+    **递归脱敏**（Codex 深审）：嵌套 dict / list 内的敏感 key 也剔除——P2 写审计 payload 可能
+    带嵌套结构（如 ``{"changes": {"password": ...}}``），仅清顶层会漏。
+    """
     if not raw:
         return {}, False
+    return _redact_dict(raw)
+
+
+def _redact_dict(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     cleaned: dict[str, Any] = {}
     redacted = False
-    for key, value in raw.items():
+    for key, value in data.items():
         if any(bad in key.lower() for bad in _DENY_KEYS):
             redacted = True
             continue
-        cleaned[key] = value
+        new_value, sub_redacted = _redact_value(value)
+        cleaned[key] = new_value
+        redacted = redacted or sub_redacted
     return cleaned, redacted
+
+
+def _redact_value(value: Any) -> tuple[Any, bool]:
+    if isinstance(value, dict):
+        return _redact_dict(value)
+    if isinstance(value, list):
+        out: list[Any] = []
+        any_redacted = False
+        for item in value:
+            new_item, item_redacted = _redact_value(item)
+            out.append(new_item)
+            any_redacted = any_redacted or item_redacted
+        return out, any_redacted
+    return value, False
 
 
 class AuditActor(BaseModel):

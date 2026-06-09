@@ -276,6 +276,20 @@ async def test_write_side_data_scope_limits_non_superadmin(client: AsyncClient) 
         assert (await lc.delete(f"/api/v1/depts/{b}")).status_code == 404
 
 
+async def test_update_move_to_root_forbidden_for_non_superadmin(client: AsyncClient) -> None:
+    # Codex 深审越权：非超管把可见子部门显式移到根（parent_id=None）必须 403 —— 堵 update
+    # parent=None 绕过 data_scope（与建根需 ALL 同口径）。改其它字段仍 200，证明拦的是"移到根"。
+    root = await _create(client, code="A", name="A")
+    child = await _create(client, code="A1", name="A1", parent_id=root)
+    async with _build_client(_LimitedProvider(visible=frozenset({root, child})), user_id="2") as lc:
+        forbidden = await lc.patch(f"/api/v1/depts/{child}", json={"parent_id": None})
+        assert forbidden.status_code == 403
+        assert forbidden.json()["type"] == "auth.FORBIDDEN_BY_SCOPE"
+        # 可见部门改其它字段仍可用（证明拦的是越权移根，不是整体禁写）
+        ok = await lc.patch(f"/api/v1/depts/{child}", json={"name": "改名"})
+        assert ok.status_code == 200, ok.text
+
+
 async def test_create_nonexistent_parent_returns_404(client: AsyncClient) -> None:
     res = await client.post("/api/v1/depts", json={"name": "x", "code": "X", "parent_id": 999999})
     assert res.status_code == 404

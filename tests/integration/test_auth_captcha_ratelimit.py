@@ -45,7 +45,10 @@ async def _setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     monkeypatch.setenv("APP_AUTH_ENABLED", "true")
     monkeypatch.setenv("APP_AUTH_JWT_SECRET", _SECRET)
     monkeypatch.setenv("APP_REDIS_URL", _REDIS_URL)
-    monkeypatch.setenv("APP_IDEMPOTENCY_ENABLED", "true")
+    # Codex 深审解耦回归：登录防护靠 auth_login_guard_enabled 而非 idempotency。刻意关幂等
+    # 仍开 guard → 验证码/限流必须照常生效（证明关幂等不再静默关防护）。
+    monkeypatch.setenv("APP_IDEMPOTENCY_ENABLED", "false")
+    monkeypatch.setenv("APP_AUTH_LOGIN_GUARD_ENABLED", "true")
     get_settings.cache_clear()
     r = Redis.from_url(_REDIS_URL)
     await r.flushdb()

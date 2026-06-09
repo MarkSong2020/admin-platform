@@ -28,6 +28,7 @@ from admin_platform.domains.dept.api import router as dept_router
 from admin_platform.domains.menu.api import router as menu_router
 from admin_platform.domains.menu.provider import DbMenuProvider
 from admin_platform.domains.post.api import router as post_router
+from admin_platform.domains.rbac_binding.api import router as rbac_binding_router
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.user.api import router as user_router
@@ -74,7 +75,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         redis: Redis | None = getattr(app.state, "redis", None)
         if redis is not None:
             stack.push_async_callback(redis.aclose)
-        if get_settings().startup_eager_connect:
+        # 登录防护启用时也强制 startup 探测 Redis（Codex 深审 fail-fast）：开了防护却连不上
+        # Redis = 认证防护静默失效，必须在 startup 暴露而非运行时才发现。
+        if get_settings().startup_eager_connect or get_settings().auth_login_guard_enabled:
             await _eager_probe_dependencies(app)
         yield
 
@@ -116,10 +119,17 @@ def _custom_openapi(app: FastAPI) -> dict[str, Any]:
         },
     )
     problem_ref = {"$ref": "#/components/schemas/ProblemDetail"}
-    for path_item in schema.get("paths", {}).values():
+    public_paths = set(get_settings().auth_public_paths)
+    for path, path_item in schema.get("paths", {}).items():
+        # 逐 operation 标注 security（Codex 深审）：受保护路由 ``bearerAuth``，公开路径（health /
+        # auth 端点）显式 ``security: []`` 覆盖。SDK / 前端生成器据此知道哪些接口必须带 token。
+        op_security: list[dict[str, list[str]]] = (
+            [] if path in public_paths else [{"bearerAuth": []}]
+        )
         for op in path_item.values():
             if not isinstance(op, dict):
                 continue
+            op["security"] = op_security
             responses = op.get("responses", {})
             for status_code in _PROBLEM_STATUS_CODES:
                 resp = responses.get(status_code)
@@ -147,12 +157,15 @@ def create_app() -> FastAPI:
     #        → Auth（验 JWT）
     #        → Idempotency（POST 幂等）
     #        → 路由 handler
-    if settings.idempotency_enabled:
+    # Redis 由 idempotency 或登录防护任一启用即创建（Codex 深审解耦：登录防护不再隐式
+    # 依赖 idempotency_enabled）。idempotency middleware 仅在 idempotency_enabled 时挂。
+    if settings.idempotency_enabled or settings.auth_login_guard_enabled:
         redis = Redis.from_url(settings.redis_url, decode_responses=False)
         app.state.redis = redis
+    if settings.idempotency_enabled:
         app.add_middleware(
             IdempotencyMiddleware,
-            store=RedisIdempotencyStore(redis),
+            store=RedisIdempotencyStore(app.state.redis),
             ttl_seconds=settings.idempotency_ttl_seconds,
             lock_ttl_seconds=settings.idempotency_lock_ttl_seconds,
         )
@@ -177,6 +190,9 @@ def create_app() -> FastAPI:
     app.include_router(menu_router)
     app.include_router(post_router)
     app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
+    app.include_router(
+        rbac_binding_router
+    )  # RBAC 绑定子资源 PUT/GET（P1.5，user-role/role-menu/…）
     # 业务 domain router 在此挂载（用 `make new-module` 生成 domain 后追加 include_router）。
     # RBAC Provider 接线（组合根）：core 的 get_permission_provider / get_menu_provider 默认
     # fail-closed 抛错（占位），此处经 dependency_overrides 注入真实 DB 版 Provider。

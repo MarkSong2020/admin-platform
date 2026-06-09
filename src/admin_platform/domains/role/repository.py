@@ -124,3 +124,19 @@ class RoleRepository:
         for dept_id in dict.fromkeys(dept_ids):
             self._session.add(RoleDept(role_id=role_id, dept_id=dept_id))
         await self._session.flush()
+
+    async def list_existing_ids(self, ids: list[int]) -> set[int]:
+        """返回 ``ids`` 中实际存在的 role 子集（绑定前 all-or-nothing 校验用；空入参返回空集）。"""
+        if not ids:
+            return set()
+        result = await self._session.execute(select(Role.id).where(Role.id.in_(ids)))
+        return {int(i) for i in result.scalars().all()}
+
+    async def list_role_ids_for_user(self, user_id: int) -> list[int]:
+        """用户已绑定的角色 id（**不过滤 status**，含 disabled——管理端回显用，区别于授权读取
+        的 ``list_roles_for_user`` 只取 active）。按 id 有序。"""
+        stmt = (
+            select(UserRole.role_id).where(UserRole.user_id == user_id).order_by(UserRole.role_id)
+        )
+        result = await self._session.execute(stmt)
+        return [int(i) for i in result.scalars().all()]

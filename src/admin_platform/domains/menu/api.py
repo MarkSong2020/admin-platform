@@ -13,9 +13,8 @@
   * 409 menu.HAS_CHILDREN          —— delete 有子菜单的菜单
   * 422 framework.VALIDATION_FAILED —— Pydantic 拒绝 payload
 
-⚠️ 本 router **暂未挂进生产 ``create_app()``**（main.py 接线 + ``MenuProvider`` 注入是人值守
-   步骤，见任务完成报告「人值守接线」#1）；当前只在测试 app 经 ``dependency_overrides`` 注入
-   超管 / 权限 stub 验证守卫与 CRUD。
+本 router 已挂进生产 ``create_app()``（main.py ``include_router(menu_router)`` + ``DbMenuProvider``
+   经 ``dependency_overrides`` 注入）；测试 app 另经 stub provider 注入超管 / 权限点验证守卫与 CRUD。
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
+from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.menu.deps import get_menu_service
 from admin_platform.domains.menu.schemas import (
     MenuCreate,
@@ -116,8 +116,15 @@ async def get_menu(item_id: int, svc: ServiceDep, _user: QueryGuard) -> MenuRead
     responses=IDEMPOTENT_POST_ERROR_RESPONSES,
 )
 @idempotent
-async def create_menu(payload: MenuCreate, svc: ServiceDep, _user: AddGuard) -> MenuRead:
-    return await svc.create(payload)
+async def create_menu(payload: MenuCreate, svc: ServiceDep, user: AddGuard) -> MenuRead:
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_MENU_ADD,
+        "menu",
+        coro=svc.create(payload),
+        display=lambda m: m.name,
+        success_status=201,
+    )
 
 
 @router.patch(
@@ -127,9 +134,16 @@ async def create_menu(payload: MenuCreate, svc: ServiceDep, _user: AddGuard) -> 
     responses=PATCH_ERROR_RESPONSES,
 )
 async def update_menu(
-    item_id: int, payload: MenuUpdate, svc: ServiceDep, _user: EditGuard
+    item_id: int, payload: MenuUpdate, svc: ServiceDep, user: EditGuard
 ) -> MenuRead:
-    return await svc.update(item_id, payload)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_MENU_EDIT,
+        "menu",
+        coro=svc.update(item_id, payload),
+        target_id=item_id,
+        display=lambda m: m.name,
+    )
 
 
 @router.delete(
@@ -138,5 +152,11 @@ async def update_menu(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=DELETE_ERROR_RESPONSES,
 )
-async def delete_menu(item_id: int, svc: ServiceDep, _user: RemoveGuard) -> None:
-    await svc.delete(item_id)
+async def delete_menu(item_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
+    await audited_write(
+        user,
+        Permissions.SYSTEM_MENU_REMOVE,
+        "menu",
+        coro=svc.delete(item_id),
+        target_id=item_id,
+    )
