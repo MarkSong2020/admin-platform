@@ -36,6 +36,9 @@ from admin_platform.domains.post.api import router as post_router
 from admin_platform.domains.rbac_binding.api import router as rbac_binding_router
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.provider import DbPermissionProvider
+from admin_platform.domains.scheduled_task.api import router as scheduled_task_router
+from admin_platform.domains.scheduled_task.registry import JOB_REGISTRY
+from admin_platform.domains.scheduled_task.scheduler import SchedulerController
 from admin_platform.domains.user.api import router as user_router
 
 # ADR 0001 §1：这些状态码上的错误响应必须符合 ProblemDetail 形状。
@@ -86,8 +89,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             stack.push_async_callback(redis.aclose)
         # 登录防护启用时也强制 startup 探测 Redis（Codex 深审 fail-fast）：开了防护却连不上
         # Redis = 认证防护静默失效，必须在 startup 暴露而非运行时才发现。
-        if get_settings().startup_eager_connect or get_settings().auth_login_guard_enabled:
+        # P4c：调度器启用时也强制探测（DB 不可达 = 调度静默失效，必须 startup fail-fast）。
+        if (
+            settings.startup_eager_connect
+            or settings.auth_login_guard_enabled
+            or settings.scheduler_enabled
+        ):
             await _eager_probe_dependencies(app)
+        # P4c 定时任务调度器：scheduler_enabled 默认 False 时 start/stop 均 no-op；启用则仅抢到
+        # PG advisory leader 锁的 worker 真正起 AsyncIOScheduler。最后 push → LIFO 最先执行：
+        # stop（释放 leader 锁 + 停调度）跑在 dispose_engine 之前，避免对已释放引擎取连接。
+        scheduler = SchedulerController(settings, JOB_REGISTRY)
+        stack.push_async_callback(scheduler.stop)
+        await scheduler.start()
+        app.state.scheduler = scheduler
         yield
 
 
@@ -203,6 +218,7 @@ def create_app() -> FastAPI:
     app.include_router(config_router)  # P3 运营配置：参数设置
     app.include_router(notice_router)  # P3 运营配置：通知公告
     app.include_router(monitor_router)  # P2 系统监控：操作日志 / 登录日志只读查询
+    app.include_router(scheduled_task_router)  # P4c 定时任务：CRUD + 手动触发 + 执行日志
     app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
     app.include_router(
         rbac_binding_router

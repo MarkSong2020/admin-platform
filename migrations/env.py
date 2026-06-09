@@ -41,6 +41,10 @@ from admin_platform.audit.models import AuditEventLog  # noqa: F401
 from admin_platform.domains.notice.models import Notice  # noqa: F401
 from admin_platform.domains.config.models import Config  # noqa: F401
 from admin_platform.domains.dict.models import DictData, DictType  # noqa: F401
+from admin_platform.domains.scheduled_task.models import (  # noqa: F401
+    ScheduledTask,
+    ScheduledTaskLog,
+)
 
 # ----------------------------------------------------------------------------
 

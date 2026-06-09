@@ -19,6 +19,10 @@ dependencies = [
     "opentelemetry-sdk>=1.41.1",
     "opentelemetry-exporter-otlp-proto-http>=1.41.1",
     "argon2-cffi>=25,<26",
+    # P4 服务监控：跨平台（macOS 开发 + Linux 生产）CPU/内存/磁盘采集；只读、无副作用。
+    "psutil>=6",
+    # P4c 定时任务：APScheduler 3.x（AsyncIOScheduler + CronTrigger）；4.x 是 API 重写，pin <4。
+    "apscheduler>=3.10,<4",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +40,8 @@ dev = [
     "pre-commit>=4",
     # 依赖扫描（Errata #1）：用 uvx pip-audit 一次性跑也可，不强制入 dev
     "import-linter>=2.11,<3",
+    # P4 服务监控：psutil 不带完整类型存根，pyright 需 types-psutil 才不报 reportMissingTypeStubs。
+    "types-psutil>=6",
 ]
 
 [build-system]
@@ -130,6 +136,12 @@ omit = [
     "*/domains/rbac_binding/service.py",
     "*/domains/rbac_binding/api.py",
     "*/core/rbac_audit.py",
+    # P4c 定时任务：executor（两段 db_session 执行 saga）+ scheduler（PG advisory leader election +
+    # AsyncIOScheduler 生命周期）是 DB/infra-bound，fast lane 无法结构性覆盖；由 integration 测
+    # （test_scheduled_task_scheduler 覆盖 claim 去重/leader/reconcile/_fire、test_scheduled_task_crud
+    # 覆盖真实手动执行），同 repository.py / refresh_service.py 性质，从 fast-lane gate omit。
+    "*/domains/scheduled_task/executor.py",
+    "*/domains/scheduled_task/scheduler.py",
 ]
 
 [tool.coverage.report]

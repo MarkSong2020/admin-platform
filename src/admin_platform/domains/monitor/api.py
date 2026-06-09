@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -16,18 +17,23 @@ from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.permissions import require_permission
-from admin_platform.domains.monitor.deps import get_monitor_service
+from admin_platform.core.rbac_audit import audited_write
+from admin_platform.domains.monitor.deps import get_monitor_service, get_system_monitor_service
 from admin_platform.domains.monitor.schemas import (
     AuditEventDetail,
     AuditEventPage,
+    CacheMetrics,
     LoginLogPage,
     LoginLogRead,
+    OnlineSessionPage,
+    ServerMetrics,
 )
-from admin_platform.domains.monitor.service import MonitorService
+from admin_platform.domains.monitor.service import MonitorService, SystemMonitorService
 
 router = APIRouter(prefix="/api/v1/monitor", tags=["monitor"])
 
 ServiceDep = Annotated[MonitorService, Depends(get_monitor_service)]
+SysMonServiceDep = Annotated[SystemMonitorService, Depends(get_system_monitor_service)]
 # page 上限防深分页 DoS（review O1：审计表 append-only 持续增长，大 offset 扫描+count 成本随表涨）。
 PageQ = Annotated[int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000）")]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
@@ -41,6 +47,12 @@ LoginInfoList = Annotated[
 LoginInfoQuery = Annotated[
     CurrentUser, Depends(require_permission(Permissions.SYSTEM_LOGININFOR_QUERY))
 ]
+# P4 服务/缓存监控守卫（只读单视图）。
+ServerView = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_SERVER_LIST))]
+CacheView = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_CACHE_LIST))]
+# P4 在线用户守卫（查 + 强制下线）。
+OnlineList = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_ONLINE_LIST))]
+OnlineRemove = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_ONLINE_REMOVE))]
 
 AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     401: {"model": ProblemDetail},
@@ -113,3 +125,58 @@ async def list_logininfor(
 )
 async def get_logininfor(log_pk: int, svc: ServiceDep, _user: LoginInfoQuery) -> LoginLogRead:
     return await svc.get_login_log(log_pk)
+
+
+@router.get(
+    "/server",
+    operation_id="monitor_server_metrics",
+    response_model=ServerMetrics,
+    responses=AUTH_ERROR_RESPONSES,
+)
+async def get_server_metrics(svc: SysMonServiceDep, _user: ServerView) -> ServerMetrics:
+    """服务监控：CPU / 内存 / 磁盘 / 进程实时指标（psutil 采集）。"""
+    return await svc.get_server_metrics()
+
+
+@router.get(
+    "/cache",
+    operation_id="monitor_cache_metrics",
+    response_model=CacheMetrics,
+    responses=AUTH_ERROR_RESPONSES,
+)
+async def get_cache_metrics(svc: SysMonServiceDep, _user: CacheView) -> CacheMetrics:
+    """缓存监控：Redis INFO 摘要 + 命令统计。Redis 不可达时 available=False（不 500）。"""
+    return await svc.get_cache_metrics()
+
+
+@router.get(
+    "/online",
+    operation_id="monitor_online_list",
+    response_model=OnlineSessionPage,
+    responses=AUTH_ERROR_RESPONSES,
+)
+async def list_online_sessions(
+    svc: ServiceDep, _user: OnlineList, page: PageQ = 1, size: SizeQ = 20
+) -> OnlineSessionPage:
+    """在线用户：当前活动会话（未撤销未过期的 refresh token family）分页。"""
+    return await svc.list_online_sessions(page=page, size=size)
+
+
+@router.delete(
+    "/online/{session_id}",
+    operation_id="monitor_online_force_logout",
+    response_model=None,
+    status_code=204,
+    responses=GET_ERROR_RESPONSES,
+)
+async def force_logout(session_id: uuid.UUID, svc: ServiceDep, user: OnlineRemove) -> None:
+    """强制下线：撤销指定会话 family。审计 rbac_write（目标= 会话 UUID + 用户名）。会话不存在 → 404。"""
+    await audited_write(
+        user,
+        Permissions.SYSTEM_ONLINE_REMOVE,
+        "online_session",
+        coro=svc.force_logout(session_id),
+        target_id=str(session_id),
+        display=lambda username: username,
+        success_status=204,
+    )
