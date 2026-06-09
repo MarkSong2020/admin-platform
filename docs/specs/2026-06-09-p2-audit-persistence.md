@@ -115,15 +115,29 @@ async def persist_audit_event(event):
 
 失败/denied 审计（permission_denied / login_failed / rbac_write 失败）在业务 `raise AppError` 之时/之前 emit → 业务 `session.begin()` 的 `__aexit__` 触发 **ROLLBACK**。若审计同 session，**最该留的安全事件被一起回滚丢掉**——这正是 P1.5 刚修的「revoke 副作用被 ROLLBACK」同一 bug 类。独立 session 同时切断两个耦合：①审计不被业务回滚牵连；②审计写失败不回滚业务。
 
-### 3.3 已知缺口（诚实边界）
+### 3.3 写入路径按结果分流（review F1 修正，方案 B）
 
-- **「假审计」不存在**：原担心「独立 session 过早写 success → 业务最终 rollback 但审计已 success」——
-  当前架构天然规避：成功 emit 都在业务事务**关闭后**（`audited_write` 在 `await coro` 之后；登录成功在
-  db_session 块外），且 flush 又延后到响应后。故无需 after-commit collector（spec 收敛时的简化洞察）。
-- **崩溃丢失窗口**：响应已生成、flush 未完成时进程崩溃 → 该请求缓冲的审计丢失（logger sink 是 durable
-  底线）。这是 best-effort 固有缺口；真不丢要 transactional outbox（重，P3）。
-- **响应延迟**：flush 在中间件 finally `await`，给有审计的请求加一次批量 insert 延迟（通常 1 条/~1ms）。
-  无审计请求空缓冲 = no-op。高频写场景是 Redis Stream 异步化（§3.4）的升级信号。
+> ⚠️ **修正**：原 §3.3 曾断言「假审计不存在 / 成功 emit 都在业务事务关闭后」——**错**。`audited_write`
+> / `rbac_binding` 的成功 emit 在 `await coro` 之后，但 service 用的是**请求共享 `get_session`**，其
+> commit 在 FastAPI teardown（晚于 emit），且 teardown 与中间件 flush 的先后不被框架保证。4 个独立
+> 审查者（含 Codex high）命中：commit 失败时会留假成功审计。用户拍板方案 B 修复：
+
+- **成功类审计**（rbac_write success）→ `record_audit_committed` 写**当前请求业务 session**
+  （`db.session.current_request_session` 取，`begin_nested()` SAVEPOINT 隔离）。与业务**原子提交**：
+  commit 失败 → 审计随业务一同回滚，**无假成功审计**；审计 insert 失败 → 仅回滚 savepoint，不连累
+  业务。集成测试 `test_success_audit_{rolls_back,commits}_with_business_transaction` 守。
+- **失败/拒绝类审计**（permission_denied / login_failed / rbac_write 失败 / refresh_reused）→ `emit_audit`
+  缓冲 + 响应后中间件独立 session flush。这些事件业务**本就已 ROLLBACK**，必须独立落（不被回滚吞）。
+- **登录成功**：`_emit_login_success` 在 `db_session()` 块外（业务已 commit），post-commit emit 无 F1，
+  保持缓冲路径。
+- **非 HTTP 上下文**（CLI / 后台）无请求 session → 成功审计回退缓冲（无业务事务可绑，无 F1 风险）。
+
+### 3.5 已知缺口（诚实边界）
+
+- **崩溃丢失窗口（仅失败/拒绝类）**：缓冲未 flush 即进程崩溃 → 丢该请求的失败审计 DB 行（logger sink
+  是 durable 底线）。成功类已 in-tx 与业务原子，无此窗口。真不丢失败审计要 transactional outbox（P3）。
+- **响应延迟**：失败审计 flush 在中间件 finally `await`（通常 1 条/~1ms）；成功审计随业务事务无额外往返。
+- **列宽截断（F3）**：拆查询列截断到列宽防溢出丢批；完整原值在 `payload` JSONB（无损）。
 
 ### 3.4 Redis Stream 异步（推迟）
 
@@ -212,3 +226,20 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 ### 7.4 红线裁决 → **升级人拍板**
 
 两方裁决信号一致：**否自动执行**，命中升级（数据模型不可逆 / 认证安全日志 / 跨模块横切 / 事务边界红线）。按 codex-pk 纪律 + CLAUDE.md「不可逆决策强制升级，不让 Claude 自裁」——数据模型落迁移前需用户签字。设计已收敛，升级性质为**收敛设计的 sign-off**（非让用户裁决分歧），外加 2 个用户语境相关的开放项（保留期/分区、P2 范围边界）。
+
+---
+
+## 8. Round-1 对抗审查处置（Codex high + 3 视角 subagent，2026-06-09）
+
+实现完成后做对抗式深审：Codex high + 3 个独立 subagent（事务边界 / 安全脱敏越权 / 并发 ContextVar 资源）。4 路独立视角**全部命中 F1**（成功审计 emit 早于业务 commit）——PK 防自欺核心信号。
+
+| # | 发现 | 严重度 | 处置 |
+|---|---|---|---|
+| F1 | 成功审计（audited_write/rbac_binding）emit 时业务用请求共享 session 未提交，commit 失败留假成功审计；推翻原 §3.3 论断 | 阻断（Codex）| **用户拍板方案 B**：成功审计写业务 session（SAVEPOINT 隔离）原子提交；失败/拒绝独立缓冲。测试 `test_success_audit_{rolls_back,commits}_with_business_transaction` |
+| F2 | 登录失败分支 `record_login_attempt` 嵌业务 session 块内 → 每次失败登录占 2 连接 | 应修 | ✅ deferred 模式移出块外（块退出后落日志再 raise），与成功/锁/限流分支对齐 |
+| F3 / A1 | 批量 flush 非原子：超长 UA/path（攻击者可控）触 VARCHAR 溢出 → 整批审计丢失 | 应修 | ✅ `from_envelope` / `record_login_attempt` 拆查询列截断到列宽；payload JSONB 留完整原值（零损失）。测试 `test_oversized_user_agent_does_not_lose_audit` |
+| O1 | 监控查询 `page` 无上限 → 深分页 DoS | 可选 | ✅ `PageQ` 加 `le=10000` |
+| A2 | XFF 信任开关默认安全但缺运维文档 | 应修 | config.py 注释 + .env.example + 本 spec §4 已记「仅可信反代剥离 XFF 时可开」三处覆盖 |
+| 池放大 | provider sync 桥每权限校验多次独立 session + P2 flush session 叠加，threadpool(40) vs pool(15) 倒挂无 pool_timeout | 应修（P1 遗留） | 排期项：属 P1 RBAC provider 设计，P2 仅加剧；记入 §7 排期，建议 P2.1 给 engine 设 pool_timeout + provider 单 session 批量取 |
+
+**未发现**：脱敏（payload 唯一自由文本入口 metadata 已 deny-list 递归脱敏，逐 emit 点核对无明文密码/token 旁路）、注入（监控查询全 ORM 参数化）、越权（4 端点全挂 require_permission，`test_monitor_query` 403 实测）、ContextVar 请求隔离（finally reset + 同步线程池依赖 buffer 共享已测）。

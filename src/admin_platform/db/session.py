@@ -26,16 +26,31 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.db.engine import get_sessionmaker
 
+# 当前 HTTP 请求的业务 session（ContextVar）。供成功审计在**同一业务事务内**写 audit 行
+# （SAVEPOINT 隔离，与业务原子提交）——解 review F1「成功审计 emit 早于业务 commit」。非 HTTP
+# 上下文（CLI / db_session()）不设，成功审计回退缓冲独立 flush（无业务事务可绑，无 F1 风险）。
+_request_session_var: ContextVar[AsyncSession | None] = ContextVar("request_session", default=None)
+
+
+def current_request_session() -> AsyncSession | None:
+    """读当前请求业务 session；无（非 HTTP / 后台任务）返回 None。"""
+    return _request_session_var.get()
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI 依赖：每请求一个 AsyncSession，一请求一事务（``session.begin()``）。"""
     async with get_sessionmaker()() as session, session.begin():
-        yield session
+        token = _request_session_var.set(session)
+        try:
+            yield session
+        finally:
+            _request_session_var.reset(token)
 
 
 @asynccontextmanager

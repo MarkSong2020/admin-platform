@@ -28,7 +28,8 @@ from admin_platform.domains.monitor.service import MonitorService
 router = APIRouter(prefix="/api/v1/monitor", tags=["monitor"])
 
 ServiceDep = Annotated[MonitorService, Depends(get_monitor_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+# page 上限防深分页 DoS（review O1：审计表 append-only 持续增长，大 offset 扫描+count 成本随表涨）。
+PageQ = Annotated[int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000）")]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。只读日志：list + query（detail）。

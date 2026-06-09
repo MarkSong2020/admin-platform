@@ -23,6 +23,8 @@ from admin_platform.audit.events import (
     RiskLevel,
     redact_metadata,
 )
+from admin_platform.audit.sink import persist_audit_in_session
+from admin_platform.db.session import current_request_session
 
 _audit_logger = logging.getLogger("admin_platform.audit")
 
@@ -63,12 +65,8 @@ def build_audit_event(  # noqa: PLR0913 —— audit_event.v1 字段多且全命
     )
 
 
-def emit_audit(event: AuditEvent) -> None:
-    """把审计事件落结构化日志（一行 JSON 嵌在 ``audit_event`` 字段，见 core.logging 白名单）。
-
-    P1 最小 hook —— 失败不抛（审计不应阻断主流程）：日志器异常吞掉只记一条 warning。
-    **同步 logger sink 是 durable 底线**；P2 持久化走 ``record_audit``（logger + DB）。
-    """
+def _emit_to_logger(event: AuditEvent) -> None:
+    """落结构化日志（一行 JSON 嵌在 ``audit_event`` 字段，见 core.logging 白名单）。失败不抛。"""
     try:
         _audit_logger.info(
             event.event_type,
@@ -76,12 +74,34 @@ def emit_audit(event: AuditEvent) -> None:
         )
     except Exception:  # 审计落地失败绝不阻断业务主流程
         _audit_logger.warning("audit emit failed", exc_info=True)
-    # P2：追加进请求级缓冲，响应后由中间件 flush 落库（独立 session 批量）。无缓冲
-    # （CLI/单测/后台任务）= no-op，退化为仅 logger（durable 底线）。append 永不抛。
+
+
+def emit_audit(event: AuditEvent) -> None:
+    """失败/拒绝类审计落地：logger（durable 底线）+ 追加请求缓冲（响应后中间件独立 session flush）。
+
+    用于业务已 ROLLBACK 的事件（permission_denied / login_failed / rbac_write 失败 / refresh_reused）——
+    这些不能随业务事务、必须独立落（守住失败审计不被回滚吞）。无缓冲（CLI/单测）= 仅 logger。
+    """
+    _emit_to_logger(event)
     append_audit_event(event)
 
 
-def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/target/result/metadata），全命名 kwargs 可放宽
+async def record_audit_committed(event: AuditEvent) -> None:
+    """成功类审计落地（review F1 修复，方案 B）：logger + 写**当前请求业务 session**（SAVEPOINT
+    隔离，与业务原子提交）。
+
+    成功审计必须与业务**原子**——commit 失败时审计随业务一同回滚，不留假成功审计。无请求 session
+    （非 HTTP 上下文）回退缓冲独立 flush（无业务事务可绑，本就无 F1 风险）。
+    """
+    _emit_to_logger(event)
+    session = current_request_session()
+    if session is not None:
+        await persist_audit_in_session(session, event)
+    else:
+        append_audit_event(event)
+
+
+async def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/target/result/metadata），全命名 kwargs 可放宽
     *,
     actor: AuditActor,
     action: str,
@@ -96,17 +116,21 @@ def emit_rbac_write(  # noqa: PLR0913 —— audit_event 字段多（actor/targe
 
     成功 / 失败都记（失败带 ``error_code``，不阻断原业务错误）；``metadata`` 只放非敏感差异
     摘要（password/token 等再经 ``redact_metadata`` deny-list 兜底剔除）。risk_level 固定 medium。
-    P2：``emit_audit`` 同步 logger + 追加请求缓冲（响应后中间件落库），保持同步、调用点不变。
+
+    **写入路径按结果分流（review F1 方案 B）**：成功 → ``record_audit_committed``（写业务 session，
+    SAVEPOINT 隔离，与业务原子提交）；失败 → ``emit_audit``（缓冲独立 flush，因业务已回滚）。
     """
-    emit_audit(
-        build_audit_event(
-            event_type="rbac_write",
-            action=action,
-            title=title,
-            actor=actor,
-            target=target,
-            result=AuditResult(status=status, http_status=http_status, error_code=error_code),
-            risk_level="medium",
-            metadata=metadata,
-        )
+    event = build_audit_event(
+        event_type="rbac_write",
+        action=action,
+        title=title,
+        actor=actor,
+        target=target,
+        result=AuditResult(status=status, http_status=http_status, error_code=error_code),
+        risk_level="medium",
+        metadata=metadata,
     )
+    if status == "success":
+        await record_audit_committed(event)
+    else:
+        emit_audit(event)
