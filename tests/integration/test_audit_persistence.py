@@ -17,6 +17,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from admin_platform.audit.emit import build_audit_event
 from admin_platform.audit.events import AuditEvent, AuditResult
@@ -30,6 +31,7 @@ from admin_platform.core.permissions import PermissionProvider, get_permission_p
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.role.api import router as role_router
+from admin_platform.domains.role.models import Role
 
 pytestmark = pytest.mark.integration
 
@@ -223,3 +225,17 @@ async def test_success_audit_commits_with_business_transaction() -> None:
     rows = await _audit_by_event_id(event.event_id)
     assert len(rows) == 1
     assert rows[0].result_status == "success"
+
+
+async def test_in_tx_audit_does_not_swallow_business_flush_error() -> None:
+    # Round-2 审查 #2：persist_audit_in_session 前置 flush，让**业务** pending 的约束错在审计 try
+    # 之外暴露、正常上抛，不被审计层 except 吞成 warning（否则 phantom：业务约束错被吞、审计也没落）。
+    async with db_session() as session:
+        session.add(Role(name="r1", code="dupcode", status="active"))
+        await session.flush()
+    # 新事务：add 一个撞 code uq 的 Role（pending，未 flush），再 persist 审计 → 前置 flush 应抛
+    # IntegrityError（业务约束错正常上抛，而非被审计层 except 吞成 warning）。
+    with pytest.raises(IntegrityError):
+        async with db_session() as session:
+            session.add(Role(name="r2", code="dupcode", status="active"))
+            await persist_audit_in_session(session, _success_event())

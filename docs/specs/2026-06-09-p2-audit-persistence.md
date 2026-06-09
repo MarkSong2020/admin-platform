@@ -159,11 +159,12 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 
 ## 5. 登录日志织入点（D 配套）✅ 已实现（Phase 3）
 
-> **实现优化 vs 原 §5**：rate_limited / captcha_required **不再额外写 audit_events**——它们是登录流状态，
-> 全在 login_logs（本就是登录安全日志，可查），写进 audit_events 是与 login_logs 的冗余。audit_events
-> 保持聚焦 P1 定义的安全事件（login_failed 含 bad-cred/locked、refresh_reused）+ 新增 login_success。
-> login_logs 则记**全部 5 种结局**。登录日志写入用 `domains/auth/login_log.py record_login_attempt`
-> （独立 session、最佳努力、永不阻断登录；IP/UA/request_id 从 ContextVar 读）。
+> **实现优化 vs 原 §5**：rate_limited / captcha_required **不写 audit_events**（by-design，Round-2 Codex
+> 复议确认非缺陷）——理由三条：① **RuoYi 对标**本就把登录事件全放 `sys_logininfor`（login_logs）、不进
+> `sys_oper_log`（audit_events）；② 语义上 rate_limited 是 IP 级预检、captcha_required 是挑战，**都不是
+> 凭据 login_failed**；③ 二者全在 login_logs 可查。audit_events 聚焦凭据/账号类安全事件（login_failed 含
+> bad-cred/locked、refresh_reused）+ login_success。login_logs 记**全部 5 种结局**。登录日志写入用
+> `domains/auth/login_log.py record_login_attempt`（独立 session、最佳努力、永不阻断；IP/UA 从 ContextVar）。
 
 | 路径 | audit_events | login_logs | 备注 |
 |---|---|---|---|
@@ -243,3 +244,16 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 | 池放大 | provider sync 桥每权限校验多次独立 session + P2 flush session 叠加，threadpool(40) vs pool(15) 倒挂无 pool_timeout | 应修（P1 遗留） | 排期项：属 P1 RBAC provider 设计，P2 仅加剧；记入 §7 排期，建议 P2.1 给 engine 设 pool_timeout + provider 单 session 批量取 |
 
 **未发现**：脱敏（payload 唯一自由文本入口 metadata 已 deny-list 递归脱敏，逐 emit 点核对无明文密码/token 旁路）、注入（监控查询全 ORM 参数化）、越权（4 端点全挂 require_permission，`test_monitor_query` 403 实测）、ContextVar 请求隔离（finally reset + 同步线程池依赖 buffer 共享已测）。
+
+### 8.1 Round-2 验证审查处置（Codex high + 2 视角 subagent，2026-06-09）
+
+对 Round-1 修复（commit 1b333cb）做第二轮验证。2 个 subagent 均「验证通过、无新问题」（async 级联完整、SAVEPOINT 正确、F2 五路径无漏重、F3 长度全对齐、测试非假绿）。Codex 提 4 项：
+
+| # | 发现 | 严重度 | 处置 |
+|---|---|---|---|
+| R2-1 | rate_limited/captcha 不进 audit_events | Important（疑口径）| **by-design**：RuoYi 登录事件本就只进 login_logs；语义非凭据失败；login_logs 可查。spec §5 补三条理由。非缺陷（Codex 注明非本提交引入）|
+| R2-2 | `begin_nested()` RELEASE autoflush 全部 pending，业务对象未 flush 且带约束错会被审计 except 吞 → phantom | Important | ✅ `persist_audit_in_session` 前置 `session.flush()`，业务错在审计 try 外暴露上抛。测试 `test_in_tx_audit_does_not_swallow_business_flush_error` |
+| R2-3 | 非 HTTP 成功审计回退缓冲非原子（未来 db_session() 路径若发 rbac_write success 会重现 F1）| Medium | 现状无非 HTTP RBAC 写；已在 §3.3 标「非 HTTP 回退缓冲」。未来若加非 HTTP RBAC 写需让其 session 也注册 request-session var |
+| R2-4 | 测试未覆盖业务 savepoint 与 audit savepoint 交错（saga）| Medium | 现状 service 不用嵌套 savepoint；test-gap 记此，saga 落地时补 |
+
+**收敛**：R2-2 修复（强化 F1 方案 B），R2-1 判 by-design，R2-3/4 记排期。无新阻断。
