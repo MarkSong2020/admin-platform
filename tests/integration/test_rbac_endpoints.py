@@ -117,10 +117,12 @@ async def test_super_admin_routers_sees_full_seed_tree() -> None:
         res = await c.get("/api/v1/menus/routers")
     assert res.status_code == 200, res.text
     routers = res.json()
-    # seed 顶层 1 个「系统管理」目录（M），其下 5 个资源菜单（C，按钮 F 不进路由树）。
-    assert len(routers) == 1
-    assert routers[0]["component"] == "Layout"
-    assert len(routers[0]["children"]) == 5
+    # seed 顶层 2 个目录（M）：系统管理（5 资源菜单 C）+ 系统监控（操作日志/登录日志 2 菜单 C）；
+    # 按钮 F 不进路由树。P2 新增系统监控。
+    assert len(routers) == 2
+    assert all(r["component"] == "Layout" for r in routers)
+    assert len(routers[0]["children"]) == 5  # 系统管理（sort_order=1）
+    assert len(routers[1]["children"]) == 2  # 系统监控（sort_order=2，操作日志 + 登录日志）
     await dispose_engine()
 
 
