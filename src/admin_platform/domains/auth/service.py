@@ -15,7 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 
 from admin_platform.audit.emit import build_audit_event, emit_audit
-from admin_platform.audit.events import AuditActor, AuditResult, AuditTarget
+from admin_platform.audit.events import AuditActor, AuditResult, AuditTarget, RiskLevel
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import (
     AUTH_CAPTCHA_REQUIRED,
@@ -52,6 +52,23 @@ def _login_failed() -> AppError:
     )
 
 
+def _emit_login_failed(username: str, *, risk_level: RiskLevel = "medium") -> None:
+    """登录失败审计（spec §13.3 三类必审事件之一）。防枚举：actor 留空（尚未确立身份），
+    只把尝试的 username 记进 ``target.display``，不暴露「用户是否存在 / 是否被锁」。
+    """
+    emit_audit(
+        build_audit_event(
+            event_type="login_failed",
+            action="auth.login",
+            title="登录失败",
+            actor=AuditActor(),
+            target=AuditTarget(type="user", display=username),
+            result=AuditResult(status="failure", http_status=401, error_code=AUTH_LOGIN_FAILED),
+            risk_level=risk_level,
+        )
+    )
+
+
 async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下文，命名 kwargs，用例层可放宽
     username: str,
     password: str,
@@ -83,6 +100,9 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
         # 防枚举不暴露「锁定状态」）。decision-log「账号软锁 10min / 统一 401」。
         if decision.account_locked:
             await login_guard.record_failure(redis, username=username, client_ip=client_ip)
+            # 审计（Workflow 深审）：锁定窗口内的持续尝试正是暴力破解最该留痕的时刻，
+            # 不能因「对客户端防枚举不暴露锁定状态」而连内部审计一起省略。risk 升 high。
+            _emit_login_failed(username, risk_level="high")
             raise _login_failed()
         # 失败达阈值 → 要求验证码（Q14：失败 N 次后才要，非首登必填）。
         if decision.require_captcha and not await verify_captcha(redis, captcha_id, captcha_answer):
@@ -108,21 +128,7 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
         if active_user is None or not password_ok:
             if redis is not None:
                 await login_guard.record_failure(redis, username=username, client_ip=client_ip)
-            # 审计：登录失败（spec §13.3 三类事件之一）。防枚举——不暴露「用户是否存在」，
-            # 只把尝试的 username 记进 target.display；actor 留空（尚未确立身份）。
-            emit_audit(
-                build_audit_event(
-                    event_type="login_failed",
-                    action="auth.login",
-                    title="登录失败",
-                    actor=AuditActor(),
-                    target=AuditTarget(type="user", display=username),
-                    result=AuditResult(
-                        status="failure", http_status=401, error_code=AUTH_LOGIN_FAILED
-                    ),
-                    risk_level="medium",
-                )
-            )
+            _emit_login_failed(username)
             raise _login_failed()
 
         token = issue_access_token(user_id=active_user.id, username=active_user.username)
@@ -147,21 +153,54 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
 
 
 async def refresh(raw_token: str) -> LoginResponse:
-    """轮换 refresh token → 新 access + 新 refresh（spec 2026-06-09 §1.3）。"""
+    """轮换 refresh token → 新 access + 新 refresh（spec 2026-06-09 §1.3）。
+
+    事务边界关键（Codex 深审 🔴-2）：拒绝路径（reuse 检测撤销 family / 停用账号撤销）的
+    **撤销是安全副作用，必须随本事务提交**。若直接 ``raise AppError`` 让其穿出
+    ``db_session()`` 的 ``session.begin()``，异常会触发 ROLLBACK → 撤销失效（401 照样返回，
+    但 family 仍 active，防盗用 / 停用即失效形同虚设）。故在事务内 catch、正常退出上下文
+    （COMMIT 副作用）后再 re-raise。无副作用的 ``REFRESH_TOKEN_INVALID`` 路径提交空事务无害。
+    """
+    response: LoginResponse | None = None
+    deferred: AppError | None = None
     async with db_session() as session:
-        result = await rotate_refresh_token(session, raw_token=raw_token)
-        user = await session.get(User, result.user_id)
-        if user is None or user.status != _ACTIVE:
-            # 用户已删/停用：撤销该 family 并拒绝（不签新 access）。
-            await revoke_refresh_token(session, raw_token=raw_token)
-            raise _login_failed()
-        access = issue_access_token(user_id=user.id, username=user.username)
-    return LoginResponse(
-        access_token=access,
-        expires_in=get_settings().auth_access_token_ttl_seconds,
-        refresh_token=result.refresh.token,
-        refresh_expires_in=result.refresh.expires_in,
-    )
+        try:
+            result = await rotate_refresh_token(session, raw_token=raw_token)
+            user = await session.get(User, result.user_id)
+            if user is None or user.status != _ACTIVE:
+                # 用户已删/停用：撤销该 family 并拒绝（不签新 access）。
+                await revoke_refresh_token(session, raw_token=raw_token)
+                # 审计（Round-3 对称）：停用/删除账号仍持有效 refresh → 强制撤销 family，是安全
+                # 相关信号（token 存活超过账号有效期），与 reuse 路径（refresh_reused）对称留痕。
+                # actor 用 token 已确立的 user_id（区别于 login 路径的 actor 留空防枚举）。
+                emit_audit(
+                    build_audit_event(
+                        event_type="login_failed",
+                        action="auth.refresh",
+                        title="refresh 拒绝（账号停用/删除）",
+                        actor=AuditActor(user_id=result.user_id),
+                        target=AuditTarget(type="user", id=str(result.user_id)),
+                        result=AuditResult(
+                            status="failure", http_status=401, error_code=AUTH_LOGIN_FAILED
+                        ),
+                        risk_level="medium",
+                    )
+                )
+                raise _login_failed()
+            access = issue_access_token(user_id=user.id, username=user.username)
+            response = LoginResponse(
+                access_token=access,
+                expires_in=get_settings().auth_access_token_ttl_seconds,
+                refresh_token=result.refresh.token,
+                refresh_expires_in=result.refresh.expires_in,
+            )
+        except AppError as exc:
+            deferred = exc
+    if deferred is not None:
+        raise deferred
+    if response is None:  # 不变式：无 deferred ⇒ response 已构造；防御性兜底（理论不可达）
+        raise _login_failed()
+    return response
 
 
 async def logout(raw_token: str) -> None:

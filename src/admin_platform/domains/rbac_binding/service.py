@@ -17,7 +17,7 @@ from admin_platform.audit.emit import emit_rbac_write
 from admin_platform.audit.events import AuditActor, AuditTarget
 from admin_platform.authz.data_scope import is_dept_visible
 from admin_platform.authz.scope import DataScope
-from admin_platform.core.errors import AUTH_FORBIDDEN_BY_SCOPE, AppError
+from admin_platform.core.errors import AUTH_FORBIDDEN_BY_ROLE, AUTH_FORBIDDEN_BY_SCOPE, AppError
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.post.repository import PostRepository
@@ -67,6 +67,10 @@ class RbacBindingService:
     ) -> list[int]:
         action = "system:user:bind_roles"
         try:
+            # 提权防护（Codex 🔴-1，用户拍板「超管专属角色分配」2026-06-09）：user-role 直接改变
+            # 被绑用户的后端权限集（role_menus→menus.perms），非超管持 system:user:edit 即可给
+            # 可见用户/自己绑高权限角色自我提权 → 收紧为仅 is_super_admin 可写（保守 + 可逆）。
+            self._require_super_admin(operator)
             user = await self._require_visible_user(user_id, scope)
             deduped = list(dict.fromkeys(role_ids))
             await self._require_ids_exist(
@@ -116,9 +120,12 @@ class RbacBindingService:
     async def set_role_menus(
         self, role_id: int, menu_ids: list[int], *, operator: AuditActor
     ) -> list[int]:
-        # role-menu 无 data_scope 语义（menu/role 均全局配置资源）—— 仅靠 system:role:edit 权限点管控。
+        # role-menu 无 data_scope 语义（menu/role 均全局配置资源）。提权防护（Codex 🔴-1）：
+        # role-menu 直接改角色的权限图谱（加高权限菜单到自己持有的角色即自我提权），与 user-role
+        # 同属权限图谱写 → 收紧为仅 is_super_admin（用户拍板「超管专属」2026-06-09）。
         action = "system:role:bind_menus"
         try:
+            self._require_super_admin(operator)
             role = await self._require_role(role_id)
             deduped = list(dict.fromkeys(menu_ids))
             await self._require_ids_exist(
@@ -152,9 +159,13 @@ class RbacBindingService:
             await self._require_ids_exist(
                 self._dept_repo.list_existing_ids, deduped, DEPT_IDS_INVALID, "dept"
             )
-            # 数据权限（Codex 风险 #2）：非超管只能把可见部门绑进角色自定义范围，否则 403。
+            # 数据权限写侧（Codex 风险 #2 + Round-3 写侧对称）：set_role_depts 是先全删后插的全量
+            # 替换。非超管操作时，① 新增 ids 必须可见；② 既有绑定也必须全部可见——否则全删会
+            # 静默清除范围外（不可见）部门绑定（scoped operator 篡改了范围外数据），与读侧 403
+            # 对称，强制此类角色由超管操作。超管 scope=ALL → is_dept_visible 恒 True，不受限。
             if scope is not None:
-                for dept_id in deduped:
+                existing = await self._role_repo.list_custom_dept_ids_for_role(role_id)
+                for dept_id in (*deduped, *existing):
                     if not is_dept_visible(scope, dept_id):
                         raise self._forbidden_scope()
             await self._role_repo.set_role_depts(role_id, deduped)
@@ -164,9 +175,17 @@ class RbacBindingService:
         self._audit_ok(operator, action, "role", role_id, role.code, {"dept_ids": deduped})
         return deduped
 
-    async def get_role_depts(self, role_id: int) -> list[int]:
+    async def get_role_depts(self, role_id: int, *, scope: DataScope | None = None) -> list[int]:
         await self._require_role(role_id)
-        return sorted(await self._role_repo.list_custom_dept_ids_for_role(role_id))
+        dept_ids = sorted(await self._role_repo.list_custom_dept_ids_for_role(role_id))
+        # 数据权限读侧对称（Codex 深审 🟡-3）：非超管若绑定集含不可见部门则 403，与
+        # set_role_depts 写侧一致——既不泄露范围外部门 id，也避免"读到却无法安全全量 PUT 回"
+        # 的管理端陷阱（读子集 → PUT 会误删范围外绑定）。
+        if scope is not None:
+            for dept_id in dept_ids:
+                if not is_dept_visible(scope, dept_id):
+                    raise self._forbidden_scope()
+        return dept_ids
 
     # ---- helpers ------------------------------------------------------------
 
@@ -205,6 +224,19 @@ class RbacBindingService:
                 title=f"{label} ids invalid",
                 detail=f"不存在的 {label} id: {sorted(missing)}",
                 status_code=422,
+            )
+
+    @staticmethod
+    def _require_super_admin(operator: AuditActor) -> None:
+        """权限图谱写（user-role / role-menu）超管专属（Codex 🔴-1，用户拍板 2026-06-09）。
+        非超管即使持 system:user:edit / system:role:edit 也不得改权限图谱，杜绝自我提权。
+        """
+        if not operator.is_super_admin:
+            raise AppError(
+                code=AUTH_FORBIDDEN_BY_ROLE,
+                title="Forbidden",
+                detail="角色/权限图谱分配仅超级管理员可操作",
+                status_code=403,
             )
 
     @staticmethod

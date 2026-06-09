@@ -15,7 +15,7 @@ from sqlalchemy import text
 from admin_platform.api.v1.auth import router as auth_router
 from admin_platform.api.v1.health import router as health_router
 from admin_platform.api.v1.rbac import router as rbac_router
-from admin_platform.core.auth import AuthMiddleware, get_auth_config
+from admin_platform.core.auth import AuthMiddleware, get_auth_config, is_public_path
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import ProblemDetail, register_exception_handlers
 from admin_platform.core.idempotency import IdempotencyMiddleware, RedisIdempotencyStore
@@ -119,12 +119,13 @@ def _custom_openapi(app: FastAPI) -> dict[str, Any]:
         },
     )
     problem_ref = {"$ref": "#/components/schemas/ProblemDetail"}
-    public_paths = set(get_settings().auth_public_paths)
+    public_paths = get_settings().auth_public_paths
     for path, path_item in schema.get("paths", {}).items():
         # 逐 operation 标注 security（Codex 深审）：受保护路由 ``bearerAuth``，公开路径（health /
         # auth 端点）显式 ``security: []`` 覆盖。SDK / 前端生成器据此知道哪些接口必须带 token。
+        # 用与 AuthMiddleware 同一个 is_public_path（前缀匹配），避免精确匹配口径漂移（Workflow 深审）。
         op_security: list[dict[str, list[str]]] = (
-            [] if path in public_paths else [{"bearerAuth": []}]
+            [] if is_public_path(path, public_paths) else [{"bearerAuth": []}]
         )
         for op in path_item.values():
             if not isinstance(op, dict):

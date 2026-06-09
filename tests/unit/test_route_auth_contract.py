@@ -56,3 +56,16 @@ def test_all_non_public_routes_require_auth() -> None:
     assert not unguarded, (
         f"非公开路由缺鉴权守卫（应挂 require_permission/require_current_user）: {unguarded}"
     )
+
+
+def test_probe_unguarded_route_is_detected() -> None:
+    """违规探针（对称 test_openapi_contract 的 probe）：构造一条故意无守卫的 synthetic 路由，
+    断言 _route_has_auth 判其为 unguarded —— 证明规则真会抓漏挂守卫的路由，而非恒返回 True
+    的空绿（FastAPI 升级 / 重构令 _route_has_auth 失效时本探针会先红）。
+    """
+
+    async def _naked() -> dict[str, str]:
+        return {}
+
+    route = APIRoute("/__synthetic_naked", _naked, methods=["GET"])
+    assert not _route_has_auth(route), "规则没抓到无守卫的 synthetic 路由 —— 契约测可能空绿"
