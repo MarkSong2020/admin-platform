@@ -37,7 +37,14 @@ async def persist_audit_in_session(session: AsyncSession, event: AuditEvent) -> 
     用 ``begin_nested()`` SAVEPOINT 隔离：审计 insert 失败只回滚 savepoint，**不连累业务**（守
     「审计写失败不阻断业务」）；审计行随外层业务事务一起 commit / rollback → commit 失败时审计
     与业务一同回滚，不留假成功审计。**永不抛**。
+
+    Round-2 审查 #2：``begin_nested()`` 的 RELEASE 会 autoflush **全部** pending（含业务对象）。若
+    业务 coro 返回时仍有未 flush 的业务对象且带约束错，该错会在下面 try 内触发被 except 吞成
+    warning → 业务约束错丢失 + phantom success。故**前置 ``session.flush()``**——让业务 pending 的
+    约束错在审计 try **之外**暴露（正常上抛 → 全局 handler 翻 409/500），审计 savepoint 只 flush
+    审计行自身。正常路径业务已 flush，前置 flush 为 no-op。
     """
+    await session.flush()
     try:
         async with session.begin_nested():
             session.add(AuditEventLog.from_envelope(event))
