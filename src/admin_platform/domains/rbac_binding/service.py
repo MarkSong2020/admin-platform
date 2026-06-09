@@ -78,9 +78,11 @@ class RbacBindingService:
             )
             await self._role_repo.set_user_roles(user_id, deduped)
         except AppError as exc:
-            self._audit_fail(operator, action, "user", user_id, exc)
+            await self._audit_fail(operator, action, "user", user_id, exc)
             raise
-        self._audit_ok(operator, action, "user", user_id, user.username, {"role_ids": deduped})
+        await self._audit_ok(
+            operator, action, "user", user_id, user.username, {"role_ids": deduped}
+        )
         return deduped
 
     async def get_user_roles(self, user_id: int, *, scope: DataScope | None = None) -> list[int]:
@@ -106,9 +108,11 @@ class RbacBindingService:
             )
             await self._post_repo.set_user_posts(user_id, deduped)
         except AppError as exc:
-            self._audit_fail(operator, action, "user", user_id, exc)
+            await self._audit_fail(operator, action, "user", user_id, exc)
             raise
-        self._audit_ok(operator, action, "user", user_id, user.username, {"post_ids": deduped})
+        await self._audit_ok(
+            operator, action, "user", user_id, user.username, {"post_ids": deduped}
+        )
         return deduped
 
     async def get_user_posts(self, user_id: int, *, scope: DataScope | None = None) -> list[int]:
@@ -133,9 +137,9 @@ class RbacBindingService:
             )
             await self._menu_repo.set_role_menus(role_id, deduped)
         except AppError as exc:
-            self._audit_fail(operator, action, "role", role_id, exc)
+            await self._audit_fail(operator, action, "role", role_id, exc)
             raise
-        self._audit_ok(operator, action, "role", role_id, role.code, {"menu_ids": deduped})
+        await self._audit_ok(operator, action, "role", role_id, role.code, {"menu_ids": deduped})
         return deduped
 
     async def get_role_menus(self, role_id: int) -> list[int]:
@@ -170,9 +174,9 @@ class RbacBindingService:
                         raise self._forbidden_scope()
             await self._role_repo.set_role_depts(role_id, deduped)
         except AppError as exc:
-            self._audit_fail(operator, action, "role", role_id, exc)
+            await self._audit_fail(operator, action, "role", role_id, exc)
             raise
-        self._audit_ok(operator, action, "role", role_id, role.code, {"dept_ids": deduped})
+        await self._audit_ok(operator, action, "role", role_id, role.code, {"dept_ids": deduped})
         return deduped
 
     async def get_role_depts(self, role_id: int, *, scope: DataScope | None = None) -> list[int]:
@@ -249,7 +253,7 @@ class RbacBindingService:
         )
 
     @staticmethod
-    def _audit_ok(  # noqa: PLR0913 —— 审计字段多（target 三段 + metadata），全命名参数可放宽
+    async def _audit_ok(  # noqa: PLR0913 —— 审计字段多（target 三段 + metadata），全命名参数可放宽
         operator: AuditActor,
         action: str,
         target_type: str,
@@ -257,7 +261,8 @@ class RbacBindingService:
         display: str | None,
         metadata: dict[str, object],
     ) -> None:
-        emit_rbac_write(
+        # 成功绑定审计走 in-tx（review F1 方案 B：emit_rbac_write success → 写业务 session）。
+        await emit_rbac_write(
             actor=operator,
             action=action,
             target=AuditTarget(type=target_type, id=str(target_id), display=display),
@@ -267,10 +272,10 @@ class RbacBindingService:
         )
 
     @staticmethod
-    def _audit_fail(
+    async def _audit_fail(
         operator: AuditActor, action: str, target_type: str, target_id: int, exc: AppError
     ) -> None:
-        emit_rbac_write(
+        await emit_rbac_write(
             actor=operator,
             action=action,
             target=AuditTarget(type=target_type, id=str(target_id), display=None),

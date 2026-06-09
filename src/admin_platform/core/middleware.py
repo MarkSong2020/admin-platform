@@ -21,6 +21,14 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import ClientDisconnect
 
+from admin_platform.audit.context import (
+    reset_audit_buffer,
+    reset_request_context,
+    set_audit_buffer,
+    set_request_context,
+)
+from admin_platform.audit.events import AuditEvent, AuditRequest
+from admin_platform.audit.sink import flush_audit_events
 from admin_platform.core.config import get_settings
 
 # nginx 风格的「客户端关闭请求」状态码 —— 在客户端在 handler 完成前
@@ -41,6 +49,19 @@ _TRACEPARENT_PATTERN = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-(
 
 def current_request_id() -> str | None:
     return _request_id_var.get()
+
+
+def _client_ip(request: Request, *, trust_xff: bool) -> str | None:
+    """客户端 IP（审计/登录日志用）。默认取直连 peer ``request.client.host``（不可伪造）。
+
+    ``trust_xff`` 开时取 ``X-Forwarded-For`` 最左跳（原始客户端）——⚠️ 仅在可信反代会覆盖/
+    剥离客户端自带 XFF 时才安全，否则可被伪造（Codex PK 红线：不裸信任 XFF）。
+    """
+    if trust_xff:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip() or None
+    return request.client.host if request.client is not None else None
 
 
 _ALL_ZERO_TRACE_ID = "0" * 32
@@ -125,6 +146,23 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request.state.trace_id = trace_id
         request.state.span_id = None
         token = _request_id_var.set(request_id)
+        # P2：把请求段（IP/UA/method/path/id）灌进审计 ContextVar，供 service 层 build_audit_event
+        # 默认读（service 拿不到 Request）。trace_id 用 header 解析值；OTel 后置补的 trace_id 是
+        # 边缘情形，审计以稳定的 request_id 为主关联键。
+        ctx_token = set_request_context(
+            AuditRequest(
+                request_id=request_id,
+                trace_id=trace_id,
+                method=request.method,
+                path=request.url.path,
+                ip=_client_ip(request, trust_xff=settings.audit_trust_x_forwarded_for),
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        # P2 审计缓冲：本地持有空 list 引用，下游 emit_audit append（mutate 同一对象，规避
+        # BaseHTTPMiddleware contextvar 上行不传播）；finally 一次性 flush 落库。
+        audit_buffer: list[AuditEvent] = []
+        buffer_token = set_audit_buffer(audit_buffer)
         start = time.perf_counter()
 
         span_id: str | None = None
@@ -160,7 +198,12 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            # 响应后 flush 审计缓冲（独立 session 批量落库；空缓冲/无 sink = no-op，永不抛）。
+            # 此时业务事务已 commit/rollback，时点对成功/失败事件统一正确。
+            await flush_audit_events(audit_buffer)
             _request_id_var.reset(token)
+            reset_request_context(ctx_token)
+            reset_audit_buffer(buffer_token)
             access_logger.info(
                 "request handled",
                 extra={
