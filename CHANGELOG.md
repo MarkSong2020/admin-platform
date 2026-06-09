@@ -23,7 +23,49 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ## [Unreleased]
 
-(rolling — 见 git log)
+> **应用轨**（`v0.0.1`，P1 RBAC 阶段）——本仓自 `python-web-service-template`
+> 派生后的独立演进；下方 `vX.Y.Z` 是模板 lineage，**非本应用发版记录**。
+> 完整 commit 见 git log，路线图见
+> [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
+
+### P1.5 RBAC 绑定 API + 审计织入 + 安全加固（2026-06-09）
+
+`0d38ca8` + `1bfbb29` ·
+[spec](./docs/specs/2026-06-09-p1.5-rbac-binding-audit.md)
+
+- **绑定 API**：user-role / role-menu / role-dept / user-post 关联读写端点，全部
+  经 `core/rbac_audit.audited_write` 织入 `rbac_write` 审计（成功/失败均落
+  `admin_platform.audit` logger）
+- **权限图写收紧为超管专属**：`set_user_roles` / `set_role_menus` 加
+  `_require_super_admin`（非超管 403 `auth.FORBIDDEN_BY_ROLE`）；role-dept 属数据
+  范围委派，保留 scoped 操作但写前校验「新 ∪ 旧绑定」全部可见，防全量 PUT 静默
+  删 scope 外数据
+- **认证事务修复**：`auth.refresh()` 改 deferred-raise —— 账号停用/删除路径让
+  `revoke_family` / `revoke` 先 COMMIT 再 re-raise（原先 AppError 穿透
+  `session.begin()` 的 `__aexit__` 触发 ROLLBACK，安全副作用被回滚）
+- **审计完整性**：`audited_write` 补 `IntegrityError → 409 framework.CONFLICT`
+  分支，并发唯一约束兜底竞态也留审计
+- **TOCTOU**：menu `create/update` 改父 / 转按钮前先 `acquire_tree_lock`
+  （`pg_advisory_xact_lock`），父类型校验与写纳入同一 xact
+- **其它加固**：dept 越权防护、登录防护（验证码 / 限流）默认开、route 鉴权契约
+  测试、refresh user-lock、data_scope CTE 深度上限
+- **审查方式**：5 轮 Codex high + 多视角 subagent 对抗式 review，Round-5 双路零
+  新发现收敛；386 unit + 119 integration 全绿，8 import-linter 契约 KEPT
+
+### 无人值守执行地基（2026-06-09）
+
+`f6bc3ce` · [doc](./doc/operations/UNATTENDED_EXECUTION.md)
+
+- **CI coverage gate**：`ci.yml` 新增 `make coverage` 阻塞 step（`fail_under=85`
+  在 CI 通电，避免新代码 0 覆盖却 fast lane 全绿；实测 86.49%）
+- **`UNATTENDED_EXECUTION.md`**：异步执行副作用隔离——三层防御（L1 团队权限基线
+  / L2 supervisor 严格 allowlist / L3 物理隔离）+ 可逆-不可逆边界（commit 随便做、
+  `push` 是 review 前红线）+ NIGHT_LOG + 诚实边界
+- **`.claude/settings.json`**：团队权限基线（allow 安全操作 + deny 红线如
+  `git push --force` / `git add -A` / `rm -rf`）；`settings.local.json` 已
+  gitignore（per-developer）
+- **`scripts/unattended/`**：supervisor + queue（A1–P1T 任务 DAG）+ R1/ME1/P1T
+  任务 prompt 入库
 
 ## [v0.5.3] — 2026-05-19
 
