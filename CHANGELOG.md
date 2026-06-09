@@ -28,6 +28,19 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P2 审计持久化 + 登录日志 + 监控查询 API（2026-06-09）
+
+`caa0f66`→`37d8eb6`（分支 `p2-audit-log`，7 commit）·
+[spec](./docs/specs/2026-06-09-p2-audit-persistence.md)
+
+- **audit_events 表**（迁移 0011）：`audit_event.v1` envelope 落库，`payload` JSONB 存完整 envelope（无损取证）+ 拆查询列；actor 无 FK 冗余快照（用户删后审计留存）；event_id UNIQUE 幂等键
+- **写入路径**（Claude×Codex PK 收敛红线）：**成功审计走业务 session `begin_nested()` SAVEPOINT 原子提交**（commit 失败审计一同回滚、审计写失败不连累业务）；**失败/拒绝审计走请求缓冲 + 响应后独立 session flush**（业务已回滚、不被吞）。`AuditSink` 抽象，P2.1 可换 Redis Stream
+- **login_logs 表**（迁移 0012，RuoYi `sys_logininfor` 对标）：登录全路径（成功/密码错/账号锁/限流/验证码）各落 1 条；`login_success` 扩 EventType
+- **请求上下文中间件**：扩展 `RequestIDMiddleware` 灌 IP/UA/method/path 进 ContextVar，填 envelope 现恒空的 `request` 段；不裸信任 X-Forwarded-For
+- **监控查询 API**：`domains/monitor/`（五层 + C1 契约）operlog/logininfor list+detail，4 权限点 + seed「系统监控」菜单
+- **4 轮对抗审查收敛**（Codex high ×4 + 多视角 subagent ×7，发现 4→1→1→0）：F1 成功审计事务原子 / F2 登录连接放大 / F3 列宽溢出截断（payload 留完整）/ O1 分页上限 / R2-2 in-tx 前置 flush 防吞业务错 / R3-1 persist 先于 logger 防假成功日志
+- 测试：`make check` 391 ✓ / 8 import 契约 KEPT / `make test-integration` 136 ✓ / 迁移零漂移
+
 ### P1.5 RBAC 绑定 API + 审计织入 + 安全加固（2026-06-09）
 
 `0d38ca8` + `1bfbb29` ·
