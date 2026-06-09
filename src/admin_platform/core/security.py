@@ -23,8 +23,12 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
+import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 
 import jwt
@@ -134,3 +138,51 @@ def decode_token(token: str) -> dict[str, Any]:
     if not payload["sub"]:
         raise jwt.InvalidTokenError("sub 不能为空")
     return payload
+
+
+# ---- refresh token 原语（P1.4：opaque + HMAC 落库可撤销，spec 2026-06-09）----
+
+_REFRESH_PREFIX = "rt_"
+
+
+def _require_pepper(pepper: str) -> str:
+    if not pepper:
+        raise TokenConfigError(
+            "auth_refresh_token_pepper 为空：拒绝用空密钥 HMAC refresh token（设 APP_AUTH_REFRESH_TOKEN_PEPPER）"
+        )
+    return pepper
+
+
+def generate_refresh_token() -> tuple[str, str, str]:
+    """生成 opaque refresh token，返回 (明文 token, jti, token_hash)。
+
+    明文 ``rt_<jti>.<secret>`` 只返回给客户端一次（不落库）；DB 存 ``token_hash``
+    = ``HMAC-SHA256(pepper, secret)`` 的 hex。高熵随机 secret 用 HMAC+pepper 而非 Argon2
+    （Argon2 适合低熵密码；refresh 高频等值校验，HMAC 快且抗彩虹表）。
+    """
+    jti = str(uuid.uuid4())
+    secret = secrets.token_urlsafe(32)  # 256-bit
+    token = f"{_REFRESH_PREFIX}{jti}.{secret}"
+    return token, jti, hash_refresh_secret(secret)
+
+
+def hash_refresh_secret(secret: str) -> str:
+    """``HMAC-SHA256(pepper, secret)`` 的 hex（64 字符）。"""
+    pepper = _require_pepper(get_settings().auth_refresh_token_pepper)
+    return hmac.new(pepper.encode(), secret.encode(), sha256).hexdigest()
+
+
+def parse_refresh_token(token: str) -> tuple[str, str] | None:
+    """解析明文 ``rt_<jti>.<secret>`` → (jti, secret)；格式非法返回 None（统一无效处理）。"""
+    if not token.startswith(_REFRESH_PREFIX):
+        return None
+    body = token[len(_REFRESH_PREFIX) :]
+    jti, sep, secret = body.partition(".")
+    if not sep or not jti or not secret:
+        return None
+    return jti, secret
+
+
+def verify_refresh_secret(secret: str, token_hash: str) -> bool:
+    """常量时间比对 secret 的 HMAC 与库存 hash。"""
+    return hmac.compare_digest(hash_refresh_secret(secret), token_hash)
