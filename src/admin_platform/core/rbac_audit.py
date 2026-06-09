@@ -22,7 +22,8 @@ def _actor(user: CurrentUser) -> AuditActor:
     return AuditActor(user_id=int(user.user_id), is_super_admin=user.is_super_admin)
 
 
-def _opt(value: int | None) -> str | None:
+def _opt(value: int | str | None) -> str | None:
+    # target id 多为整型主键；P4 在线用户强退的目标是 UUID 会话（family_id），故放宽到 str。
     return str(value) if value is not None else None
 
 
@@ -32,7 +33,7 @@ async def audited_write[T](  # noqa: PLR0913 —— api 层审计织入 helper�
     target_type: str,
     *,
     coro: Awaitable[T],
-    target_id: int | None = None,
+    target_id: int | str | None = None,
     display: Callable[[T], str | None] | None = None,
     success_status: int = 200,
 ) -> T:

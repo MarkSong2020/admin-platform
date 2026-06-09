@@ -166,6 +166,19 @@ class Settings(BaseSettings):
     # audit_events 表；False = 退化为仅结构化日志（logger sink 是 durable 底线）。
     audit_persistence_enabled: bool = True
 
+    # P4c 定时任务调度器。默认 **False**：本地/CI/单测不起调度器（CRUD + 手动触发不依赖它）。
+    # 生产由部署显式开。多 worker 安全：仅抢到 PG advisory leader lock 的 worker 起 APScheduler；
+    # 任务级 DB execution claim（partial unique）兜 failover 双触发。
+    scheduler_enabled: bool = False
+    # leader 选举 advisory lock key（与 seed 478261 / 各域 478221-478260 隔离，单 bigint）。
+    scheduler_leader_lock_key: int = 478270
+    # 周期：非 leader 重试夺锁 + leader 重载任务（reconcile DB↔scheduler）的间隔秒。
+    scheduler_poll_seconds: int = 30
+    # 关闭时等待运行中任务的宽限秒（超时则强制 shutdown）。
+    scheduler_shutdown_grace_seconds: int = 10
+    # 调度器默认时区（cron 每任务可单独配 cron_timezone；此为兜底，库时间一律 UTC）。
+    scheduler_timezone: str = "Asia/Shanghai"
+
     @field_validator("database_url")
     @classmethod
     def _validate_database_url_scheme(cls, value: str) -> str:

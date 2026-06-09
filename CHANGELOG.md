@@ -28,6 +28,31 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P4c 定时任务：APScheduler + 多 worker 安全 + handler registry（2026-06-10）
+
+[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) §4 · Codex PK medium 收敛 + 人值守拍板 + 4 视角对抗审查 2 轮
+
+- **域** `domains/scheduled_task/`（迁移 0016：`scheduled_tasks` + `scheduled_task_logs`）：五层 + registry/executor/cron/scheduler 4 装备模块。新依赖 `apscheduler<4`
+- **任务安全（防 RCE）**：管理员只能选代码侧预注册的 `handler_key`（registry 白名单），DB 只存 key + params_json，schema 无 `call_target/command/shell` 任意调用字段；service create/update/run 三处强制 registry 命中 + params 过 handler Pydantic schema——反 RuoYi 任意调用串
+- **多 worker 安全（roadmap P4 红线，两层）**：① 进程级 **leader election**（`pg_try_advisory_lock(478270)` 专用连接，仅 leader 起 `AsyncIOScheduler`）；② 任务级 **DB execution claim**（`(task_id, scheduled_at) WHERE schedule` partial unique，兜 failover 双触发）。手动并发靠任务行 `SELECT FOR UPDATE` 串行化
+- **executor 两段 session**（Codex 风险 #5）：claim（running 日志）先提交 → handler 事务外跑 → result 写终态；超时 `asyncio.wait_for`；orphan running 靠 `count_running` stale 阈值过滤不冻调度
+- **cron**：仅 5 字段标准 crontab（`from_crontab`，校验器=调度构造器），拒 6/7 字段 + Quartz `?L W#`；next_run 仅单条算防永不触发 cron 的 lookahead 阻塞
+- **端点** `/api/v1/monitor/jobs`：CRUD + `/{id}/run` 手动触发（audited）+ `/handlers` + `/logs`；6 perms `system:job:*` 过三集合契约；seed monitor:job 菜单
+- **生命周期**：main.py lifespan，`scheduler_enabled` 默认 False（本地/CI/单测不起，CRUD+手动触发不依赖）；AsyncExitStack LIFO（stop 先于 dispose_engine）+ 优雅 drain + `_loop` 异常守护防僵尸 leader
+- 测试：`make check` 537 ✓ / 8 import 契约 KEPT / `make test-integration` 189 ✓ / coverage 88%（executor/scheduler 走 integration omit，含 claim 并发去重 / leader 选举 / failover / 失败链路）
+- ⚠️ 迁移 0016 仅本地 dev + CI 临时容器跑过，**生产/共享库迁移待单独授权**
+
+### P4a/P4b 监控：服务/缓存监控 + 在线用户（2026-06-10）
+
+[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) · 各经 3 视角对抗审查收敛
+
+- **服务监控** `GET /monitor/server`（`system:server:list`）：psutil 采 CPU/内存/磁盘/进程/负载；阻塞 syscall 整体下沉 `anyio.to_thread`（不阻塞事件循环），单分区读失败跳过不整体 500。新依赖 `psutil` + `types-psutil`
+- **缓存监控** `GET /monitor/cache`（`system:cache:list`）：Redis `INFO` **白名单** 12 字段（不回整 dict，不泄露 executable/config/复制密钥）+ 命令统计；`asyncio.wait_for(2s)` 超时 + 不可达**降级 `available=False`**（监控面板不跟着 500）
+- **在线用户** `GET /monitor/online`（`system:online:list`）+ `DELETE /monitor/online/{uuid}`（`system:online:remove`）：会话 = 活动 refresh token family 派生（roadmap §4），`login_time` 取 family **轮换原点**（min over 全部 token，非最近轮换）；分页 `family_id` tiebreaker；强制下线撤销 family 全部活动 token（镜像 `revoke_family`，reason=`forced_logout`），经 `audited_write` 织入 `rbac_write`（成功 + 失败 404 都记，target=会话 UUID + 用户名）。**仅撤 refresh**：access JWT 无状态，即时 denylist 触鉴权中间件留后续。无 IP/UA（P1.4 决策 refresh token 不落设备列，不反转）
+- **core 微调**：`audited_write.target_id` 放宽 `int|None`→`int|str|None`（`_opt` 本就 `str()`，零行为变更）承载 UUID 会话目标
+- 落 `domains/monitor`（系统监控 umbrella，复用 MonitorRepository 跨域读 auth/audit 先例）；新增 4 权限点 + seed 菜单 4 项；无新表（纯基础设施读 + 派生现有 auth_refresh_tokens）
+- 测试：`make check` 484 ✓ / 8 import 契约 KEPT / `make test-integration` 168 ✓ / `make coverage` 87.6%（collector.py / schemas.py 100%）
+
 ### P3 运营配置：字典 + 参数 + 通知公告（2026-06-09）
 
 分支 `p1-rbac` · [spec](./docs/specs/2026-06-09-p3-operational-config.md)（Codex high 数据模型 PK 收敛）

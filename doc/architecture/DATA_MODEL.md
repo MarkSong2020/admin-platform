@@ -18,9 +18,11 @@
 - [`notices`](#notices)（8 列）
 - [`posts`](#posts)（7 列）
 - [`roles`](#roles)（8 列）
+- [`scheduled_tasks`](#scheduled_tasks)（15 列）
 - [`dict_data`](#dict_data)（11 列）
 - [`role_depts`](#role_depts)（5 列）
 - [`role_menus`](#role_menus)（5 列）
+- [`scheduled_task_logs`](#scheduled_task_logs)（18 列）
 - [`users`](#users)（9 列）
 - [`auth_refresh_tokens`](#auth_refresh_tokens)（13 列）
 - [`user_posts`](#user_posts)（5 列）
@@ -198,6 +200,34 @@
 
 - UNIQUE `uq_roles_code`：(code)
 
+### `scheduled_tasks`
+
+> 来源 model：`admin_platform.domains.scheduled_task.models.ScheduledTask`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `name` | VARCHAR(128) | NOT NULL | — | 任务名称(唯一) |  |
+| `handler_key` | VARCHAR(128) | NOT NULL | — | 处理器键(命中代码侧registry,非任意调用目标) |  |
+| `params_json` | JSONB | NOT NULL | `'{}'::jsonb` (DB) | 处理器参数(JSON) |  |
+| `cron_expression` | VARCHAR(128) | NOT NULL | — | cron表达式(5字段标准crontab,经校验) |  |
+| `cron_timezone` | VARCHAR(64) | NOT NULL | `'Asia/Shanghai'` (DB) | cron解释时区(库时间存UTC) |  |
+| `status` | VARCHAR(16) | NOT NULL | `'disabled'` (DB) | 状态(enabled/disabled) |  |
+| `allow_concurrent` | BOOLEAN | NOT NULL | `false` (DB) | 是否允许上次未跑完时并发执行 |  |
+| `misfire_grace_seconds` | INTEGER | NOT NULL | `300` (DB) | 错过触发的宽限秒数 |  |
+| `timeout_seconds` | INTEGER | NULL | — | 单次执行超时秒数(空=不限) |  |
+| `last_run_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 最近一次执行时刻(UTC) |  |
+| `last_status` | VARCHAR(16) | NULL | — | 最近一次执行结果状态 |  |
+| `remark` | VARCHAR(255) | NULL | — | 备注 |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE `uq_scheduled_tasks_name`：(name)
+- INDEX `ix_scheduled_tasks_handler_key`：(handler_key)
+- INDEX `ix_scheduled_tasks_status`：(status)
+
 ### `dict_data`
 
 > 来源 model：`admin_platform.domains.dict.models.DictData`
@@ -262,6 +292,39 @@
 - FK `None`：(role_id) → roles.id
 - INDEX `ix_role_menus_menu`：(menu_id)
 - INDEX `ix_role_menus_role`：(role_id)
+
+### `scheduled_task_logs`
+
+> 来源 model：`admin_platform.domains.scheduled_task.models.ScheduledTaskLog`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `task_id` | BIGINT | NULL | — | 所属任务ID(任务删后置空,保留历史) |  |
+| `execution_id` | UUID | NOT NULL | — | 执行唯一标识(UUID) |  |
+| `trigger_type` | VARCHAR(16) | NOT NULL | — | 触发方式(schedule自动/manual手动) |  |
+| `scheduled_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 计划触发时刻(UTC,自动触发用于claim去重) |  |
+| `handler_key` | VARCHAR(128) | NOT NULL | — | 处理器键(快照) |  |
+| `params_json` | JSONB | NOT NULL | `'{}'::jsonb` (DB) | 执行参数快照(JSON) |  |
+| `status` | VARCHAR(16) | NOT NULL | — | 执行状态 |  |
+| `started_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 开始执行时刻(UTC) |  |
+| `finished_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 结束时刻(UTC) |  |
+| `duration_ms` | INTEGER | NULL | — | 执行耗时(毫秒) |  |
+| `error_code` | VARCHAR(128) | NULL | — | 失败错误码 |  |
+| `error_message` | VARCHAR(1024) | NULL | — | 失败信息(截断,禁写密钥) |  |
+| `result_summary` | VARCHAR(1024) | NULL | — | 成功结果摘要 |  |
+| `worker_id` | VARCHAR(128) | NULL | — | 执行所在worker标识 |  |
+| `actor_user_id` | BIGINT | NULL | — | 手动触发操作者用户ID |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE （列级 `unique=True`，DDL 由 PG 自动命名）：(execution_id)
+- FK `None`：(task_id) → scheduled_tasks.id
+- INDEX `ix_scheduled_task_logs_status_created`：(status, created_at)
+- INDEX `ix_scheduled_task_logs_task_started`：(task_id, started_at)
+- INDEX UNIQUE `uq_scheduled_task_logs_schedule_claim`：(task_id, scheduled_at)
 
 ### `users`
 

@@ -82,6 +82,24 @@ class Permissions:
     SYSTEM_NOTICE_EDIT: Final = "system:notice:edit"
     SYSTEM_NOTICE_REMOVE: Final = "system:notice:remove"
 
+    # ---- system:server（服务监控，对标 RuoYi 服务监控，只读单视图）----
+    SYSTEM_SERVER_LIST: Final = "system:server:list"
+
+    # ---- system:cache（缓存监控，对标 RuoYi 缓存监控，只读单视图）----
+    SYSTEM_CACHE_LIST: Final = "system:cache:list"
+
+    # ---- system:online（在线用户，对标 RuoYi 在线用户，查 + 强制下线）----
+    SYSTEM_ONLINE_LIST: Final = "system:online:list"
+    SYSTEM_ONLINE_REMOVE: Final = "system:online:remove"
+
+    # ---- system:job（定时任务，对标 RuoYi sys_job，CRUD + 手动触发）----
+    SYSTEM_JOB_LIST: Final = "system:job:list"
+    SYSTEM_JOB_QUERY: Final = "system:job:query"
+    SYSTEM_JOB_ADD: Final = "system:job:add"
+    SYSTEM_JOB_EDIT: Final = "system:job:edit"
+    SYSTEM_JOB_REMOVE: Final = "system:job:remove"
+    SYSTEM_JOB_RUN: Final = "system:job:run"
+
 
 # registry 全集（自动从 Permissions 常量收集，frozenset 天然去重）。
 ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(
