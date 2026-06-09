@@ -169,11 +169,11 @@ roadmap 列为「评估」。独立 session 同步更简单、无新基建、cor
 
 > 每步一可验证目标；DB 步走一次性库 + Alembic 重建；push / 真库迁移 = 红线留人 review。
 
-1. `RequestContextMiddleware` + ContextVar + envelope.request 自动填 → 单测断言 request 子对象非空。
-2. `audit_logs` 表（`make new-module` 或手建 model）+ 迁移 0011 → `persist_audit_event` 独立 session sink → emit_audit 接入 → 集成测试断言失败审计在业务 ROLLBACK 后仍落库（守 §3.2）。
-3. `login_logs` 表 + 迁移 0012 + 登录全路径织入（§5）→ 集成测试断言成功/失败各落 1 条 + IP/UA 非空（roadmap §167 验收）。
-4. 列表/查询 API（audit_logs / login_logs 分页只读，require_permission 守）。
-5. Codex high + 多视角 subagent 对抗审查 → 收敛。
+1. ✅ **Phase 1**：扩展 `RequestIDMiddleware` + `audit/context.py` ContextVar + envelope.request 自动填 → `test_audit_context`（默认读/覆盖/异步传播）。
+2. ✅ **Phase 2**：`audit_events` 表 + 迁移 0011 + `AuditSink`/`DbAuditSink` + 请求缓冲响应后批量 flush → `test_audit_persistence`（失败审计 ROLLBACK 后落库 / 成功 / permission_denied 同步依赖）。
+3. ✅ **Phase 3**：`login_logs` 表 + 迁移 0012 + 登录全路径织入 + `login_success` 扩 EventType → `test_login_log`（成功/失败各 1 条 + IP/UA + 未知用户 user_id 空 + captcha 路径）。
+4. ✅ **Phase 4**：`domains/monitor/`（5 层 + C1）operlog/logininfor list+detail 查询 API + 4 权限点 + seed 监控菜单 → `test_monitor_query`（分页/过滤/detail/404/403）。
+5. **Phase 5**：Codex high + 多视角 subagent 对抗审查 → 收敛。
 
 ---
 

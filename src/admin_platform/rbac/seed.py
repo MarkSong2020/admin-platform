@@ -149,6 +149,54 @@ MENU_TREE: tuple[SeedMenu, ...] = (
             ),
         ),
     ),
+    SeedMenu(
+        seed_key="monitor",
+        name="系统监控",
+        menu_type="M",
+        path="monitor",
+        icon="monitor",
+        sort_order=2,
+        children=(
+            SeedMenu(
+                seed_key="monitor:operlog",
+                name="操作日志",
+                menu_type="C",
+                path="operlog",
+                component="monitor/operlog/index",
+                perms=Permissions.SYSTEM_OPERLOG_LIST,
+                icon="form",
+                sort_order=1,
+                children=(
+                    SeedMenu(
+                        Permissions.SYSTEM_OPERLOG_QUERY,
+                        "操作日志查询",
+                        "F",
+                        perms=Permissions.SYSTEM_OPERLOG_QUERY,
+                        sort_order=1,
+                    ),
+                ),
+            ),
+            SeedMenu(
+                seed_key="monitor:logininfor",
+                name="登录日志",
+                menu_type="C",
+                path="logininfor",
+                component="monitor/logininfor/index",
+                perms=Permissions.SYSTEM_LOGININFOR_LIST,
+                icon="logininfor",
+                sort_order=2,
+                children=(
+                    SeedMenu(
+                        Permissions.SYSTEM_LOGININFOR_QUERY,
+                        "登录日志查询",
+                        "F",
+                        perms=Permissions.SYSTEM_LOGININFOR_QUERY,
+                        sort_order=1,
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
 
 # superadmin 展示角色：解决前端漂移（§2.4），**不作信任根**（信任根 = is_super_admin 布尔）。
