@@ -7,11 +7,14 @@ base64 留 P6 前端阶段。Redis key ``auth:captcha:{id}`` 存答案，TTL 短
 
 from __future__ import annotations
 
+import logging
 import secrets
 
 from redis.asyncio import Redis
 
 from admin_platform.core.config import get_settings
+
+logger = logging.getLogger("admin_platform.auth")
 
 _KEY = "auth:captcha:{}"
 _MAX_OPERAND = 9
@@ -28,13 +31,22 @@ async def generate_captcha(redis: Redis) -> tuple[str, str]:
 
 
 async def verify_captcha(redis: Redis, captcha_id: str | None, answer: str | None) -> bool:
-    """校验 + 一次性消费（无论对错都删 key，防暴力试答）。缺参数 / 过期 / 错误 → False。"""
+    """校验 + **原子**一次性消费（Codex 复审修复）。缺参数 / 过期 / 错误 / Redis 故障 → False。
+
+    用 ``GETDEL`` 原子读取并删除（Redis 6.2+）：避免「GET 后 DEL」非原子窗口里并发请求读到
+    同一答案绕过一次性。Redis 异常 → 返回 False（**fail-closed**：故障时验证码视为未通过，
+    不放行；认证防护不静默 fail-open）。
+    """
     if not captcha_id or not answer:
         return False
-    key = _KEY.format(captcha_id)
-    stored = await redis.get(key)
+    try:
+        stored = await redis.getdel(_KEY.format(captcha_id))  # 原子读+删
+    except Exception:
+        logger.warning(
+            "verify_captcha redis failed → treat as invalid (fail-closed)", exc_info=True
+        )
+        return False
     if stored is None:
         return False
-    await redis.delete(key)  # 一次性：消费后即失效
     expected = stored.decode() if isinstance(stored, bytes) else str(stored)
     return expected == answer.strip()
