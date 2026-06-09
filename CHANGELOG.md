@@ -28,6 +28,16 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P3 运营配置：字典 + 参数 + 通知公告（2026-06-09）
+
+分支 `p1-rbac` · [spec](./docs/specs/2026-06-09-p3-operational-config.md)（Codex high 数据模型 PK 收敛）
+
+- **字典管理** `domains/dict/`（迁移 0015）：`dict_types` + `dict_data` 双表单域两资源，共用 `system:dict:*`。关联决策（Codex PK）：`dict_data.dict_type_id` 外键到代理键 `dict_types.id` + **`ondelete RESTRICT`**（删有数据的类型 → 409 `dict.TYPE_HAS_DATA`，service 预检，不走 DB 静默级联删配置事实）；同类型 `value` 唯一、跨类型可复用；**单默认值**（service 设默认时清同类型其它默认）；`type` 创建后不可改（防前端契约漂移）；内置类型禁删。消费契约 `GET /dict/data/type/{type}` 取启用数据渲染下拉
+- **参数设置** `domains/config/`（迁移 0014）：`configs` 键值参数，`config_key` 全局唯一、内置参数禁删。**热更新决策（Codex PK）**：消费端点 `GET /configs/value/{key}` **纯读穿 DB 无缓存**——单/多 worker 都正确（READ COMMITTED + 一请求一事务，更新提交后下次读即新值），不接 `Settings`/`lru_cache`；P3 DoD「热更新生效」断言测试守门
+- **通知公告** `domains/notice/`（迁移 0013）：`notices` 标题/类型/富文本/状态 CRUD，`notice_type`+`status` 双层 CheckConstraint；`content` 后端存 raw（渲染期净化是 P6 职责），集成测断言富文本原样往返
+- 三域均：五层 + `audited_write` 写审计织入 + 默认 deny 权限守卫（每端点 guard，`test_route_auth_contract` 守）+ 15 权限点过 3-set 相等契约 + seed 菜单 + 每列中文 comment + 迁移零漂移
+- 测试：`make check` 448 ✓ / 8 import 契约 KEPT / `make test-integration` 153 ✓ / `make coverage` 86.7%
+
 ### P2 审计持久化 + 登录日志 + 监控查询 API（2026-06-09）
 
 `caa0f66`→`37d8eb6`（分支 `p2-audit-log`，7 commit）·

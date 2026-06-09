@@ -61,6 +61,27 @@ class Permissions:
     SYSTEM_LOGININFOR_LIST: Final = "system:logininfor:list"
     SYSTEM_LOGININFOR_QUERY: Final = "system:logininfor:query"
 
+    # ---- system:dict（字典类型 + 字典数据，双资源共用，对标 RuoYi sys_dict）----
+    SYSTEM_DICT_LIST: Final = "system:dict:list"
+    SYSTEM_DICT_QUERY: Final = "system:dict:query"
+    SYSTEM_DICT_ADD: Final = "system:dict:add"
+    SYSTEM_DICT_EDIT: Final = "system:dict:edit"
+    SYSTEM_DICT_REMOVE: Final = "system:dict:remove"
+
+    # ---- system:config（参数设置，对标 RuoYi sys_config）----
+    SYSTEM_CONFIG_LIST: Final = "system:config:list"
+    SYSTEM_CONFIG_QUERY: Final = "system:config:query"
+    SYSTEM_CONFIG_ADD: Final = "system:config:add"
+    SYSTEM_CONFIG_EDIT: Final = "system:config:edit"
+    SYSTEM_CONFIG_REMOVE: Final = "system:config:remove"
+
+    # ---- system:notice（通知公告，对标 RuoYi sys_notice）----
+    SYSTEM_NOTICE_LIST: Final = "system:notice:list"
+    SYSTEM_NOTICE_QUERY: Final = "system:notice:query"
+    SYSTEM_NOTICE_ADD: Final = "system:notice:add"
+    SYSTEM_NOTICE_EDIT: Final = "system:notice:edit"
+    SYSTEM_NOTICE_REMOVE: Final = "system:notice:remove"
+
 
 # registry 全集（自动从 Permissions 常量收集，frozenset 天然去重）。
 ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(

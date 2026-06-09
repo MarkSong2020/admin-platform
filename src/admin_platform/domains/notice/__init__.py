@@ -1,0 +1,1 @@
+"""Notice domain 包。"""
