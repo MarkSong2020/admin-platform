@@ -28,6 +28,20 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P4c 定时任务：APScheduler + 多 worker 安全 + handler registry（2026-06-10）
+
+[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) §4 · Codex PK medium 收敛 + 人值守拍板 + 4 视角对抗审查 2 轮
+
+- **域** `domains/scheduled_task/`（迁移 0016：`scheduled_tasks` + `scheduled_task_logs`）：五层 + registry/executor/cron/scheduler 4 装备模块。新依赖 `apscheduler<4`
+- **任务安全（防 RCE）**：管理员只能选代码侧预注册的 `handler_key`（registry 白名单），DB 只存 key + params_json，schema 无 `call_target/command/shell` 任意调用字段；service create/update/run 三处强制 registry 命中 + params 过 handler Pydantic schema——反 RuoYi 任意调用串
+- **多 worker 安全（roadmap P4 红线，两层）**：① 进程级 **leader election**（`pg_try_advisory_lock(478270)` 专用连接，仅 leader 起 `AsyncIOScheduler`）；② 任务级 **DB execution claim**（`(task_id, scheduled_at) WHERE schedule` partial unique，兜 failover 双触发）。手动并发靠任务行 `SELECT FOR UPDATE` 串行化
+- **executor 两段 session**（Codex 风险 #5）：claim（running 日志）先提交 → handler 事务外跑 → result 写终态；超时 `asyncio.wait_for`；orphan running 靠 `count_running` stale 阈值过滤不冻调度
+- **cron**：仅 5 字段标准 crontab（`from_crontab`，校验器=调度构造器），拒 6/7 字段 + Quartz `?L W#`；next_run 仅单条算防永不触发 cron 的 lookahead 阻塞
+- **端点** `/api/v1/monitor/jobs`：CRUD + `/{id}/run` 手动触发（audited）+ `/handlers` + `/logs`；6 perms `system:job:*` 过三集合契约；seed monitor:job 菜单
+- **生命周期**：main.py lifespan，`scheduler_enabled` 默认 False（本地/CI/单测不起，CRUD+手动触发不依赖）；AsyncExitStack LIFO（stop 先于 dispose_engine）+ 优雅 drain + `_loop` 异常守护防僵尸 leader
+- 测试：`make check` 537 ✓ / 8 import 契约 KEPT / `make test-integration` 189 ✓ / coverage 88%（executor/scheduler 走 integration omit，含 claim 并发去重 / leader 选举 / failover / 失败链路）
+- ⚠️ 迁移 0016 仅本地 dev + CI 临时容器跑过，**生产/共享库迁移待单独授权**
+
 ### P4a/P4b 监控：服务/缓存监控 + 在线用户（2026-06-10）
 
 [spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) · 各经 3 视角对抗审查收敛

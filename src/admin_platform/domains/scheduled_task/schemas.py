@@ -1,0 +1,113 @@
+"""定时任务 DTO — scheduled_tasks API 的请求 / 响应形状。
+
+**安全（P4c §3）**：create/update **只接受 ``handler_key`` + ``params``**，无 ``call_target`` /
+``python_path`` / ``command`` / ``shell`` / ``module`` 等任意调用目标字段——schema 层即封死 RCE 面。
+cron / handler_key / params 的语义校验在 service（需 registry + 时区），schema 只做结构与长度。
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+TaskStatus = Literal["enabled", "disabled"]
+TriggerType = Literal["schedule", "manual"]
+LogStatus = Literal["waiting", "running", "success", "failure", "misfire", "skipped"]
+
+
+class HandlerInfo(BaseModel):
+    """registry 中一个可选 handler（供前端下拉，管理员只能从中选）。"""
+
+    key: str
+    display_name: str
+    allow_manual: bool
+
+
+class ScheduledTaskCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    handler_key: str = Field(min_length=1, max_length=128)
+    params: dict[str, Any] = Field(default_factory=dict)
+    cron_expression: str = Field(min_length=1, max_length=128)
+    cron_timezone: str = Field(default="Asia/Shanghai", max_length=64)
+    status: TaskStatus = "disabled"
+    allow_concurrent: bool = False
+    misfire_grace_seconds: int = Field(default=300, ge=0)
+    timeout_seconds: int | None = Field(default=None, ge=1)
+    remark: str | None = Field(default=None, max_length=255)
+
+
+class ScheduledTaskUpdate(BaseModel):
+    """PATCH：全可选。handler_key/params/cron 任一变更都会在 service 重新校验。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    handler_key: str | None = Field(default=None, min_length=1, max_length=128)
+    params: dict[str, Any] | None = None
+    cron_expression: str | None = Field(default=None, min_length=1, max_length=128)
+    cron_timezone: str | None = Field(default=None, max_length=64)
+    status: TaskStatus | None = None
+    allow_concurrent: bool | None = None
+    misfire_grace_seconds: int | None = Field(default=None, ge=0)
+    timeout_seconds: int | None = Field(default=None, ge=1)
+    remark: str | None = Field(default=None, max_length=255)
+
+
+class ScheduledTaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    handler_key: str
+    params_json: dict[str, Any]
+    cron_expression: str
+    cron_timezone: str
+    status: TaskStatus
+    allow_concurrent: bool
+    misfire_grace_seconds: int
+    timeout_seconds: int | None
+    last_run_at: datetime | None
+    last_status: str | None
+    remark: str | None
+    next_run_at: datetime | None = None  # service 按 cron 计算填充（非存储列）
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScheduledTaskPage(BaseModel):
+    items: list[ScheduledTaskRead]
+    page: int
+    size: int
+    total: int
+    total_pages: int
+
+
+class ScheduledTaskLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int | None
+    execution_id: uuid.UUID  # JSON 序列化为字符串
+    trigger_type: TriggerType
+    scheduled_at: datetime | None
+    handler_key: str
+    params_json: dict[str, Any]
+    status: LogStatus
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
+    error_code: str | None
+    error_message: str | None
+    result_summary: str | None
+    worker_id: str | None
+    actor_user_id: int | None
+    created_at: datetime
+
+
+class ScheduledTaskLogPage(BaseModel):
+    items: list[ScheduledTaskLogRead]
+    page: int
+    size: int
+    total: int
+    total_pages: int

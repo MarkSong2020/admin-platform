@@ -16,9 +16,9 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 服务/缓存/在线监控已落地）
+## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 监控/任务已落地）
 
-`make check` 484 ✓ / `make test-integration` 168 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
+`make check` 537 ✓ / `make test-integration` 189 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
@@ -32,7 +32,8 @@
 | P2 审计持久化：audit_events 表（成功审计 in-tx 原子 / 失败缓冲独立）+ login_logs + 中间件 IP/UA + 监控查询 API（operlog/logininfor） | ✓ |
 | P3 运营配置：字典（类型+数据双资源 / FK RESTRICT / 单默认 / 消费端点）+ 参数（热更新读穿 / 内置禁删）+ 通知公告 | ✓ |
 | P4a/P4b 监控：服务监控（psutil CPU/内存/磁盘/进程）+ 缓存监控（Redis INFO 降级）+ 在线用户（活动 family 派生 + 强制下线审计） | ✓ |
-| P4c 定时任务（APScheduler + leader election + handler registry + 执行日志）/ P5 工具（代码生成 / Excel / 文件）/ P6 Vue 前端 | 待做 |
+| P4c 定时任务：APScheduler + PG leader election + DB execution claim（多 worker 红线）+ handler registry 白名单（防 RCE）+ 手动触发 + 执行日志 | ✓ |
+| P5 工具（代码生成 / Excel / 文件）/ P6 Vue 前端 | 待做 |
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
@@ -40,7 +41,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：**P4c 定时任务**（APScheduler `AsyncIOScheduler` + PG advisory leader election + DB execution claim + handler registry 白名单 + 执行日志，Codex PK medium 收敛 spec [`docs/specs/2026-06-10-p4-monitoring-tasks.md`](./docs/specs/2026-06-10-p4-monitoring-tasks.md) §4，时区 Asia/Shanghai，命中基础设施/新依赖/迁移红线已人值守拍板）/ P5 工具 / P6 Vue 前端。P4a/P4b 监控已落地（spec 同上 §2/§3）：服务/缓存监控只读（psutil + Redis INFO 白名单 + 降级 available=False）、在线用户派生活动 refresh token family（login_time 取轮换原点）+ 强制下线撤销 family（audited_write 织入，仅撤 refresh 不碰中间件）。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
+下一步：**P5 工具**（代码生成对标 / Excel 导入导出 / 文件上传）/ P6 Vue 前端。**P4 监控/任务全落地**（spec [`docs/specs/2026-06-10-p4-monitoring-tasks.md`](./docs/specs/2026-06-10-p4-monitoring-tasks.md)）：P4a/P4b 服务/缓存监控（psutil + Redis INFO 白名单 + 降级）+ 在线用户（活动 refresh token family 派生，login_time 取轮换原点 + 强制下线 audited，仅撤 refresh）；**P4c 定时任务**（Codex PK medium 收敛 + 人值守拍板 §4，时区 Asia/Shanghai）：APScheduler `AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行（红线）** + **handler registry 白名单防 RCE**（管理员只选预注册 handler_key，非任意调用串）+ 手动触发 + 执行日志。关键纪律：`scheduler_enabled` 默认 False（CRUD/手动触发不依赖调度器）、手动并发靠任务行 FOR UPDATE 串行化、orphan running 靠 stale 阈值不冻调度。P4c 排期项：6 字段秒级 cron / SIGKILL 显式启动恢复 / 自动重试，见 spec §4 非目标。⚠️ **迁移 0016 + 0013-0015 生产/共享库迁移仍待单独授权**（仅本地 dev + CI 临时容器跑过）。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
 
 ## AI 工作约束
 
