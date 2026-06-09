@@ -1,0 +1,192 @@
+# P2：审计持久化 + 登录日志 — 设计 spec
+
+> 状态：**已拍板，实现中**（2026-06-09 用户签字）。分支 `p2-audit-log`。
+> 用户拍板：① 按 §7 收敛设计开工；② **不做时间分区**（普通表 + 时间索引，量大再迁移）；③ P2 **含只读查询 API**（完整 RuoYi 对标）。
+> 路线图锚点：[`2026-06-04-ruoyi-parity-roadmap.md`](./2026-06-04-ruoyi-parity-roadmap.md) §line 63-64 / 150 / 167 / 176 / 283-284。
+> 前置：P1 已冻结 `audit_event.v1` envelope（`src/admin_platform/audit/events.py`），当前只 emit 到 logger；`emit.py` docstring 明示「P2 接中间件 + 持久化表」。
+
+## 0. 结论先行
+
+P2 = 给现有 audit emit **加一个 DB 持久化 sink**（不动 envelope 冻结契约）+ 补 **请求上下文中间件**（填 envelope 现恒空的 `request` 子对象）+ 建 **登录日志表**（RuoYi `sys_logininfor` 对标，登录全路径织入）。
+
+四个数据模型决策（红线，待签字）：
+
+| # | 决策 | Claude 独立立场（pre-Codex） |
+|---|---|---|
+| D1 | 表数量 / 边界 | `audit_logs`（envelope 全量镜像）+ `login_logs`（登录专用宽表）两张 |
+| D2 | **写入路径**（最关键） | **独立 session 同步落库**，失败降级回 logger，**绝不同事务、绝不阻断业务**；Redis Stream 异步**推迟** |
+| D3 | 上下文传递 | 请求中间件 + `ContextVar`（IP/UA/request_id 注入 envelope.request，不穿层传 Request） |
+| D4 | 与 envelope 关系 | `audit_logs` 是 envelope 1:1 镜像（JSONB metadata）；`login_logs` 另起 RuoYi 对标 schema，非镜像 |
+
+---
+
+## 1. 现状底座（Explore 摸查，file:line 锚点）
+
+- **envelope**：`audit/events.py:120-137`，14 顶层字段（schema_version/event_id/event_type/action/title/occurred_at_utc/actor/target/request/result/duration_ms/risk_level/metadata/redaction_applied）。EventType 4 值（`permission_denied|login_failed|rbac_write|refresh_reused`，P1 注明「可向后兼容扩展」）。脱敏双层 deny-list 已落（`events.py:29-78`）。
+- **emit 路径**：`emit.py:63-74` → logger `admin_platform.audit` INFO，extra key `audit_event`；**失败吞掉不抛**（审计不阻断业务，`emit.py:73`）。
+- **8 处 emit 调用点**：auth login_failed（`service.py:59-69` / `:176-188`）、refresh_reused（`refresh_service.py:144-155`）、permission_denied（`core/permissions.py:82-93`）、rbac_write（`rbac_binding/service.py:260-280` + `core/rbac_audit.py:47-82`）。
+- **登录路径缺口**：成功**无 emit**、限流**无**、验证码**无**；失败/锁有。IP 取自 `api/v1/auth.py:50-51`（`request.client.host`），**UA 全仓未捕获**。**service 层拿不到 Request**（分层：仅 api 层有）。
+- **持久化基建**：`db/base.py` IdMixin（BigInt PK）+ TimestampMixin（created_at/updated_at, timestamptz UTC）+ `lazy="raise"`；`db/session.py` `db_session()` = 一调用一 session 一事务（`session.begin()`）。Redis 已用于 idempotency / login_guard，**无后台任务框架**。最新迁移 `0010_p1_4_refresh_tokens`，env.py 侧 import 注册 metadata。domain 五层骨架见 `domains/post/`（models/schemas/repository/service/api/deps）。
+
+---
+
+## 2. D1+D4 — 表结构与边界
+
+### 2.1 `audit_logs`（审计主表 = envelope 全量镜像）
+
+收**所有** `emit_audit`（每次 emit 多一个 DB sink）。是完整 append-only 审计轨，覆盖 RuoYi `sys_oper_log` 超集（rbac_write/permission_denied/refresh_reused/login_failed 都进）。
+
+| 列 | 类型 | 来源（envelope） | 备注 |
+|---|---|---|---|
+| `id` | BigInt PK | — | IdMixin 代理键 |
+| `event_id` | UUID/str unique | event_id | envelope 业务键，去重锚 |
+| `event_type` | varchar(32) index | event_type | 查询/分区维度 |
+| `action` | varchar(128) | action | 权限点/操作标识 |
+| `title` | varchar(256) | title | 人读标题 |
+| `occurred_at_utc` | timestamptz index | occurred_at_utc | 事件时刻（≠ created_at 落库时刻）|
+| `actor_user_id` | BigInt null **index, 无 FK** | actor.user_id | ⚠️ **冗余快照不设 FK**：用户删除后审计须留存 |
+| `actor_username` | varchar(64) null | actor.username | 冗余快照 |
+| `actor_is_super` | bool | actor.is_super_admin | |
+| `target_type` / `target_id` / `target_display` | varchar | target.* | 被作用对象快照 |
+| `req_ip` / `req_user_agent` / `req_method` / `req_path` / `req_request_id` / `req_trace_id` | varchar null | request.* | 中间件填（D3）|
+| `result_status` | varchar(16) index | result.status | success/failure/denied |
+| `result_http_status` | int null | result.http_status | |
+| `result_error_code` | varchar(64) null | result.error_code | |
+| `duration_ms` | int null | duration_ms | |
+| `risk_level` | varchar(8) index | risk_level | low/medium/high |
+| `metadata` | **JSONB** | metadata（已脱敏） | redaction_applied 已 true 才入 |
+| `redaction_applied` | bool | redaction_applied | |
+| `created_at` | timestamptz | — | TimestampMixin 落库时刻 |
+
+- **索引**：`(occurred_at_utc)`、`(event_type, occurred_at_utc)`、`(actor_user_id)`、`(result_status)`。
+- **分区**：P2 先不做时间分区（量未知）；留 `occurred_at_utc` 索引，量大时再上 PG 声明式分区（不破坏 schema）。
+- **不可变**：只 INSERT，无 UPDATE/DELETE（审计完整性）；无 `updated_at` 语义但 TimestampMixin 带着无害。
+
+### 2.2 `login_logs`（RuoYi `sys_logininfor` 对标，登录专用）
+
+登录全路径**显式**落 1 条（不走 envelope）。给 RuoYi 风格登录历史页用，覆盖成功 + 所有失败模式。
+
+| 列 | 类型 | 备注 |
+|---|---|---|
+| `id` | BigInt PK | |
+| `user_id` | BigInt null index | 失败/账号不存在时可空 |
+| `username` | varchar(64) index | 尝试的账号（防枚举：内部记录，不外泄）|
+| `status` | varchar(16) index | success/failure/locked/rate_limited/captcha_required |
+| `reason_code` | varchar(64) null | error_code（密码错/锁定/限流…）|
+| `ip` | varchar(64) null index | ContextVar 取 |
+| `user_agent` | varchar(512) null | ContextVar 取 |
+| `location` | varchar(128) null | IP 地理位置；P2 留列**不实现**（无 GeoIP 依赖），P3 填 |
+| `login_at_utc` | timestamptz index | 登录尝试时刻 |
+| `created_at` | timestamptz | 落库时刻 |
+
+- **索引**：`(username, login_at_utc)`、`(user_id)`、`(status)`、`(ip)`。
+- **登录失败的双轨**：login 失败既进 `login_logs`（ops 历史）又进 `audit_logs`（安全审计 via 现有 login_failed emit）——**有意重叠**，回答不同问题（"这账号最近登录历史" vs "全量安全事件流"）。RuoYi 同理（logininfor 与 oper_log 不交叉，admin 的 audit_logs 是超集所以交叉，可接受）。
+
+---
+
+## 3. D2 — 写入路径（最关键，红线核心）
+
+### 3.1 立场：独立 session 同步 sink + 降级回 logger
+
+`emit_audit(event)` 增加第二 sink `persist_audit_event(event)`：
+
+```
+async def persist_audit_event(event):
+    try:
+        async with db_session() as s:      # 自己的连接/事务，与业务 session 解耦
+            s.add(AuditLog.from_envelope(event))
+        # __aexit__ 独立 commit
+    except Exception:
+        logger.warning("audit persist failed", exc_info=True)   # 降级：logger sink 已是 durable 底线
+        # 绝不 raise —— 守 emit_audit 既有契约「失败不阻断业务」
+```
+
+### 3.2 为什么**不**同事务（驳同步同事务方案）
+
+失败/denied 审计（permission_denied / login_failed / rbac_write 失败）在业务 `raise AppError` 之时/之前 emit → 业务 `session.begin()` 的 `__aexit__` 触发 **ROLLBACK**。若审计同 session，**最该留的安全事件被一起回滚丢掉**——这正是 P1.5 刚修的「revoke 副作用被 ROLLBACK」同一 bug 类。独立 session 同时切断两个耦合：①审计不被业务回滚牵连；②审计写失败不回滚业务。
+
+### 3.3 已知缺口（诚实边界）
+
+- **成功审计非原子**：独立 session 的成功审计与业务 commit 非原子——业务 commit 后、审计 commit 前崩溃会丢一条（或反向幻影）。这是 dual-write 固有缺口。P2 接受，因为：(a) 审计契约本就 best-effort，logger sink 是 durable 底线；(b) 真原子要 transactional outbox（重，P3）。
+- **连接放大**：每个 audited op 多占一个池连接（独立 session）。池容量需相应调；高频写场景是 Redis Stream 异步化（§3.4）的升级信号。
+
+### 3.4 Redis Stream 异步（推迟）
+
+roadmap 列为「评估」。独立 session 同步更简单、无新基建、correctness 够。仅当审计写成延迟/吞吐瓶颈时升级为 outbox/stream + worker。**P2 不做**，留 §3.3 升级路径。
+
+---
+
+## 4. D3 — 请求上下文中间件 ✅ 已实现（Phase 1）
+
+> **实现优化**：不新增中间件，**扩展现有 `RequestIDMiddleware`**（`core/middleware.py`）——它已管理请求级 ContextVar（request_id）+ request.state，只缺 IP/UA。再叠一层 `BaseHTTPMiddleware`（tech-debt #13）不划算。
+
+- `audit/context.py`（audit 叶子，不 import core，守 C8 方向）：`ContextVar[AuditRequest|None]` + `set/reset/current_request_context`。
+- `RequestIDMiddleware.dispatch`：入口把 `{request_id, trace_id, method, path, ip, user_agent}` 灌进 ContextVar，finally 复位（防跨请求泄漏）。
+- IP 源：`_client_ip(request, trust_xff)` 默认取 `request.client.host`（直连 peer，不可伪造）；`audit_trust_x_forwarded_for=true` 时取 XFF 最左跳（Codex 红线：不裸信任 XFF，需可信反代）。
+- `build_audit_event`：`request is None` 时默认读 `current_request_context()`（填现恒空的 `request` 段）；显式传入覆盖。`login_logs` 写入同样从 ContextVar 取 IP/UA。
+- 这是 `emit.py` docstring「P2 接中间件」的落地半。**异步传播**：ContextVar 在 await 链 + `create_task` 快照透传（`test_audit_context` 守）。
+
+---
+
+## 5. 登录日志织入点（D 配套）
+
+| 路径 | file:line | audit_logs（envelope）| login_logs | 备注 |
+|---|---|---|---|---|
+| 登录成功 | `service.py:134-152` | **新增** `login_success`（扩 EventType，向后兼容加值）| status=success | |
+| 密码错/账号不存在/停用 | `service.py:128-132` | 现有 login_failed | status=failure + reason | |
+| 账号软锁 | `service.py:101-106` | 现有 login_failed（high）| status=locked | |
+| 限流拒绝 | `service.py:89-98` | **新增**（login_failed 或 denied）| status=rate_limited | |
+| 验证码不通过 | `service.py:107-114` | 不 emit（非安全事件，仅挑战）| status=captcha_required | |
+| refresh 复用 | `refresh_service.py:141-155` | 现有 refresh_reused（token theft，high）| 不落 login_logs | |
+
+- **声明式 vs 显式**：oper-log 审计沿用现有 `audited_write`（api 层 declarative-ish，符合 roadmap「声明式注解非纯 middleware」红线）；登录日志 = 5 个分支结果点**显式写**（分支多、显式更清晰）。
+
+---
+
+## 6. 实现顺序（签字后，无人值守，feature 分支 `p2-audit-log`）
+
+> 每步一可验证目标；DB 步走一次性库 + Alembic 重建；push / 真库迁移 = 红线留人 review。
+
+1. `RequestContextMiddleware` + ContextVar + envelope.request 自动填 → 单测断言 request 子对象非空。
+2. `audit_logs` 表（`make new-module` 或手建 model）+ 迁移 0011 → `persist_audit_event` 独立 session sink → emit_audit 接入 → 集成测试断言失败审计在业务 ROLLBACK 后仍落库（守 §3.2）。
+3. `login_logs` 表 + 迁移 0012 + 登录全路径织入（§5）→ 集成测试断言成功/失败各落 1 条 + IP/UA 非空（roadmap §167 验收）。
+4. 列表/查询 API（audit_logs / login_logs 分页只读，require_permission 守）。
+5. Codex high + 多视角 subagent 对抗审查 → 收敛。
+
+---
+
+## 7. Codex PK 交叉评审结论（high reasoning，2026-06-09）
+
+> Codex 经 `-C` 独立读仓 + write-safe-migrations skill 出方案。原文 `/tmp/codex-pk-p2.out`。
+
+### 7.1 强收敛（两方独立同结论）
+
+最关键的 **D2 写入路径**两方**各自独立**得出同一结论，且都点名这是 P1.5「revoke 被 ROLLBACK」同类陷阱——这是 PK 防自欺的核心信号：
+
+| 决策 | 收敛结论 |
+|---|---|
+| 表边界 D1/D4 | 两张表：`audit_events`（canonical 审计，全 event_type）+ `login_logs`（认证日志投影）；`sys_oper_log` **不建物理表**，作 audit_events 的查询视图/API DTO |
+| actor 外键 | **不设 FK**，冗余快照 user_id + username（审计须在用户删除后留存；CASCADE 误删、SET NULL 损失调查价值）|
+| 写入路径 D2 | **独立 session**，非同业务事务、非纯 BackgroundTask；失败/拒绝立即写，**成功事件确认业务 commit 后再写**；写失败降级 logger，绝不阻断业务 |
+| metadata | JSONB（仅 PG），经 `redact_metadata` 脱敏，禁塞 raw headers/token/UA-as-secret |
+| 分区 | P2 **不做**时间分区（量未知）；留时间索引，量大再上月分区 |
+| Redis Stream | **推迟 P2.1**，behind `AuditSink` 接口 |
+| login_success | 扩 EventType（schema_version 不变，向后兼容加值）|
+| 幂等 | `event_id` UNIQUE |
+
+### 7.2 采纳 Codex 三处精化（改进，非冲突）
+
+1. **`payload JSONB NOT NULL` 列**：audit_events 除拆查询列外，再存**完整 envelope** 做无损回放（拆列查询 + payload 取证两全）。
+2. **`AuditSink` 抽象**：P2 实现 `db_independent` sink，接口保留 `redis_stream` sink 可替换——Claude 若日后主张 Redis 可交叉评审 ops 成本，不把业务码绑死 Redis。
+3. **after-commit 时点**：成功类 DB 写事件用请求级 collector，在主事务确认 commit 后 flush；驳「独立 session 过早写 success → 业务最终 rollback 但审计已 success」假审计。
+4. **`login_logs.event_id` nullable unique**：回查关联 `audit_events.event_id`（登录失败双轨可串起来）。
+
+### 7.3 一处分歧（非红线 / 可逆 / 已裁决）
+
+| 维度 | Claude | Codex | 裁决 |
+|---|---|---|---|
+| D3 上下文传递 | RequestContextMiddleware + ContextVar（envelope.request 全局填）| API 层显式取 `request.client.host` / `headers` / `request.state` | **采 ContextVar**：①`rbac_audit.py:564` 现有注释已写明「请求段留 P2 中间件统一补」，②audited_write 拿不到 Request（只有 CurrentUser），显式取需穿层。**但加 Codex 的两条约束**：(a) 不信任 `X-Forwarded-For`，需 trusted proxy 配置；(b) 补 ContextVar 异步传播正确性单测（防 task 边界丢上下文）|
+
+### 7.4 红线裁决 → **升级人拍板**
+
+两方裁决信号一致：**否自动执行**，命中升级（数据模型不可逆 / 认证安全日志 / 跨模块横切 / 事务边界红线）。按 codex-pk 纪律 + CLAUDE.md「不可逆决策强制升级，不让 Claude 自裁」——数据模型落迁移前需用户签字。设计已收敛，升级性质为**收敛设计的 sign-off**（非让用户裁决分歧），外加 2 个用户语境相关的开放项（保留期/分区、P2 范围边界）。

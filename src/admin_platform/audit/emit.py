@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from admin_platform.audit.context import current_request_context
 from admin_platform.audit.events import (
     AuditActor,
     AuditEvent,
@@ -51,7 +52,9 @@ def build_audit_event(  # noqa: PLR0913 —— audit_event.v1 字段多且全命
         occurred_at_utc=occurred_at_utc or datetime.now(UTC).isoformat(),
         actor=actor or AuditActor(),
         target=target or AuditTarget(),
-        request=request or AuditRequest(),
+        # request 默认从请求级 ContextVar 读（中间件灌的 IP/UA/id）——service 层拿不到 Request，
+        # 这是 P1 envelope.request 恒空的解法（P2 §4）。显式传入则覆盖（如测试注入固定值）。
+        request=request if request is not None else current_request_context(),
         result=result,
         duration_ms=duration_ms,
         risk_level=risk_level,

@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     auth_login_lock_seconds: int = Field(default=600, ge=60)  # 软锁时长
     auth_login_ip_limit: int = Field(default=30, ge=1)  # IP 维度窗口上限 → 429
 
+    # ---- P2 审计持久化 + 登录日志（spec 2026-06-09-p2-audit-persistence）----
+    # 客户端 IP 取值（审计/登录日志用）。默认 False = 取 ``request.client.host``（直连 peer，
+    # 不可伪造）。True 时取 ``X-Forwarded-For`` 最左跳——⚠️ **仅在可信反代会覆盖/剥离客户端
+    # 自带 XFF 时才可开**（否则客户端可伪造 IP，污染审计/限流）。Codex PK 红线：不裸信任 XFF。
+    audit_trust_x_forwarded_for: bool = False
+
     @field_validator("database_url")
     @classmethod
     def _validate_database_url_scheme(cls, value: str) -> str:
