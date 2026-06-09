@@ -16,9 +16,9 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/登录日志/监控查询已落地）
+## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置已落地）
 
-`make check` 391 ✓ / `make test-integration` 136 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
+`make check` 448 ✓ / `make test-integration` 153 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
@@ -30,7 +30,8 @@
 | P1.4 登录增强：refresh 轮换 + 验证码 + 登录限流 | ✓ |
 | P1.5 安全加固：dept 越权 / 登录防护默认 / 绑定 API + 审计织入 / route 契约 / refresh lock | ✓ |
 | P2 审计持久化：audit_events 表（成功审计 in-tx 原子 / 失败缓冲独立）+ login_logs + 中间件 IP/UA + 监控查询 API（operlog/logininfor） | ✓ |
-| P2+ 字典参数 / 监控任务（在线用户 / 定时任务）/ Vue 前端 | 待做 |
+| P3 运营配置：字典（类型+数据双资源 / FK RESTRICT / 单默认 / 消费端点）+ 参数（热更新读穿 / 内置禁删）+ 通知公告 | ✓ |
+| P4 监控/任务（定时任务 / 服务监控 / 在线用户）/ P5 工具（代码生成 / Excel / 文件）/ P6 Vue 前端 | 待做 |
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
@@ -38,7 +39,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：P2+（字典参数 / 监控任务：在线用户 + 定时任务 / Vue 前端）。P2 审计持久化已落地（spec [`docs/specs/2026-06-09-p2-audit-persistence.md`](./docs/specs/2026-06-09-p2-audit-persistence.md)，经 4 轮 Codex high + 多视角 subagent 对抗审查收敛）；写入路径红线：**成功审计走业务 session SAVEPOINT 原子提交、失败/拒绝走缓冲独立 flush**（§3.3）。排期项：P2.1 Redis Stream 异步 sink / transactional outbox（失败审计崩溃窗口）/ provider 连接池放大 / 非 HTTP RBAC 写原子性，见 spec §8。
+下一步：P4（监控/任务：定时任务 APScheduler + 服务监控 + 在线用户）/ P5 工具 / P6 Vue 前端。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
 
 ## AI 工作约束
 
