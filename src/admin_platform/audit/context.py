@@ -16,9 +16,21 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 
-from admin_platform.audit.events import AuditRequest
+from admin_platform.audit.events import AuditEvent, AuditRequest
 
 _request_ctx_var: ContextVar[AuditRequest | None] = ContextVar("audit_request_ctx", default=None)
+
+# 请求级审计事件缓冲（P2 §3 写入路径）：中间件入口 set 一个空 list，下游 emit_audit 往里
+# append，响应后中间件 flush 一次（独立 session 批量落库）。
+#
+# 为何用「中间件持有引用的可变 list」而非「事件追加进 contextvar 值」：BaseHTTPMiddleware 下，
+# 下游对 contextvar 的【重新赋值】不会上行传播回中间件（Starlette 已知行为），但对中间件 set 的
+# 【同一 list 对象的 mutation】可见（同一内存对象）。故只 append、绝不重新 set，flush 用中间件
+# 本地持有的那个 list 引用。同步线程池依赖（如 permissions._dep）由 anyio 复制 context 进线程，
+# append 仍命中同一 list。
+_audit_buffer_var: ContextVar[list[AuditEvent] | None] = ContextVar(
+    "audit_event_buffer", default=None
+)
 
 
 def set_request_context(request: AuditRequest) -> Token[AuditRequest | None]:
@@ -35,3 +47,19 @@ def current_request_context() -> AuditRequest:
     """读当前请求上下文；无（如后台任务 / 单测未 set）时返回空 ``AuditRequest``。"""
     ctx = _request_ctx_var.get()
     return ctx if ctx is not None else AuditRequest()
+
+
+def set_audit_buffer(buffer: list[AuditEvent]) -> Token[list[AuditEvent] | None]:
+    """中间件入口设置请求级审计缓冲（传入中间件本地持有的空 list），返回 reset token。"""
+    return _audit_buffer_var.set(buffer)
+
+
+def reset_audit_buffer(token: Token[list[AuditEvent] | None]) -> None:
+    _audit_buffer_var.reset(token)
+
+
+def append_audit_event(event: AuditEvent) -> None:
+    """把审计事件追加进当前请求缓冲（仅 mutate，不重新 set）。无缓冲（CLI/单测）= no-op。"""
+    buffer = _audit_buffer_var.get()
+    if buffer is not None:
+        buffer.append(event)

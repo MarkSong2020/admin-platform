@@ -15,6 +15,7 @@ from sqlalchemy import text
 from admin_platform.api.v1.auth import router as auth_router
 from admin_platform.api.v1.health import router as health_router
 from admin_platform.api.v1.rbac import router as rbac_router
+from admin_platform.audit.sink import DbAuditSink, configure_audit_sink
 from admin_platform.core.auth import AuthMiddleware, get_auth_config, is_public_path
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import ProblemDetail, register_exception_handlers
@@ -69,8 +70,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     settings = get_settings()
     init_observability(settings)
+    # P2：注册审计持久化 sink（独立 session 批量落库，由 RequestIDMiddleware 响应后 flush）。
+    # 关持久化（audit_persistence_enabled=false）则退化为仅 logger。shutdown 复位防进程内重启泄漏。
+    configure_audit_sink(DbAuditSink() if settings.audit_persistence_enabled else None)
     async with AsyncExitStack() as stack:
         stack.push_async_callback(lambda: shutdown_observability(settings))
+        stack.callback(configure_audit_sink, None)
         stack.push_async_callback(dispose_engine)
         redis: Redis | None = getattr(app.state, "redis", None)
         if redis is not None:

@@ -21,8 +21,14 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import ClientDisconnect
 
-from admin_platform.audit.context import reset_request_context, set_request_context
-from admin_platform.audit.events import AuditRequest
+from admin_platform.audit.context import (
+    reset_audit_buffer,
+    reset_request_context,
+    set_audit_buffer,
+    set_request_context,
+)
+from admin_platform.audit.events import AuditEvent, AuditRequest
+from admin_platform.audit.sink import flush_audit_events
 from admin_platform.core.config import get_settings
 
 # nginx 风格的「客户端关闭请求」状态码 —— 在客户端在 handler 完成前
@@ -153,6 +159,10 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                 user_agent=request.headers.get("user-agent"),
             )
         )
+        # P2 审计缓冲：本地持有空 list 引用，下游 emit_audit append（mutate 同一对象，规避
+        # BaseHTTPMiddleware contextvar 上行不传播）；finally 一次性 flush 落库。
+        audit_buffer: list[AuditEvent] = []
+        buffer_token = set_audit_buffer(audit_buffer)
         start = time.perf_counter()
 
         span_id: str | None = None
@@ -188,8 +198,12 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            # 响应后 flush 审计缓冲（独立 session 批量落库；空缓冲/无 sink = no-op，永不抛）。
+            # 此时业务事务已 commit/rollback，时点对成功/失败事件统一正确。
+            await flush_audit_events(audit_buffer)
             _request_id_var.reset(token)
             reset_request_context(ctx_token)
+            reset_audit_buffer(buffer_token)
             access_logger.info(
                 "request handled",
                 extra={

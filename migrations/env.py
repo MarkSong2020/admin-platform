@@ -37,6 +37,7 @@ from admin_platform.domains.role.models import Role  # noqa: F401
 from admin_platform.domains.menu.models import Menu  # noqa: F401
 from admin_platform.domains.post.models import Post  # noqa: F401
 from admin_platform.domains.auth.models import RefreshToken  # noqa: F401
+from admin_platform.audit.models import AuditEventLog  # noqa: F401
 
 # ----------------------------------------------------------------------------
 
