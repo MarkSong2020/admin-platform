@@ -19,6 +19,8 @@ dependencies = [
     "opentelemetry-sdk>=1.41.1",
     "opentelemetry-exporter-otlp-proto-http>=1.41.1",
     "argon2-cffi>=25,<26",
+    # P4 服务监控：跨平台（macOS 开发 + Linux 生产）CPU/内存/磁盘采集；只读、无副作用。
+    "psutil>=6",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +38,8 @@ dev = [
     "pre-commit>=4",
     # 依赖扫描（Errata #1）：用 uvx pip-audit 一次性跑也可，不强制入 dev
     "import-linter>=2.11,<3",
+    # P4 服务监控：psutil 不带完整类型存根，pyright 需 types-psutil 才不报 reportMissingTypeStubs。
+    "types-psutil>=6",
 ]
 
 [build-system]

@@ -225,6 +225,47 @@ MENU_TREE: tuple[SeedMenu, ...] = (
                     ),
                 ),
             ),
+            # P4 服务/缓存监控：只读单视图，无增删改按钮（list perm 即整页授权）。
+            SeedMenu(
+                seed_key="monitor:server",
+                name="服务监控",
+                menu_type="C",
+                path="server",
+                component="monitor/server/index",
+                perms=Permissions.SYSTEM_SERVER_LIST,
+                icon="server",
+                sort_order=3,
+            ),
+            SeedMenu(
+                seed_key="monitor:cache",
+                name="缓存监控",
+                menu_type="C",
+                path="cache",
+                component="monitor/cache/index",
+                perms=Permissions.SYSTEM_CACHE_LIST,
+                icon="redis",
+                sort_order=4,
+            ),
+            # P4 在线用户：列表（list）+ 强制下线按钮（remove）。
+            SeedMenu(
+                seed_key="monitor:online",
+                name="在线用户",
+                menu_type="C",
+                path="online",
+                component="monitor/online/index",
+                perms=Permissions.SYSTEM_ONLINE_LIST,
+                icon="online",
+                sort_order=5,
+                children=(
+                    SeedMenu(
+                        Permissions.SYSTEM_ONLINE_REMOVE,
+                        "强制下线",
+                        "F",
+                        perms=Permissions.SYSTEM_ONLINE_REMOVE,
+                        sort_order=1,
+                    ),
+                ),
+            ),
         ),
     ),
 )

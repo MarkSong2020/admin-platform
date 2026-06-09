@@ -87,3 +87,145 @@ class LoginLogPage(BaseModel):
     size: int
     total: int
     total_pages: int
+
+
+# ---- P4 服务监控（psutil 采集，对标 RuoYi 服务监控）------------------------------
+
+
+class ServerCpu(BaseModel):
+    """CPU 指标。"""
+
+    cores: int | None  # 逻辑核心数
+    percent: float  # 总体使用率 %
+    per_cpu: list[float]  # 各核使用率 %
+    load_avg: list[float] | None  # 1/5/15 分钟平均负载（仅类 Unix）
+
+
+class ServerMemory(BaseModel):
+    """物理内存指标（字节）。"""
+
+    total: int
+    available: int
+    used: int
+    percent: float
+
+
+class ServerSwap(BaseModel):
+    """交换分区指标（字节）。"""
+
+    total: int
+    used: int
+    free: int
+    percent: float
+
+
+class ServerDisk(BaseModel):
+    """单个磁盘分区用量（字节）。"""
+
+    device: str
+    mountpoint: str
+    fstype: str
+    total: int
+    used: int
+    free: int
+    percent: float
+
+
+class ServerSys(BaseModel):
+    """主机基本信息。"""
+
+    hostname: str
+    os_name: str
+    os_release: str
+    arch: str
+    python_version: str
+    boot_time: datetime
+
+
+class ServerProcess(BaseModel):
+    """当前应用进程指标。"""
+
+    pid: int
+    cpu_percent: float
+    memory_percent: float
+    memory_rss: int  # 常驻内存（字节）
+    num_threads: int
+    create_time: datetime
+
+
+class ServerMetrics(BaseModel):
+    """服务监控聚合响应。"""
+
+    cpu: ServerCpu
+    memory: ServerMemory
+    swap: ServerSwap
+    disks: list[ServerDisk]
+    sys: ServerSys
+    process: ServerProcess
+    collected_at: datetime
+
+
+# ---- P4 缓存监控（Redis INFO，对标 RuoYi 缓存监控）--------------------------------
+
+
+class CacheCommandStat(BaseModel):
+    """单条 Redis 命令统计（``commandstats``）。"""
+
+    name: str
+    calls: int
+    usec: int
+    usec_per_call: float
+
+
+class CacheRedisInfo(BaseModel):
+    """Redis ``INFO`` 关键字段摘要。字段缺失（不同 Redis 版本）时为 None。"""
+
+    version: str | None
+    mode: str | None
+    uptime_seconds: int | None
+    connected_clients: int | None
+    used_memory: int | None
+    used_memory_human: str | None
+    maxmemory: int | None
+    mem_fragmentation_ratio: float | None
+    keyspace_hits: int | None
+    keyspace_misses: int | None
+    hit_rate: float | None  # 命中率 = hits / (hits + misses)，无样本则 0.0
+    total_commands_processed: int | None
+
+
+class CacheMetrics(BaseModel):
+    """缓存监控聚合响应。Redis 未配置 / 不可达时 ``available=False``（不抛 500）。"""
+
+    available: bool
+    db_size: int | None  # 当前 db 的 key 数量
+    info: CacheRedisInfo | None
+    command_stats: list[CacheCommandStat]
+    collected_at: datetime
+
+
+# ---- P4 在线用户（活动 refresh token family 派生，对标 RuoYi 在线用户）-------------
+
+
+class OnlineSession(BaseModel):
+    """一个在线会话 = 一个活动 refresh token family（一次登录）。
+
+    设备信息（IP/UA）按 P1.4 决策不落 refresh token，故此处不含——会话级 IP/UA 需查登录日志。
+    """
+
+    session_id: str  # family_id（UUID 字符串），强制下线按此撤销
+    user_id: int
+    username: str
+    login_time: datetime  # family 首签时间（登录时刻）
+    last_active_time: datetime  # 最近一次轮换/签发时间
+    expires_at: datetime  # 会话绝对过期上限
+
+
+class OnlineSessionPage(BaseModel):
+    """在线会话分页 envelope。"""
+
+    items: list[OnlineSession]
+    page: int
+    size: int
+    total: int
+    total_pages: int
