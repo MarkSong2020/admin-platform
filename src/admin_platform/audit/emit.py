@@ -87,17 +87,22 @@ def emit_audit(event: AuditEvent) -> None:
 
 
 async def record_audit_committed(event: AuditEvent) -> None:
-    """成功类审计落地（review F1 修复，方案 B）：logger + 写**当前请求业务 session**（SAVEPOINT
-    隔离，与业务原子提交）。
+    """成功类审计落地（review F1 修复，方案 B）：写**当前请求业务 session**（SAVEPOINT 隔离，与
+    业务原子提交）+ logger。
 
     成功审计必须与业务**原子**——commit 失败时审计随业务一同回滚，不留假成功审计。无请求 session
     （非 HTTP 上下文）回退缓冲独立 flush（无业务事务可绑，本就无 F1 风险）。
+
+    **顺序：先 persist 后 logger**（Round-3 审查 R3-1）——``persist_audit_in_session`` 前置业务 flush，
+    若业务 pending 约束错会在此上抛，跳过 logger，**logger sink 也不留假成功审计**。persist 成功
+    （或审计自身失败被 savepoint 吞）后再 logger。
     """
-    _emit_to_logger(event)
     session = current_request_session()
     if session is not None:
         await persist_audit_in_session(session, event)
+        _emit_to_logger(event)
     else:
+        _emit_to_logger(event)
         append_audit_event(event)
 
 
