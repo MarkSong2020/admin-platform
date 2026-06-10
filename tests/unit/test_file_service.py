@@ -31,6 +31,11 @@ async def _stream(*parts: bytes) -> AsyncIterator[bytes]:
         yield part
 
 
+def _files_under(root: Path) -> list[Path]:
+    """同步遍历 storage root 下的文件（提到模块级，避免 async 函数体内 pathlib 触发 ruff ASYNC240）。"""
+    return [p for p in root.rglob("*") if p.is_file()]
+
+
 class _FakeRepo:
     """镜像 FileRepository 契约（DB-free，行用 SimpleNamespace）。"""
 
@@ -297,8 +302,7 @@ async def test_upload_cleans_physical_when_repo_create_fails(tmp_path: Path) -> 
             stream=_stream(_PNG + b"data"),
             uploader_id=7,
         )
-    leftover = [p for p in tmp_path.rglob("*") if p.is_file()]  # noqa: ASYNC240 测试同步遍历断言
-    assert leftover == []  # storage root 下无残留孤儿文件
+    assert _files_under(tmp_path) == []  # storage root 下无残留孤儿文件
 
 
 async def test_upload_truncates_overlong_filename(tmp_path: Path) -> None:
