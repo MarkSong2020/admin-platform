@@ -28,6 +28,7 @@ from admin_platform.db.engine import dispose_engine, get_engine
 from admin_platform.domains.config.api import router as config_router
 from admin_platform.domains.dept.api import router as dept_router
 from admin_platform.domains.dict.api import router as dict_router
+from admin_platform.domains.file.api import router as file_router
 from admin_platform.domains.menu.api import router as menu_router
 from admin_platform.domains.menu.provider import DbMenuProvider
 from admin_platform.domains.monitor.api import router as monitor_router
@@ -221,6 +222,7 @@ def create_app() -> FastAPI:
     app.include_router(role_router)
     app.include_router(menu_router)
     app.include_router(post_router)
+    app.include_router(file_router)  # P5 系统工具：文件管理（上传/下载/列表/删除）
     app.include_router(dict_router)  # P3 运营配置：字典管理（类型 + 数据）
     app.include_router(config_router)  # P3 运营配置：参数设置
     app.include_router(notice_router)  # P3 运营配置：通知公告
