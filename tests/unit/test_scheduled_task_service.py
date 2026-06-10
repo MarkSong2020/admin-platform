@@ -253,7 +253,7 @@ async def test_manual_run_handler_offline_409() -> None:
     svc = _service(repo)
     with pytest.raises(AppError) as e:
         await svc.manual_run(1, actor_user_id=1)
-    assert e.value.code == "scheduled_task.HANDLER_UNKNOWN"
+    assert e.value.code == "scheduled_task.HANDLER_OFFLINE"  # M10：manual 专属 409 码（非 422 码）
     assert e.value.status_code == 409
 
 
@@ -290,6 +290,9 @@ async def test_manual_run_outcome_none_409() -> None:
     with pytest.raises(AppError) as e:
         await svc.manual_run(1, actor_user_id=1)
     assert e.value.status_code == 409
+    assert (
+        e.value.code == "scheduled_task.RUN_CONFLICT"
+    )  # M10：执行期消失专属码（非 404 NOT_FOUND）
 
 
 async def test_create_enabled_computes_next_run() -> None:
