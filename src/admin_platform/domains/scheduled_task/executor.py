@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import socket
 import uuid
 from dataclasses import dataclass
@@ -33,6 +34,18 @@ _ERR_MSG_MAX = 1024
 _SUMMARY_MAX = 1024
 # 孤儿 running 兜底：无 timeout_seconds 的任务，超过此秒数的 running 视为崩溃遗留、不计入并发判定。
 _DEFAULT_STALE_SECONDS = 3600
+
+# F6：执行日志脱敏兜底——error_message / result_summary 可能含 handler 异常里的连接串/密钥
+# （admin-only 日志，但 handler registry 是扩展点，纵深防御屏蔽常见敏感模式胜过裸写）。
+_SECRET_PATTERN = re.compile(
+    r"(?i)(password|passwd|pwd|token|secret|api[_-]?key|authorization)\s*[=:]\s*\S+"
+    r"|[a-z][a-z0-9+.-]*://[^:/\s]+:[^@\s]+@"  # 连接串 scheme://user:pass@host
+)
+
+
+def _redact(text: str) -> str:
+    """屏蔽常见敏感模式（key=value / key:value 形式的密钥 + URL 内嵌凭据）。"""
+    return _SECRET_PATTERN.sub("***REDACTED***", text)
 
 
 @dataclass(frozen=True)
@@ -165,8 +178,9 @@ class TaskExecutor:
         except TimeoutError:
             return "failure", "scheduled_task.TIMEOUT", f"执行超时(> {timeout_seconds}s)", None
         except Exception as exc:
-            return "failure", type(exc).__name__, str(exc)[:_ERR_MSG_MAX], None
-        return "success", None, None, (summary[:_SUMMARY_MAX] if summary else None)
+            # F6：脱敏兜底——handler 异常文本可能含连接串/密钥（纵深防御，不裸写入库）。
+            return "failure", type(exc).__name__, _redact(str(exc))[:_ERR_MSG_MAX], None
+        return "success", None, None, (_redact(summary)[:_SUMMARY_MAX] if summary else None)
 
     async def _finish(  # noqa: PLR0913 —— 执行终态字段多且全显式传，内部 helper 可放宽
         self,
