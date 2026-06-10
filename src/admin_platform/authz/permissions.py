@@ -100,6 +100,13 @@ class Permissions:
     SYSTEM_JOB_REMOVE: Final = "system:job:remove"
     SYSTEM_JOB_RUN: Final = "system:job:run"
 
+    # ---- system:file（文件管理，对标 RuoYi sys_oss，上传/下载/列表/删除）----
+    SYSTEM_FILE_LIST: Final = "system:file:list"
+    SYSTEM_FILE_QUERY: Final = "system:file:query"
+    SYSTEM_FILE_UPLOAD: Final = "system:file:upload"
+    SYSTEM_FILE_DOWNLOAD: Final = "system:file:download"
+    SYSTEM_FILE_REMOVE: Final = "system:file:remove"
+
 
 # registry 全集（自动从 Permissions 常量收集，frozenset 天然去重）。
 ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(

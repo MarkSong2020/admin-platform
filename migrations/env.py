@@ -46,6 +46,8 @@ from admin_platform.domains.scheduled_task.models import (  # noqa: F401
     ScheduledTaskLog,
 )
 
+from admin_platform.domains.file.models import File  # noqa: F401
+
 # ----------------------------------------------------------------------------
 
 config = context.config

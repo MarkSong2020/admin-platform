@@ -25,6 +25,7 @@
 - [`scheduled_task_logs`](#scheduled_task_logs)（18 列）
 - [`users`](#users)（9 列）
 - [`auth_refresh_tokens`](#auth_refresh_tokens)（14 列）
+- [`files`](#files)（12 列）
 - [`user_posts`](#user_posts)（5 列）
 - [`user_roles`](#user_roles)（5 列）
 
@@ -379,6 +380,33 @@
 - INDEX `ix_auth_refresh_tokens_family`：(family_id)
 - INDEX `ix_auth_refresh_tokens_user_active`：(user_id, revoked_at, expires_at)
 - INDEX `ix_auth_refresh_tokens_user_family`：(user_id, family_id)
+
+### `files`
+
+> 来源 model：`admin_platform.domains.file.models.File`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `object_key` | VARCHAR(64) | NOT NULL | — | 存储对象键(uuid4 hex，不含原文件名，防穿越/覆盖) |  |
+| `storage_backend` | VARCHAR(32) | NOT NULL | — | 存储后端(local/s3) |  |
+| `original_filename` | VARCHAR(255) | NOT NULL | — | 原始文件名(仅展示/下载用，不信任) |  |
+| `content_type` | VARCHAR(128) | NOT NULL | — | 声明MIME类型(校验后落库) |  |
+| `size_bytes` | BIGINT | NOT NULL | — | 文件字节数(实际写入量) |  |
+| `sha256` | VARCHAR(64) | NOT NULL | — | 内容SHA256(完整性校验) |  |
+| `uploader_id` | BIGINT | NOT NULL | — | 上传者用户ID |  |
+| `status` | VARCHAR(16) | NOT NULL | `'active'` | 状态(active/deleted) |  |
+| `deleted_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 软删时间(NULL=未删) |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE `uq_files_object_key`：(object_key)
+- FK `fk_files_uploader_id`：(uploader_id) → users.id
+- INDEX `ix_files_sha256`：(sha256)
+- INDEX `ix_files_status_created`：(status, created_at)
+- INDEX `ix_files_uploader_id`：(uploader_id)
 
 ### `user_posts`
 
