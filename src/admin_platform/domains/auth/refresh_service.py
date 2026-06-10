@@ -73,6 +73,7 @@ async def issue_refresh_token(
         token_hash=token_hash,
         issued_at=now,
         expires_at=expires_at,
+        family_absolute_at=family_absolute,
     )
     return IssuedRefresh(
         token=token,
@@ -133,6 +134,12 @@ async def rotate_refresh_token(session: AsyncSession, *, raw_token: str) -> Rota
 
     now = _now()
     repo = RefreshTokenRepository(session)
+    # H1：先无锁读 user_id → 取 per-user advisory lock，再 FOR UPDATE 锁行。统一「先 user 锁、再行
+    # 锁」顺序，串行化本用户的轮换/撤销/强制下线，关掉新插 token 逃逸并发撤销快照的竞态（防死锁）。
+    user_id = await repo.get_user_id_by_jti(jti)
+    if user_id is None:
+        raise _invalid()
+    await repo.acquire_user_lock(user_id)
     row = await repo.get_by_jti_for_update(jti)  # FOR UPDATE 锁行
     if row is None or not verify_refresh_secret(secret, row.token_hash):
         raise _invalid()
@@ -164,12 +171,10 @@ async def rotate_refresh_token(session: AsyncSession, *, raw_token: str) -> Rota
     if row.revoked_at is not None or row.expires_at <= now:
         raise _invalid()
 
-    # absolute 上限锚定 family 首登（轮换不续期 absolute）：超上限即拒绝，须重登。
-    settings = get_settings()
-    origin = await repo.get_family_origin_issued_at(row.family_id)
-    family_absolute = (origin or row.issued_at) + timedelta(
-        seconds=settings.auth_refresh_absolute_ttl_seconds
-    )
+    # absolute 上限锚定 family 首登（轮换不续期 absolute，hardening-r1 H2）：直接读本行持久化的
+    # family_absolute_at（签发时落列、轮换透传），不再 min(issued_at) 聚合——后者会随 cleanup
+    # 删早期行而前移，让持续刷新的会话永不过期。超上限即拒绝，须重登。
+    family_absolute = row.family_absolute_at
     if now >= family_absolute:
         raise _invalid()
 
@@ -195,6 +200,11 @@ async def revoke_refresh_token(session: AsyncSession, *, raw_token: str) -> bool
     except ValueError:
         return False
     repo = RefreshTokenRepository(session)
+    # H1：先取 per-user 锁再锁行 + 撤销（与 rotate 同顺序），串行化 logout 与并发轮换。
+    user_id = await repo.get_user_id_by_jti(jti)
+    if user_id is None:
+        return False
+    await repo.acquire_user_lock(user_id)
     row = await repo.get_by_jti_for_update(jti)
     if row is None or not verify_refresh_secret(secret, row.token_hash):
         return False

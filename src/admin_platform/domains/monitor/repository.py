@@ -12,11 +12,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Row, Select, func, select, update
+from sqlalchemy import Row, Select, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.audit.models import AuditEventLog
 from admin_platform.domains.auth.models import LoginLog, RefreshToken
+from admin_platform.domains.auth.repository import REFRESH_USER_LOCK_NS
 from admin_platform.domains.user.models import User
 
 
@@ -165,6 +166,15 @@ class MonitorRepository:
         """取单个活动会话（强制下线前的存在性检查 + 取用户名供审计 display）。"""
         stmt = self._active_sessions_stmt(now=now).where(RefreshToken.family_id == family_id)
         return (await self._session.execute(stmt)).first()
+
+    async def acquire_user_lock(self, user_id: int) -> None:
+        """复用 auth 的 per-user advisory lock（同 NS，hardening-r1 H1）：强制下线撤销 family 前先取
+        锁，与 refresh 轮换/撤销串行化——否则并发轮换插入的新 token 不在本次撤销语句快照内 → 逃逸。"""
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :uid)").bindparams(
+                ns=REFRESH_USER_LOCK_NS, uid=user_id
+            )
+        )
 
     async def revoke_online_session(
         self, family_id: uuid.UUID, *, reason: str, now: datetime

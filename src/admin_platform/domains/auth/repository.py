@@ -15,9 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.domains.auth.models import RefreshToken
 
-# per-user refresh 签发 advisory lock 命名空间（与 dept 478221 / role 478231-2 / menu 478241-2 /
+# per-user refresh advisory lock 命名空间（与 dept 478221 / role 478231-2 / menu 478241-2 /
 # post 478251 的单 bigint 锁隔离：本锁用 (ns, user_id) 双 int4 形式，不会跨域互锁）。
-_REFRESH_USER_LOCK_NS = 478260
+# hardening-r1 H1：登录签发、轮换、撤销、强制下线（monitor 复用同 NS）全经此锁串行化同一用户的
+# family 变更，关掉并发轮换插入新 token 逃逸并发撤销的 READ COMMITTED 快照竞态。公开（去下划线）
+# 供 monitor.repository 复用。
+REFRESH_USER_LOCK_NS = 478260
 
 
 class RefreshTokenRepository:
@@ -25,12 +28,12 @@ class RefreshTokenRepository:
         self._session = session
 
     async def acquire_user_lock(self, user_id: int) -> None:
-        """per-user 事务级 advisory lock —— 串行化同一用户的并发登录「签新 family + 上限检查」临界区
-        （Codex 深审 F）：否则多并发登录各签 family、互不可见对方未提交 family，可超 max_sessions。
-        提交/回滚自动释放。"""
+        """per-user 事务级 advisory lock —— 串行化同一用户的全部 family 变更：登录签发（签新 family
+        + 上限检查，Codex 深审 F）、轮换、撤销、强制下线（hardening-r1 H1）。否则并发轮换插入的新
+        token 不在并发撤销语句的快照内 → 逃逸 reuse 检测/logout/强制下线。提交/回滚自动释放。"""
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:ns, :uid)").bindparams(
-                ns=_REFRESH_USER_LOCK_NS, uid=user_id
+                ns=REFRESH_USER_LOCK_NS, uid=user_id
             )
         )
 
@@ -43,6 +46,7 @@ class RefreshTokenRepository:
         token_hash: str,
         issued_at: datetime,
         expires_at: datetime,
+        family_absolute_at: datetime,
     ) -> RefreshToken:
         row = RefreshToken(
             jti=jti,
@@ -51,6 +55,7 @@ class RefreshTokenRepository:
             token_hash=token_hash,
             issued_at=issued_at,
             expires_at=expires_at,
+            family_absolute_at=family_absolute_at,
         )
         self._session.add(row)
         await self._session.flush()
@@ -59,6 +64,12 @@ class RefreshTokenRepository:
     async def get_by_jti_for_update(self, jti: uuid.UUID) -> RefreshToken | None:
         """按 jti 取行并 ``FOR UPDATE`` 锁定（轮换串行化，防并发签出双后继）。"""
         stmt = select(RefreshToken).where(RefreshToken.jti == jti).with_for_update()
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_user_id_by_jti(self, jti: uuid.UUID) -> int | None:
+        """无锁轻量读 user_id（hardening-r1 H1）：轮换/撤销入口在 ``FOR UPDATE`` 锁行前先取此值
+        → ``acquire_user_lock``，保证「先拿 user 锁、再拿行锁」的统一顺序（防与 revoke 死锁）。"""
+        stmt = select(RefreshToken.user_id).where(RefreshToken.jti == jti)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def mark_rotated(self, row: RefreshToken, *, new_jti: uuid.UUID, now: datetime) -> None:
@@ -78,11 +89,6 @@ class RefreshTokenRepository:
         )
         result = await self._session.execute(stmt)
         return int(getattr(result, "rowcount", 0) or 0)
-
-    async def get_family_origin_issued_at(self, family_id: uuid.UUID) -> datetime | None:
-        """family 首个 token 的 issued_at（absolute 上限锚点，轮换不续期 absolute）。"""
-        stmt = select(func.min(RefreshToken.issued_at)).where(RefreshToken.family_id == family_id)
-        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_active_families(self, user_id: int, *, now: datetime) -> list[uuid.UUID]:
         """用户当前活跃 family（未撤销且未过期），按最近活跃→最旧排序（并发上限淘汰最旧用）。"""

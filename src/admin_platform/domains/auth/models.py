@@ -31,6 +31,10 @@ class RefreshToken(Base, IdMixin, TimestampMixin):
         Index("ix_auth_refresh_tokens_user_family", "user_id", "family_id"),
         Index("ix_auth_refresh_tokens_user_active", "user_id", "revoked_at", "expires_at"),
         Index("ix_auth_refresh_tokens_expires_at", "expires_at"),
+        # family_id 前导索引（hardening-r1 M）：revoke_family / get_online_session / 在线用户
+        # family_id IN(子查询) 全按纯 family_id 过滤；(user_id,family_id) 复合索引前导是 user_id，
+        # 服务不了纯 family 查询 → 全表扫。
+        Index("ix_auth_refresh_tokens_family", "family_id"),
     )
 
     jti: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True, comment="当前token标识(UUID)")
@@ -54,7 +58,11 @@ class RefreshToken(Base, IdMixin, TimestampMixin):
     )
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="签发时间(UTC)")
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), comment="过期时间(UTC,absolute上限)"
+        DateTime(timezone=True), comment="过期时间(UTC,min(idle,family_absolute))"
+    )
+    family_absolute_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        comment="family绝对过期上限(UTC,首登锚定,轮换透传不随清理漂移)",
     )
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最后轮换时间(UTC)"
