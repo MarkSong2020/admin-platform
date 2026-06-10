@@ -108,3 +108,16 @@ forbidden_modules =
     admin_platform.core
     admin_platform.core.*
 allow_indirect_imports = True
+
+# C9（apiv1-not-repository）：api/v1 跨域聚合层（getInfo/getRouters 等）与 domains.*.api 同样不得
+#   直接 import domains repository——组合根在 deps.py，聚合端点经注入的 service/Provider 抽象工作
+#   （H5：rbac.py 改依赖 authz Provider 抽象而非 cast 具体 DB 实现后，此契约固化 api/v1 不绕组合根）。
+[importlinter:contract:apiv1-not-repository]
+name = C9 api/v1 aggregation layer must not import domains repository
+type = forbidden
+source_modules =
+    admin_platform.api.v1
+    admin_platform.api.v1.*
+forbidden_modules =
+    admin_platform.domains.*.repository
+allow_indirect_imports = True

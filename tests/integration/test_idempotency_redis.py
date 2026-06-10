@@ -160,7 +160,7 @@ async def test_redis_in_flight_lock_returns_409(redis_client: Redis) -> None:
     key = _unique_key()
     body = b'{"name":"alpha"}'
     body_hash = hashlib.sha256(body).hexdigest()
-    cache_key = f"idem:/items:{key}"
+    cache_key = f"idem:anon:/items:{key}"  # H4：键含主体；无 AuthMiddleware 时 subject=anon
 
     await redis_client.set(
         cache_key,
@@ -187,7 +187,7 @@ async def test_redis_lock_expiry_allows_retry(redis_client: Redis) -> None:
     key = _unique_key()
     body = b'{"name":"alpha"}'
     body_hash = hashlib.sha256(body).hexdigest()
-    cache_key = f"idem:/items:{key}"
+    cache_key = f"idem:anon:/items:{key}"  # H4：键含主体；无 AuthMiddleware 时 subject=anon
 
     # Stuck lock with a 1-second TTL.
     await redis_client.set(

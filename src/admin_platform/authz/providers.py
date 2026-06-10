@@ -77,6 +77,26 @@ class PermissionProvider(ABC):
     def get_effective_data_scope(self, user_id: int) -> DataScope:
         """用户生效的数据权限范围（多角色合并语义见 spec §11 O2）。"""
 
+    # ---- 异步内核（H5 DI seam）----
+    # 默认 = 调对应同步方法（内存 stub 用此默认把同步内存读包成 async）；真实 DB 版 Provider 覆盖
+    # 做真正的异步 DB 查询，其同步方法反过来经线程桥调 a_*。rbac.py 的异步端点直接 ``await a_*``
+    # （不再 cast 具体类），故 a_* 必须在抽象上声明——替换 Provider / P2 接缓存版才不破契约（H5）。
+
+    async def a_get_is_active(self, user_id: int) -> bool:
+        return self.get_is_active(user_id)
+
+    async def a_get_is_super_admin(self, user_id: int) -> bool:
+        return self.get_is_super_admin(user_id)
+
+    async def a_get_user_role_codes(self, user_id: int) -> frozenset[str]:
+        return self.get_user_role_codes(user_id)
+
+    async def a_get_user_permissions(self, user_id: int) -> frozenset[str]:
+        return self.get_user_permissions(user_id)
+
+    async def a_get_effective_data_scope(self, user_id: int) -> DataScope:
+        return self.get_effective_data_scope(user_id)
+
     @abstractmethod
     def invalidate_user(self, user_id: int) -> None:
         """失效单个用户的权限缓存。P1 为 no-op（不缓存），P2 接缓存时实现。"""
@@ -96,6 +116,10 @@ class MenuProvider(ABC):
     @abstractmethod
     def get_user_menu_tree(self, user_id: int) -> list[MenuNode]:
         """用户可见的菜单树（动态路由 + 按钮权限数据源）。"""
+
+    async def a_get_user_menu_tree(self, user_id: int) -> list[MenuNode]:
+        """异步内核（H5 DI seam）：默认调同步方法；DbMenuProvider 覆盖做真正异步 DB 查询。"""
+        return self.get_user_menu_tree(user_id)
 
     @abstractmethod
     def invalidate_user(self, user_id: int) -> None:

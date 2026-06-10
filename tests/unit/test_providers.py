@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from admin_platform.authz.providers import MenuNode
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.authz.stub_providers import StubMenuProvider, StubPermissionProvider
@@ -55,3 +57,34 @@ def test_invalidate_is_noop() -> None:
     menu.invalidate_user(1)
     menu.invalidate_role(2)
     menu.invalidate_all()
+
+
+# ---- H5 DI seam：stub 经 ABC 默认 a_* 与同步方法一致（rbac.py 端点直接 await a_*，注入非
+#      DbProvider 也必须可驱动，不 AttributeError、不递归）----
+
+
+@pytest.mark.anyio
+async def test_permission_provider_async_kernel_mirrors_sync() -> None:
+    """H5：rbac.py getInfo 端点 await 的 a_* 在 stub 上经 ABC 默认实现 = 调同步方法，结果一致。
+    （DI seam 真实化的回归网：替换 Provider / P2 缓存版注入 rbac.py 不破契约。）"""
+    provider = StubPermissionProvider(
+        permissions={7: frozenset({"system:user:list"})},
+        super_admins=frozenset({1}),
+        inactive_users=frozenset({9}),
+    )
+    assert await provider.a_get_is_active(7) is True
+    assert await provider.a_get_is_active(9) is False
+    assert await provider.a_get_is_super_admin(1) is True
+    assert await provider.a_get_is_super_admin(7) is False
+    assert await provider.a_get_user_permissions(7) == frozenset({"system:user:list"})
+    assert await provider.a_get_user_role_codes(7) == provider.get_user_role_codes(7)
+    assert (await provider.a_get_effective_data_scope(8)).scope_type is ScopeType.SELF
+
+
+@pytest.mark.anyio
+async def test_menu_provider_async_kernel_mirrors_sync() -> None:
+    """H5：rbac.py getRouters 端点 await 的 a_get_user_menu_tree 在 stub 上 = 同步方法结果。"""
+    node = MenuNode(id=1, name="System", path="/system")
+    provider = StubMenuProvider(menus={7: [node]})
+    assert await provider.a_get_user_menu_tree(7) == [node]
+    assert await provider.a_get_user_menu_tree(999) == []

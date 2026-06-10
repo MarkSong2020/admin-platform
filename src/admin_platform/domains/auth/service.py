@@ -12,7 +12,6 @@ from __future__ import annotations
 from http import HTTPStatus
 
 from redis.asyncio import Redis
-from sqlalchemy import select
 
 from admin_platform.audit.emit import build_audit_event, emit_audit
 from admin_platform.audit.events import AuditActor, AuditResult, AuditTarget, RiskLevel
@@ -35,6 +34,7 @@ from admin_platform.domains.auth.refresh_service import (
 )
 from admin_platform.domains.auth.schemas import CaptchaResponse, LoginResponse
 from admin_platform.domains.user.models import User
+from admin_platform.domains.user.repository import UserRepository
 
 # 固定合法 argon2id hash（参数同生产默认 m=64MiB/t=3/p=4）——用户不存在/停用时对它 verify
 # 一次抹平时序。不是真实凭据：任何输入都不会匹配。模块常量，避免每请求重算 hash。
@@ -147,9 +147,9 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
     token = ""
     issued = None
     async with db_session() as session:
-        user = (
-            await session.execute(select(User).where(User.username == username))
-        ).scalar_one_or_none()
+        # M13：经 UserRepository 查（不在 service 手写 SQL）——查询口径集中在 repository，将来给
+        # users 加软删/全局过滤只改一处，不漏登录这条最敏感路径。
+        user = await UserRepository(session).find_by_username(username)
 
         # 只有"active 用户"才算候选；否则用 dummy hash 走同一条 verify，时序一致。
         active_user = user if (user is not None and user.status == _ACTIVE) else None
