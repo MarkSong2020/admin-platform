@@ -1,14 +1,21 @@
-"""cron 计划 tick 计算单测（H3 hardening-r1）—— scheduled_tick_at 取计划时刻，跨分钟界键值恒定。
+"""cron 计算单测（hardening-r1）—— H3 计划 tick + 簇H dow 标准 crontab 语义。
 
-H3 修复核心：claim 去重键从「触发墙钟分钟」改为「cron 计划 tick」，使 failover/misfire 下同一逻辑
-触发的键值恒定（不再跨分钟界算出两值 → 双执行）。这些单测固化该不变式（DB-free，纯计算）。
+H3：claim 去重键从「触发墙钟分钟」改为「cron 计划 tick」，failover/misfire 下键值恒定（不双执行）。
+簇H：dow 转命名修复 APScheduler from_crontab 的 0=周一约定错位（标准 crontab 0/7=周日 → 周触发
+不再整体错位一天）。DB-free 纯计算/校验。
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from admin_platform.domains.scheduled_task.cron import scheduled_tick_at
+import pytest
+
+from admin_platform.domains.scheduled_task.cron import (
+    CronValidationError,
+    build_cron_trigger,
+    scheduled_tick_at,
+)
 
 
 def test_returns_planned_tick_not_wallclock() -> None:
@@ -44,3 +51,53 @@ def test_none_when_no_tick_in_lookback_window() -> None:
     now = datetime(2026, 6, 10, 14, 0, 0, tzinfo=UTC)
     tick = scheduled_tick_at("0 2 * * *", timezone="UTC", now=now, lookback_seconds=360)
     assert tick is None
+
+
+# ---- 簇H：dow 标准 crontab 语义（修复 from_crontab 的 0=周一约定错位）----
+
+
+def _weekday_of(expr: str) -> str:
+    trigger = build_cron_trigger(expr, timezone="UTC")
+    fire = trigger.get_next_fire_time(None, datetime(2026, 6, 1, tzinfo=UTC))
+    assert fire is not None
+    return fire.strftime("%A")
+
+
+@pytest.mark.parametrize(
+    ("dow", "weekday"),
+    [("0", "Sunday"), ("7", "Sunday"), ("1", "Monday"), ("3", "Wednesday"), ("6", "Saturday")],
+)
+def test_dow_single_value_is_standard_crontab(dow: str, weekday: str) -> None:
+    # 标准 crontab dow（0/7=周日, 1=周一..6=周六）正确——原 from_crontab 把 0 当周一、1 当周二错位。
+    assert _weekday_of(f"0 3 * * {dow}") == weekday
+
+
+def test_dow_range_is_weekdays() -> None:
+    trigger = build_cron_trigger("0 3 * * 1-5", timezone="UTC")  # Mon-Fri 工作日
+    days = []
+    prev = datetime(2026, 6, 1, tzinfo=UTC)
+    for _ in range(5):
+        fire = trigger.get_next_fire_time(None, prev)
+        assert fire is not None
+        days.append(fire.strftime("%a"))
+        prev = fire + timedelta(seconds=1)
+    assert days == ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+
+def test_dow_list_sun_and_sat() -> None:
+    trigger = build_cron_trigger("0 3 * * 0,6", timezone="UTC")  # 周日 + 周六
+    days = set()
+    prev = datetime(2026, 6, 1, tzinfo=UTC)
+    for _ in range(4):
+        fire = trigger.get_next_fire_time(None, prev)
+        assert fire is not None
+        days.add(fire.strftime("%a"))
+        prev = fire + timedelta(seconds=1)
+    assert days == {"Sat", "Sun"}
+
+
+@pytest.mark.parametrize("bad", ["0 3 * * 8", "0 3 * * */2", "0 3 * * 0-4"])
+def test_dow_rejects_invalid(bad: str) -> None:
+    # 非法 dow 值(8) / 步进(*/2) / 跨周首尾逆向范围(0-4 Sun-Thu) → CronValidationError（明确拒绝）。
+    with pytest.raises(CronValidationError):
+        build_cron_trigger(bad, timezone="UTC")
