@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.triggers.cron import CronTrigger
@@ -52,3 +52,22 @@ def next_run_after(expr: str, *, timezone: str, now: datetime) -> datetime | Non
     """``now`` 之后的下次触发时刻（tz-aware）。无后续触发返回 None。"""
     trigger = build_cron_trigger(expr, timezone=timezone)
     return trigger.get_next_fire_time(None, now)
+
+
+def scheduled_tick_at(
+    expr: str, *, timezone: str, now: datetime, lookback_seconds: int
+) -> datetime | None:
+    """``≤now`` 的最近 cron 计划 tick（H3：执行 claim 的去重键，取计划时刻而非触发墙钟分钟）。
+
+    取计划 tick 使「同一逻辑触发」在任意触发延迟 / 跨分钟界下键值恒定：failover 两 leader 在相近
+    时刻触发同一 tick → 各自算出同一计划时刻 → claim 同键去重（原用 ``now`` 截断分钟，跨分钟界会
+    算出两值 → 双执行）。``lookback_seconds`` 需 ≥ 该任务可能的最大触发延迟（misfire_grace）。
+    区间内无 tick（理论不应发生，因刚被触发）→ None（调用方兜底）。
+    """
+    trigger = build_cron_trigger(expr, timezone=timezone)
+    tick = trigger.get_next_fire_time(None, now - timedelta(seconds=lookback_seconds))
+    prev: datetime | None = None
+    while tick is not None and tick <= now:
+        prev = tick
+        tick = trigger.get_next_fire_time(tick, tick + timedelta(microseconds=1))
+    return prev

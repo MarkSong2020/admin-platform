@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 
 from admin_platform.db.session import db_session
+from admin_platform.domains.scheduled_task.cron import CronValidationError, scheduled_tick_at
 from admin_platform.domains.scheduled_task.models import ScheduledTaskLog
 from admin_platform.domains.scheduled_task.registry import JobHandlerRegistry
 from admin_platform.domains.scheduled_task.repository import ScheduledTaskRepository
@@ -98,6 +99,20 @@ class TaskExecutor:
                 task = await repo.get_for_update(task_id)
                 if task is None:
                     return None
+                # H3：schedule 触发的 claim 键取 cron 计划 tick（非触发墙钟分钟）——failover 跨分钟界 /
+                # misfire 延迟下同一逻辑 tick 键值恒定，去重正确。manual 触发 scheduled_at 恒 None。
+                if trigger_type == "schedule" and scheduled_at is None:
+                    now_ = datetime.now(UTC)
+                    try:
+                        tick = scheduled_tick_at(
+                            task.cron_expression,
+                            timezone=task.cron_timezone,
+                            now=now_,
+                            lookback_seconds=task.misfire_grace_seconds + 60,
+                        )
+                    except CronValidationError:
+                        tick = None  # 防御：cron 被并发改非法（reconcile 已挡，几不可达）→ 墙钟兜底
+                    scheduled_at = tick or now_.replace(second=0, microsecond=0)
                 stale_seconds = task.timeout_seconds or _DEFAULT_STALE_SECONDS
                 since = datetime.now(UTC) - timedelta(seconds=stale_seconds)
                 concurrency_skip = (

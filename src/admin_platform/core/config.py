@@ -177,10 +177,11 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     # leader 选举 advisory lock key（与 seed 478261 / 各域 478221-478260 隔离，单 bigint）。
     scheduler_leader_lock_key: int = 478270
-    # 周期：非 leader 重试夺锁 + leader 重载任务（reconcile DB↔scheduler）的间隔秒。
-    scheduler_poll_seconds: int = 30
-    # 关闭时等待运行中任务的宽限秒（超时则强制 shutdown）。
-    scheduler_shutdown_grace_seconds: int = 10
+    # 周期：非 leader 重试夺锁 + leader 重载任务（reconcile DB↔scheduler）的间隔秒。bounded 1..3600
+    # （L：APP_SCHEDULER_POLL_SECONDS=0/负 → leader 每个事件循环 tick 全量 reconcile 打 DB，构造时即拒）。
+    scheduler_poll_seconds: int = Field(default=30, ge=1, le=3600)
+    # 关闭时等待运行中任务的宽限秒（超时则强制 shutdown）。bounded 0..300。
+    scheduler_shutdown_grace_seconds: int = Field(default=10, ge=0, le=300)
     # 调度器默认时区（cron 每任务可单独配 cron_timezone；此为兜底，库时间一律 UTC）。
     scheduler_timezone: str = "Asia/Shanghai"
 
