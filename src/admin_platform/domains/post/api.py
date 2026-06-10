@@ -16,22 +16,26 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
-from admin_platform.core.errors import ProblemDetail
+from admin_platform.core.config import get_settings
+from admin_platform.core.errors import AppError, ProblemDetail
 from admin_platform.core.idempotency import idempotent
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.post.deps import get_post_service
 from admin_platform.domains.post.schemas import (
     PostCreate,
+    PostImportSummary,
     PostPage,
     PostRead,
     PostUpdate,
 )
 from admin_platform.domains.post.service import PostService
+
+_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 router = APIRouter(prefix="/api/v1/posts", tags=["posts"])
 
@@ -47,6 +51,8 @@ QueryGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTE
 AddGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_POST_ADD))]
 EditGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_POST_EDIT))]
 RemoveGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_POST_REMOVE))]
+ImportGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_POST_IMPORT))]
+ExportGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_POST_EXPORT))]
 
 # 受守卫端点都可能返回 401（未登录）/ 403（缺权限）—— 声明进 OpenAPI。
 AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
@@ -81,6 +87,17 @@ IDEMPOTENT_POST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     409: {"model": ProblemDetail},
     422: {"model": ProblemDetail},
 }
+# 导入：413 文件过大 / 422 缺 multipart 字段（行级校验错误走 200+summary.errors 业务通道，非 422）。
+IMPORT_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **AUTH_ERROR_RESPONSES,
+    413: {"model": ProblemDetail},
+    422: {"model": ProblemDetail},
+}
+# 导出：422 超过行数上限。
+EXPORT_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **AUTH_ERROR_RESPONSES,
+    422: {"model": ProblemDetail},
+}
 
 
 @router.get("", operation_id="posts_list", response_model=PostPage, responses=AUTH_ERROR_RESPONSES)
@@ -88,6 +105,59 @@ async def list_posts(
     svc: ServiceDep, _user: ListGuard, page: PageQ = 1, size: SizeQ = 20
 ) -> PostPage:
     return await svc.list_(page=page, size=size)
+
+
+_UPLOAD_CHUNK = 64 * 1024
+
+
+async def _read_within_limit(upload: UploadFile, max_bytes: int) -> bytes:
+    """流式读上传体，累计超 max_bytes 即 413——防超大 xlsx 整体读入内存 OOM（对抗审查 P0）。"""
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await upload.read(_UPLOAD_CHUNK):
+        size += len(chunk)
+        if size > max_bytes:
+            raise AppError(
+                code="post.EXCEL_TOO_LARGE",
+                title="Excel 文件过大",
+                detail=f"超过 {max_bytes} 字节上限",
+                status_code=413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+# 导入/导出在 /{item_id} **之前**注册——否则 "import"/"export" 被当作 item_id（int）触发 422。
+@router.post(
+    "/import",
+    operation_id="posts_import",
+    response_model=PostImportSummary,
+    responses=IMPORT_ERROR_RESPONSES,
+)
+async def import_posts(
+    svc: ServiceDep,
+    user: ImportGuard,
+    upload: Annotated[UploadFile, File(description="岗位 Excel（.xlsx），一步全有全无导入")],
+) -> PostImportSummary:
+    content = await _read_within_limit(upload, get_settings().excel_max_upload_size_bytes)
+    return await audited_write(
+        user,
+        Permissions.SYSTEM_POST_IMPORT,
+        "post",
+        coro=svc.import_posts(content),
+        # 审计 display 标注成功/失败计数——imported=0+errors 时审计可区分「未写入」（对抗审查 P1）。
+        display=lambda summary: f"导入 {summary.imported} 条岗位，{len(summary.errors)} 处错误",
+    )
+
+
+@router.get("/export", operation_id="posts_export", responses=EXPORT_ERROR_RESPONSES)
+async def export_posts(svc: ServiceDep, _user: ExportGuard) -> Response:
+    content = await svc.export_posts()
+    return Response(
+        content=content,
+        media_type=_XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="posts.xlsx"'},
+    )
 
 
 @router.get(
