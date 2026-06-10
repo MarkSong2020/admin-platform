@@ -34,8 +34,13 @@ class ScheduledTaskCreate(BaseModel):
     cron_timezone: str = Field(default="Asia/Shanghai", max_length=64)
     status: TaskStatus = "disabled"
     allow_concurrent: bool = False
-    misfire_grace_seconds: int = Field(default=300, ge=0)
-    timeout_seconds: int | None = Field(default=None, ge=1)
+    # le=86400（H3 对抗审查）：misfire_grace 进 scheduled_tick_at 的 lookback，无上限时 admin 设
+    # 超大值 + 每分钟 cron 会让 claim 在行锁内 O(lookback/period) 迭代（秒级 CPU 持锁）→ 特权 DoS。
+    misfire_grace_seconds: int = Field(default=300, ge=0, le=86400)
+    # M3：timeout 上限 1 天（原无上限）——manual 手动触发的请求事务会跨 handler 全程开着（executor
+    # 的 handler 在事务外跑，但外层 manual_run 请求事务仍持连接），无界 timeout → 长任务长持 DB
+    # 连接可耗尽池。上限收敛占用窗口；彻底异步化（202 + 轮询）留排期。
+    timeout_seconds: int | None = Field(default=None, ge=1, le=86400)
     remark: str | None = Field(default=None, max_length=255)
 
 
@@ -49,8 +54,8 @@ class ScheduledTaskUpdate(BaseModel):
     cron_timezone: str | None = Field(default=None, max_length=64)
     status: TaskStatus | None = None
     allow_concurrent: bool | None = None
-    misfire_grace_seconds: int | None = Field(default=None, ge=0)
-    timeout_seconds: int | None = Field(default=None, ge=1)
+    misfire_grace_seconds: int | None = Field(default=None, ge=0, le=86400)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=86400)
     remark: str | None = Field(default=None, max_length=255)
 
 
