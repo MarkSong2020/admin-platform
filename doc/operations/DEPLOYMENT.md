@@ -4,18 +4,18 @@
 
 ## Dockerfile
 
-多阶段构建（python:3.14-slim builder + runtime），`uv sync --frozen --no-dev --no-editable`，非 root 用户（uid 10001）。`CMD ["uvicorn", "service_name.main:app", "--host", "0.0.0.0", "--port", "8000"]`。
+多阶段构建（python:3.14-slim builder + runtime），`uv sync --frozen --no-dev --no-editable`，非 root 用户（uid 10001）。`CMD ["uvicorn", "admin_platform.main:app", "--host", "0.0.0.0", "--port", "8000"]`。
 
 **本地构建**：
 
 ```bash
-make docker-build   # docker build -t python-web-service-template:dev .
+make docker-build   # docker build -t admin-platform:dev .
 ```
 
 **镜像 tag 规则**（生产）：
 
 - `<service>:<git-sha-short>`（每个 commit）
-- `<service>:v0.4.4`（语义版本，发布时）
+- `admin-platform:v0.0.1`（语义版本，以 `pyproject.toml [project].version` 为准，发布时）
 - 不用 `:latest`（不可追溯）
 
 ## K8s probe 配置（ADR §6）
@@ -66,6 +66,37 @@ readinessProbe:
 | `APP_IDEMPOTENCY_ENABLED` | `True` | 默认开；False 时跳过 Redis（dev 环境可用） |
 | `APP_IDEMPOTENCY_TTL_SECONDS` | `86400` | 24h；金额场景按业务调整 |
 | `APP_STARTUP_EAGER_CONNECT` | **`true`** | 生产推荐 true；lifespan 启动时主动 ping DB + Redis，失败 pod 起不来。本地 / CI 默认 false |
+
+### 认证 / RBAC（P0–P1，**生产必设**）
+
+| 项 | env | 默认 | 注意 |
+|---|---|---|---|
+| 启用鉴权 | `APP_AUTH_ENABLED` | `False` | **生产必开 `true`**。默认 False 时 RBAC / 业务端点全部 fail-closed 返回 `401`（AuthMiddleware 拒绝） |
+| JWT 签名密钥 | `APP_AUTH_JWT_SECRET` | `""` | `auth_enabled=true` 时**必填**；HS* 算法要求 ≥ **32 字节**（`core/config.py` 校验，过短 fail-fast）。走 secret 注入，绝不入仓 |
+| refresh token pepper | `APP_AUTH_REFRESH_TOKEN_PEPPER` | `""` | 空则 refresh 签发 / 校验 **fail-fast**。独立于 JWT 密钥（泄露隔离），生产必设 |
+| access token TTL | `APP_AUTH_ACCESS_TOKEN_TTL_SECONDS` | `1800` | 30 分钟；按安全策略调整（≥ 60） |
+| 登录防护 | `APP_AUTH_LOGIN_GUARD_ENABLED` | `False` | **生产强烈建议 `true`**（验证码 + 登录限流）；默认 False 仅便于 dev / 自动化登录 |
+
+### 审计持久化（P2）
+
+| 项 | env | 默认 | 注意 |
+|---|---|---|---|
+| 审计落库 | `APP_AUDIT_PERSISTENCE_ENABLED` | `True` | 默认开；写 `audit_events` / `login_logs`，operlog/logininfor 查询依赖之 |
+| 信任 XFF | `APP_AUDIT_TRUST_X_FORWARDED_FOR` | `False` | **仅当**前置可信反代会覆盖 `X-Forwarded-For` 时才开；裸暴露公网开启会被伪造客户端 IP |
+
+### 定时任务（P4c）
+
+| 项 | env | 默认 | 注意 |
+|---|---|---|---|
+| 启用调度器 | `APP_SCHEDULER_ENABLED` | `False` | **生产显式开 `true`** 才跑 APScheduler；默认 False（CRUD / 手动触发不依赖调度器）。多 worker / 多 pod 安全靠 **PG advisory leader election + DB execution claim** 双层防重复执行，无需限制副本数 |
+
+### 基础设施超时
+
+| 项 | env | 默认 | 注意 |
+|---|---|---|---|
+| Redis socket 超时 | `APP_REDIS_SOCKET_TIMEOUT_SECONDS` | `2.0` | idempotency / 缓存监控 / 在线用户派生用；不可达时降级，超时过大会拖慢请求 |
+
+> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0018**；其中 `0013–0018`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。
 
 ## 资源 sizing 建议
 
@@ -211,6 +242,10 @@ CI/CD 平台由业务团队按 ADR 决议自选（阿里云效 / Jenkins / GitLa
 - [ ] CORS whitelist 显式
 - [ ] `Settings.service_id` 已按服务名配置（v0.4.6 加入；JWT `aud` 校验 middleware 待业务接入时对齐，遵守 ADR §5）
 - [ ] 跨服务调用必带 `X-Request-ID` 透传 + `Authorization`（如已鉴权）
+- [ ] `APP_AUTH_ENABLED=true`（生产；False 时 RBAC / 业务端点全 fail-closed 401）
+- [ ] `APP_AUTH_JWT_SECRET` ≥ 32 字节、`APP_AUTH_REFRESH_TOKEN_PEPPER` 非空（均经 secret 注入，不入仓）
+- [ ] `APP_AUTH_LOGIN_GUARD_ENABLED=true`（生产；验证码 + 登录限流）
+- [ ] `APP_AUDIT_TRUST_X_FORWARDED_FOR` 仅在可信反代覆盖 XFF 时开
 - [ ] `APP_IDEMPOTENCY_LOCK_TTL_SECONDS` ≥ **最慢业务 handler 实际耗时 + 上游重试窗口**（v0.4.9+；默认 30s 适用于秒级 POST。若业务 handler 可达数十秒、外网回调或上游 60s 重试，必须显式调高，否则锁过期后并发重试会绕过 in-flight 保护造成**重复扣款 / 重复创单**。验证：以 P99 handler 延迟为基线，乘以 1.5 ~ 2 倍。）
 
 ## 排障

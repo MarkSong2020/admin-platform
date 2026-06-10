@@ -38,7 +38,9 @@ from admin_platform.domains.dict.service import DictService
 router = APIRouter(prefix="/api/v1/dict", tags=["dict"])
 
 ServiceDep = Annotated[DictService, Depends(get_dict_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+PageQ = Annotated[
+    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
+]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 KeywordQ = Annotated[str | None, Query(description="按字典名称 / 类型模糊过滤")]
 TypeIdQ = Annotated[int | None, Query(description="按字典类型 ID 过滤数据")]

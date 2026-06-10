@@ -57,6 +57,7 @@ check:  ## Full quality gate excluding integration tests (mirror of CI fast lane
 	uv run pyright
 	uv run pytest -m "not integration"
 	uv run lint-imports
+	uv run python scripts/dump_schema.py --check
 
 check-openapi-contract:  ## OpenAPI 契约规则表（pytest 子集）
 	uv run pytest tests/unit/test_openapi_contract.py

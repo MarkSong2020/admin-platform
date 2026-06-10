@@ -40,6 +40,10 @@ _PARAMS_INVALID = "scheduled_task.PARAMS_INVALID"
 _CRON_INVALID = "scheduled_task.CRON_INVALID"
 _MANUAL_NOT_ALLOWED = "scheduled_task.MANUAL_NOT_ALLOWED"
 _LOG_NOT_FOUND = "scheduled_task.LOG_NOT_FOUND"
+# M10：manual_run 专属冲突码（type↔status 一对一）——区别 create/update 的 422 HANDLER_UNKNOWN /
+# get 的 404 NOT_FOUND，避免同一 type 映射两种 HTTP 状态破坏 SDK 类型化错误契约。
+_HANDLER_OFFLINE = "scheduled_task.HANDLER_OFFLINE"  # handler 运行期下线（409，非 422 未注册）
+_RUN_CONFLICT = "scheduled_task.RUN_CONFLICT"  # 执行期 task 被删/claim 抢占（409，非 404 不存在）
 
 
 def _total_pages(total: int, size: int) -> int:
@@ -230,7 +234,7 @@ class ScheduledTaskService:
             raise AppError(code=_NOT_FOUND, title="Task not found", status_code=404)
         spec = self._registry.get(task.handler_key)
         if spec is None:
-            raise AppError(code=_HANDLER_UNKNOWN, title="Handler offline", status_code=409)
+            raise AppError(code=_HANDLER_OFFLINE, title="Handler offline", status_code=409)
         if not spec.allow_manual:
             raise AppError(
                 code=_MANUAL_NOT_ALLOWED, title="Manual trigger not allowed", status_code=409
@@ -239,7 +243,7 @@ class ScheduledTaskService:
             task_id, trigger_type="manual", scheduled_at=None, actor_user_id=actor_user_id
         )
         if outcome is None or outcome.log_id is None:
-            raise AppError(code=_NOT_FOUND, title="Task vanished during run", status_code=409)
+            raise AppError(code=_RUN_CONFLICT, title="Task vanished during run", status_code=409)
         log = await self._repo.get_log(outcome.log_id)
         if log is None:
             raise AppError(code=_LOG_NOT_FOUND, title="Execution log not found", status_code=404)

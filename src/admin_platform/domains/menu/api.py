@@ -41,7 +41,9 @@ from admin_platform.domains.menu.service import MenuService
 router = APIRouter(prefix="/api/v1/menus", tags=["menus"])
 
 ServiceDep = Annotated[MenuService, Depends(get_menu_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+PageQ = Annotated[
+    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
+]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:menu:{action}：list/query/add/edit/remove。

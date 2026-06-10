@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from admin_platform.core.config import get_settings
 from admin_platform.db.engine import dispose_engine
@@ -279,3 +280,124 @@ async def test_executor_handler_offline_records_failure() -> None:
     async with db_session() as s:
         log = (await s.execute(select(ScheduledTaskLog))).scalar_one()
         assert log.error_code == "scheduled_task.HANDLER_NOT_REGISTERED"
+
+
+# ---- H6：leader 失活自降级 + _loop 真实路径（fleet 盲区：原 failover 测试直调私有方法）----
+
+
+async def test_verify_leadership_demotes_on_dead_connection() -> None:
+    """H6：leader 专用连接被杀（PG idle-in-tx timeout/网络断）→ _verify_leadership 自降级回夺锁态，
+    避免老 leader 仍 is_leader=True 与新 leader 双触发。"""
+    ctl = SchedulerController(_settings(), JOB_REGISTRY)
+    await ctl.start()
+    try:
+        assert ctl.is_leader and ctl._leader_conn is not None
+        await ctl._leader_conn.close()  # 模拟连接被杀（会话级 advisory lock 随之释放）
+        assert await ctl._verify_leadership() is False
+        assert ctl.is_leader is False  # 自降级
+        assert ctl._scheduler is None  # 停止调度
+    finally:
+        await ctl.stop()
+
+
+async def test_loop_cycle_keeps_leader_and_reconciles() -> None:
+    """H6/L：_loop 真实周期体（leader 分支：探活 + reconcile）跑通——补 failover 测试直调私有的盲区。"""
+    settings = get_settings().model_copy(
+        update={"scheduler_enabled": True, "scheduler_poll_seconds": 1}
+    )
+    await _seed_task(name="e1", status="enabled")
+    ctl = SchedulerController(settings, JOB_REGISTRY)
+    await ctl.start()
+    try:
+        assert ctl.is_leader
+        await asyncio.sleep(1.3)  # 让 _loop 跑至少一轮（_verify_leadership + _reconcile）
+        assert ctl.is_leader  # 探活通过仍是 leader
+        assert ctl._scheduler is not None and len(ctl._scheduler.get_jobs()) == 1
+    finally:
+        await ctl.stop()
+
+
+async def test_standby_loop_takes_over_after_leader_stops() -> None:
+    """L：standby 经 _loop 真实轮询路径接管（非直调 _try_acquire_leader）——补 _loop standby 分支盲区。"""
+    settings = get_settings().model_copy(
+        update={"scheduler_enabled": True, "scheduler_poll_seconds": 1}
+    )
+    a = SchedulerController(settings, JOB_REGISTRY)
+    b = SchedulerController(settings, JOB_REGISTRY)
+    await a.start()
+    await b.start()
+    try:
+        assert a.is_leader and not b.is_leader
+        await a.stop()  # 释放 leader 锁
+        await asyncio.sleep(1.3)  # b 的 _loop standby 分支下一轮夺锁
+        assert b.is_leader  # 经真实 _loop 路径接管
+    finally:
+        await b.stop()
+        await a.stop()
+
+
+# ---- stale running 过滤（fleet 盲区：原只测 fresh running→skip，未测 stale→执行）----
+
+
+async def test_stale_running_not_counted_executes() -> None:
+    """孤儿 running（started_at 超 stale 阈值）不计入并发判定 → 任务照常执行（不被永久冻死）。"""
+    task_id = await _seed_task(allow_concurrent=False, timeout_seconds=10)
+    async with db_session() as s:  # 插一个 11s 前的 running（超 timeout=10 → stale）
+        s.add(
+            ScheduledTaskLog(
+                task_id=task_id,
+                execution_id=uuid.uuid4(),
+                trigger_type="manual",
+                handler_key="noop",
+                params_json={},
+                status="running",
+                started_at=datetime.now(UTC) - timedelta(seconds=11),
+            )
+        )
+    ex = TaskExecutor(JOB_REGISTRY)
+    outcome = await ex.run(task_id, trigger_type="manual", scheduled_at=None, actor_user_id=None)
+    assert outcome is not None and outcome.status == "success"  # stale 不挡，照常执行
+
+
+# ---- claim CHECK（L：schedule 触发必须有 scheduled_at，防 NULLS DISTINCT 旁路去重）----
+
+
+async def test_schedule_log_requires_scheduled_at() -> None:
+    """L：DB CHECK 拒绝 schedule + scheduled_at=NULL 的日志（堵死绕过 claim 红线的旁路）。"""
+    task_id = await _seed_task()
+    with pytest.raises(IntegrityError):
+        async with db_session() as s:
+            s.add(
+                ScheduledTaskLog(
+                    task_id=task_id,
+                    execution_id=uuid.uuid4(),
+                    trigger_type="schedule",
+                    scheduled_at=None,  # 违反 ck_scheduled_task_logs_schedule_at
+                    handler_key="noop",
+                    params_json={},
+                    status="running",
+                    started_at=datetime.now(UTC),
+                )
+            )
+
+
+async def test_concurrent_fire_real_cron_tick_dedups() -> None:
+    """H3：两并发 _fire（scheduled_at=None，走 executor 真实 cron 计划 tick 计算）对每分钟 cron 同
+    tick → 同键去重为一次执行——补 fleet 盲区（原 dedup 测试传显式 scheduled_at 绕过 tick 计算路径）。"""
+    task_id = await _seed_task(cron_expression="* * * * *", cron_timezone="UTC")
+    ctl = SchedulerController(_settings(), JOB_REGISTRY)
+    # 两次并发触发几乎同墙钟（微秒级）→ executor 各自算出同一 cron 计划 tick → claim 同键。
+    results = await asyncio.gather(ctl._fire(task_id), ctl._fire(task_id), return_exceptions=True)
+    assert not any(isinstance(r, BaseException) for r in results), results
+    async with db_session() as s:
+        n = (
+            await s.execute(
+                select(func.count())
+                .select_from(ScheduledTaskLog)
+                .where(
+                    ScheduledTaskLog.task_id == task_id,
+                    ScheduledTaskLog.trigger_type == "schedule",
+                )
+            )
+        ).scalar_one()
+    assert n == 1  # 仅一条 schedule 日志（同计划 tick 去重）

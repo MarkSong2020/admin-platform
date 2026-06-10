@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -38,6 +37,9 @@ from admin_platform.domains.scheduled_task.registry import JobHandlerRegistry
 from admin_platform.domains.scheduled_task.repository import ScheduledTaskRepository
 
 _log = logging.getLogger("admin_platform.scheduler")
+
+# H6：leader 连接探活超时（秒）——half-open 分区下不挂到 OS TCP 超时，把降级延迟拉回秒级。
+_LEADER_VERIFY_TIMEOUT_S = 5.0
 
 
 class SchedulerController:
@@ -69,7 +71,10 @@ class SchedulerController:
             await asyncio.sleep(self._settings.scheduler_poll_seconds)
             try:
                 if self._is_leader:
-                    await self._reconcile()
+                    # H6：先在专用连接上探活——连接被 PG/网络杀则锁已释放（standby 可能已接管），
+                    # 必须自降级，避免老 leader 仍 _is_leader=True 与新 leader 双触发。
+                    if await self._verify_leadership():
+                        await self._reconcile()
                 else:
                     await self._try_acquire_leader()
             except Exception:
@@ -87,6 +92,9 @@ class SchedulerController:
                     {"k": self._settings.scheduler_leader_lock_key},
                 )
             ).scalar()
+            # H6：commit 释放隐式事务——会话级 advisory lock 不依赖事务存续（commit 后锁仍持有），
+            # 否则连接终身 idle-in-transaction，被 PG idle_in_transaction_session_timeout 杀即丢锁。
+            await conn.commit()
         except Exception:
             await conn.close()  # 拿锁查询出错也要回收连接，否则反复重试会耗尽 pool
             raise
@@ -101,6 +109,35 @@ class SchedulerController:
         await self._reconcile()
         _log.info("scheduler 成为 leader (worker=%s)", WORKER_ID)
         return True
+
+    async def _verify_leadership(self) -> bool:
+        """H6：在 leader 专用连接上探活。连接失活（被 PG/网络杀）→ 锁已释放 → 自降级回夺锁态。"""
+        conn = self._leader_conn
+        if conn is None:
+            self._is_leader = False
+            return False
+        try:
+            # H6：探活包超时——half-open 分区下 SELECT 1 会挂到 OS TCP 重传超时（数分钟），加超时让
+            # 降级延迟回到秒级（双执行正确性始终由 DB claim 兜，这是收敛速度/可用性加固）。
+            async with asyncio.timeout(_LEADER_VERIFY_TIMEOUT_S):
+                await conn.execute(text("SELECT 1"))
+                await conn.commit()
+            return True
+        except Exception:
+            _log.warning("scheduler leader 连接探活失败/超时，自降级回到夺锁态")
+            await self._demote()
+            return False
+
+    async def _demote(self) -> None:
+        """放弃 leader：停 scheduler、回收专用连接、置非 leader（下个 loop 周期重新夺锁）。"""
+        if self._scheduler is not None:
+            self._scheduler.shutdown(wait=False)
+            self._scheduler = None
+        if self._leader_conn is not None:
+            with contextlib.suppress(Exception):
+                await self._leader_conn.close()
+            self._leader_conn = None
+        self._is_leader = False
 
     async def _reconcile(self) -> None:
         """同步 scheduler 作业 ↔ DB enabled 任务：删已禁用/删除的，增/改启用的。"""
@@ -125,20 +162,21 @@ class SchedulerController:
                 args=[task.id],
                 replace_existing=True,
                 max_instances=1,
-                coalesce=False,
+                # coalesce=True（H3，原 False）：调度器停后恢复时积压的多个错过 tick 合并为一次补跑
+                # （维护任务补一次即可，不需逐 tick），配合计划 tick claim 键消除「同窗多 tick 互撞吞」。
+                coalesce=True,
                 misfire_grace_time=task.misfire_grace_seconds,
             )
 
     async def _fire(self, task_id: int) -> None:
-        """cron 触发 wrapper。scheduled_at 截断到分钟（cron 最小粒度）→ failover 同 tick 同值 →
-        claim partial unique 去重。登记到 in-flight 供 stop 优雅 drain。"""
+        """cron 触发 wrapper。scheduled_at 由 executor 按 cron 计划 tick 计算（H3，非触发墙钟分钟）→
+        failover/misfire 下同 tick 同键 → claim partial unique 去重。登记 in-flight 供 stop 优雅 drain。"""
         task = asyncio.current_task()
         if task is not None:
             self._inflight.add(task)
         try:
-            scheduled_at = datetime.now(UTC).replace(second=0, microsecond=0)
             await self._executor.run(
-                task_id, trigger_type="schedule", scheduled_at=scheduled_at, actor_user_id=None
+                task_id, trigger_type="schedule", scheduled_at=None, actor_user_id=None
             )
         finally:
             if task is not None:
@@ -162,12 +200,14 @@ class SchedulerController:
             )
             self._inflight.clear()
         if self._leader_conn is not None:
-            try:
+            # H6：unlock + close 各自包 suppress——连接被 PG/网络杀时不应穿透 lifespan shutdown；
+            # 连接关闭/进程退出本身即释放会话级 advisory lock。
+            with contextlib.suppress(Exception):
                 await self._leader_conn.execute(
                     text("SELECT pg_advisory_unlock(:k)"),
                     {"k": self._settings.scheduler_leader_lock_key},
                 )
-            finally:
+            with contextlib.suppress(Exception):
                 await self._leader_conn.close()
             self._leader_conn = None
         self._is_leader = False
