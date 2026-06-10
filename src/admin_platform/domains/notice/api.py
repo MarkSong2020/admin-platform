@@ -36,7 +36,9 @@ from admin_platform.domains.notice.service import NoticeService
 router = APIRouter(prefix="/api/v1/notices", tags=["notices"])
 
 ServiceDep = Annotated[NoticeService, Depends(get_notice_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+PageQ = Annotated[
+    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
+]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 # 过滤参数用 Literal（对抗审查建议）：非法值 → 422 而非静默返回空，暴露调用方 typo。
 # status 参数走 alias（函数形参名 status_filter 避让 ``from fastapi import status``，

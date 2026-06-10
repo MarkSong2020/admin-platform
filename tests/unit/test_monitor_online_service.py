@@ -29,9 +29,13 @@ class _FakeRepo:
         self._session = session
         self._rows = rows or []
         self.revoked: list[tuple[uuid.UUID, str]] = []
+        self.locked: list[int] = []
 
     async def get_online_session(self, family_id: uuid.UUID, *, now: datetime) -> Any:
         return self._session
+
+    async def acquire_user_lock(self, user_id: int) -> None:
+        self.locked.append(user_id)
 
     async def revoke_online_session(
         self, family_id: uuid.UUID, *, reason: str, now: datetime

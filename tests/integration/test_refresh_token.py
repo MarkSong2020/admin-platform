@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AppError
@@ -108,10 +110,11 @@ async def test_reuse_detection_revokes_whole_family() -> None:
             )
         ).all()
     assert active == []
-    # 被撤销的新 token 也不能再轮换
+    # 被撤销的新 token 也不能再轮换（L：pin 错误码——命中 reuse 检测的 revoked_reason 分支 → REUSED）
     async with db_session() as session:
-        with pytest.raises(AppError):
+        with pytest.raises(AppError) as exc2:
             await rotate_refresh_token(session, raw_token=rotated.refresh.token)
+    assert exc2.value.code == "auth.REFRESH_TOKEN_REUSED"
 
 
 async def test_invalid_token_rejected() -> None:
@@ -130,8 +133,65 @@ async def test_logout_revokes_family() -> None:
         ok = await revoke_refresh_token(session, raw_token=issued.token)
     assert ok is True
     async with db_session() as session:
-        with pytest.raises(AppError):
+        with pytest.raises(AppError) as exc:
             await rotate_refresh_token(session, raw_token=issued.token)
+    # L：pin 错误码——logout 撤销（非 reuse）后轮换 → INVALID（不误报为 REUSED 泄露盗用信号）。
+    assert exc.value.code == "auth.REFRESH_TOKEN_INVALID"
+
+
+async def test_rotate_rejected_when_family_absolute_exceeded() -> None:
+    """H2 + M6：family_absolute_at 达硬上限 → 轮换拒绝（须重登），锚点取本行不随 cleanup 漂移。
+
+    构造一个 idle 未过期、但 family_absolute_at 已过去的活动 token：旧实现按 min(issued_at)+ttl
+    重算锚点（≈now+30d，永不过期 = bug）；新实现直接读本行 family_absolute_at（已过期）→ 拒。
+    """
+    uid = await _seed_user()
+    async with db_session() as session:
+        issued = await issue_refresh_token(session, user_id=uid)
+    # 模拟时间流逝到 absolute 上限：把本行 family_absolute_at 拨到过去（idle expires_at 仍未到）。
+    async with db_session() as session:
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.jti == issued.jti)
+            .values(family_absolute_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    async with db_session() as session:
+        with pytest.raises(AppError) as exc:
+            await rotate_refresh_token(session, raw_token=issued.token)
+    assert exc.value.code == "auth.REFRESH_TOKEN_INVALID"
+
+
+async def test_concurrent_rotate_and_revoke_no_token_escapes() -> None:
+    """H1：并发「轮换」与「撤销 family」经 per-user advisory lock 串行化——撤销后无活动 token 逃逸。
+
+    旧实现（无 user 锁）：rotate 先插新 token Z，revoke 的单语句 UPDATE 快照不含 Z → Z 逃逸为活动
+    （reuse 检测/强制下线/logout 被击穿）。新实现两路经同一 advisory lock 串行：revoke 必能看到 Z
+    （或 rotate 看到已撤销而拒），最终 family 一定无未撤销 token。
+    """
+    uid = await _seed_user()
+    async with db_session() as session:
+        issued = await issue_refresh_token(session, user_id=uid)
+    fam = issued.family_id
+
+    async def _rotate() -> None:
+        async with db_session() as session:
+            with contextlib.suppress(AppError):
+                await rotate_refresh_token(session, raw_token=issued.token)
+
+    async def _revoke() -> None:
+        async with db_session() as session:
+            repo = RefreshTokenRepository(session)
+            await repo.acquire_user_lock(uid)  # 镜像 force_logout/logout 的锁路径
+            await repo.revoke_family(fam, reason="forced_logout", now=datetime.now(UTC))
+
+    await asyncio.gather(_rotate(), _revoke())
+    async with db_session() as session:
+        active = await session.scalar(
+            select(func.count())
+            .select_from(RefreshToken)
+            .where(RefreshToken.family_id == fam, RefreshToken.revoked_at.is_(None))
+        )
+    assert active == 0  # 无 token 逃逸撤销
 
 
 async def test_concurrency_limit_revokes_oldest_family() -> None:
@@ -164,6 +224,7 @@ async def test_delete_expired() -> None:
             token_hash="0" * 64,
             issued_at=datetime.now(UTC) - timedelta(days=40),
             expires_at=datetime.now(UTC) - timedelta(days=10),  # 已过期
+            family_absolute_at=datetime.now(UTC) - timedelta(days=10),
         )
     async with db_session() as session:
         deleted = await RefreshTokenRepository(session).delete_expired()

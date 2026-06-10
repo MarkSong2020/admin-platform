@@ -187,7 +187,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         # body 只读一次 —— 既要 hash 又要 replay 给下游。
         body = await request.body()
         body_hash = hashlib.sha256(body).hexdigest()
-        cache_key = _build_cache_key(request.url.path, client_key)
+        # H4：键含认证主体（AuthMiddleware 在 request.state.user_id 设 sub；未鉴权/匿名为 anon）——
+        # 否则跨用户重放他人 Idempotency-Key 会命中缓存、绕过路由级权限/停用检查。
+        subject = getattr(request.state, "user_id", "") or "anon"
+        cache_key = _build_cache_key(subject, request.url.path, client_key)
 
         # Phase 1：尝试抢 in-flight 锁。
         lock_payload = json.dumps({"state": _STATE_IN_FLIGHT, "body_hash": body_hash}).encode()
@@ -371,10 +374,13 @@ def _route_is_idempotent(request: Request) -> bool:
     return False
 
 
-def _build_cache_key(path: str, client_key: str) -> str:
-    """``idem:<path>:<client-key>`` —— body hash 现在放在 payload 里，不在
-    key 里，所以同 key + 不同 body 会撞锁、被 422 拒掉，而不是悄悄重跑。"""
-    return f"idem:{path}:{client_key}"
+def _build_cache_key(subject: str, path: str, client_key: str) -> str:
+    """``idem:<subject>:<path>:<client-key>`` —— subject = 认证主体 user_id（未鉴权/匿名为 anon）。
+
+    H4：键含主体后，重放他人 ``Idempotency-Key`` 不再命中缓存——否则持有效 token 的低权限用户重放
+    他人 key 可拿到完整响应体、绕过路由级 require_permission / 账号停用检查（中间件命中缓存即返回，
+    不进路由）。body hash 在 payload 里（同 key + 不同 body 撞 422，不悄悄重跑）。"""
+    return f"idem:{subject}:{path}:{client_key}"
 
 
 def _serialisable_headers(headers: Any) -> dict[str, str]:

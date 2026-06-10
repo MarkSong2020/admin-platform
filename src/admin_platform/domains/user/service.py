@@ -15,7 +15,7 @@ from __future__ import annotations
 from admin_platform.authz.data_scope import is_dept_visible
 from admin_platform.authz.scope import DataScope
 from admin_platform.core.errors import AUTH_FORBIDDEN_BY_SCOPE, AppError
-from admin_platform.core.security import hash_password
+from admin_platform.core.security import ahash_password
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.repository import UserRepository
 from admin_platform.domains.user.schemas import UserCreate, UserPage, UserRead, UserUpdate
@@ -67,7 +67,7 @@ class UserService:
             raise self._forbidden_scope()
         if await self._repo.find_by_username(payload.username) is not None:
             raise self._duplicate(payload.username)
-        row = await self._repo.create(payload, password_hash=hash_password(payload.password))
+        row = await self._repo.create(payload, password_hash=await ahash_password(payload.password))
         return UserRead.model_validate(row)
 
     async def update(
@@ -91,7 +91,9 @@ class UserService:
             and await self._repo.count_super_admins() <= 1
         ):
             raise self._last_super_admin()
-        password_hash = hash_password(payload.password) if payload.password is not None else None
+        password_hash = (
+            await ahash_password(payload.password) if payload.password is not None else None
+        )
         row = await self._repo.update(user_id, payload, password_hash=password_hash)
         if row is None:  # 并发删除兜底
             raise self._not_found(user_id)

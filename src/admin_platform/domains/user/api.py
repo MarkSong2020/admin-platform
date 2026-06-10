@@ -10,6 +10,7 @@
   * 403 auth.FORBIDDEN_BY_ROLE            —— 缺少所需权限点
   * 404 admin_platform.USER_NOT_FOUND     —— get/update/delete 命中不存在的 id
   * 409 admin_platform.USERNAME_DUPLICATE —— create 想用已存在 username
+  * 409 admin_platform.LAST_SUPER_ADMIN   —— update 停用 / delete 最后一个超管（M12 补声明）
   * 422 framework.VALIDATION_FAILED       —— Pydantic 拒绝 payload
 """
 
@@ -32,7 +33,9 @@ from admin_platform.domains.user.service import UserService
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 ServiceDep = Annotated[UserService, Depends(get_user_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+PageQ = Annotated[
+    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
+]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:user:{action}：list/query/add/edit/remove。
@@ -54,7 +57,13 @@ NOT_FOUND_RESPONSE: dict[int | str, dict[str, object]] = {
 PATCH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **AUTH_ERROR_RESPONSES,
     404: {"model": ProblemDetail},
+    409: {"model": ProblemDetail},  # M12：停用最后一个超管 / dept_id 关联冲突 → 409
     422: {"model": ProblemDetail},
+}
+DELETE_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **AUTH_ERROR_RESPONSES,
+    404: {"model": ProblemDetail},
+    409: {"model": ProblemDetail},  # M12：删最后一个超管 → 409 LAST_SUPER_ADMIN
 }
 POST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **AUTH_ERROR_RESPONSES,
@@ -124,7 +133,7 @@ async def update_user(
     "/{user_id}",
     operation_id="users_delete",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=NOT_FOUND_RESPONSE,
+    responses=DELETE_ERROR_RESPONSES,
 )
 async def delete_user(user_id: int, svc: ServiceDep, user: RemoveGuard) -> None:
     await audited_write(

@@ -34,7 +34,9 @@ from admin_platform.domains.config.service import ConfigService
 router = APIRouter(prefix="/api/v1/configs", tags=["configs"])
 
 ServiceDep = Annotated[ConfigService, Depends(get_config_service)]
-PageQ = Annotated[int, Query(ge=1, description="页码（从 1 开始）")]
+PageQ = Annotated[
+    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
+]
 SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 KeywordQ = Annotated[str | None, Query(description="按参数键名 / 名称模糊过滤")]
 

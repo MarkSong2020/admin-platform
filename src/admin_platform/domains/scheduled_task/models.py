@@ -95,6 +95,13 @@ class ScheduledTaskLog(Base, IdMixin, TimestampMixin):
         CheckConstraint(
             "trigger_type IN ('schedule', 'manual')", name="ck_scheduled_task_logs_trigger"
         ),
+        # L：schedule 触发必须有 scheduled_at（claim 正确性层兜底）——否则 partial unique 在 PG16
+        # NULLS DISTINCT 下对 schedule+NULL 行完全失效，去重被静默旁路（防未来代码/手写 SQL/回放工具
+        # 以 schedule+NULL 插入绕过红线）。manual 触发 scheduled_at 合法为 NULL，不受此约束。
+        CheckConstraint(
+            "trigger_type <> 'schedule' OR scheduled_at IS NOT NULL",
+            name="ck_scheduled_task_logs_schedule_at",
+        ),
         # 多 worker 执行 claim（P4 红线核心）：同一任务同一 cron tick 只能有一条自动触发记录。
         Index(
             "uq_scheduled_task_logs_schedule_claim",

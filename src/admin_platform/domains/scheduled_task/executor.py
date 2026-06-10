@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import socket
 import uuid
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 
 from admin_platform.db.session import db_session
+from admin_platform.domains.scheduled_task.cron import CronValidationError, scheduled_tick_at
 from admin_platform.domains.scheduled_task.models import ScheduledTaskLog
 from admin_platform.domains.scheduled_task.registry import JobHandlerRegistry
 from admin_platform.domains.scheduled_task.repository import ScheduledTaskRepository
@@ -32,6 +34,18 @@ _ERR_MSG_MAX = 1024
 _SUMMARY_MAX = 1024
 # 孤儿 running 兜底：无 timeout_seconds 的任务，超过此秒数的 running 视为崩溃遗留、不计入并发判定。
 _DEFAULT_STALE_SECONDS = 3600
+
+# F6：执行日志脱敏兜底——error_message / result_summary 可能含 handler 异常里的连接串/密钥
+# （admin-only 日志，但 handler registry 是扩展点，纵深防御屏蔽常见敏感模式胜过裸写）。
+_SECRET_PATTERN = re.compile(
+    r"(?i)(password|passwd|pwd|token|secret|api[_-]?key|authorization)\s*[=:]\s*\S+"
+    r"|[a-z][a-z0-9+.-]*://[^:/\s]+:[^@\s]+@"  # 连接串 scheme://user:pass@host
+)
+
+
+def _redact(text: str) -> str:
+    """屏蔽常见敏感模式（key=value / key:value 形式的密钥 + URL 内嵌凭据）。"""
+    return _SECRET_PATTERN.sub("***REDACTED***", text)
 
 
 @dataclass(frozen=True)
@@ -98,6 +112,20 @@ class TaskExecutor:
                 task = await repo.get_for_update(task_id)
                 if task is None:
                     return None
+                # H3：schedule 触发的 claim 键取 cron 计划 tick（非触发墙钟分钟）——failover 跨分钟界 /
+                # misfire 延迟下同一逻辑 tick 键值恒定，去重正确。manual 触发 scheduled_at 恒 None。
+                if trigger_type == "schedule" and scheduled_at is None:
+                    now_ = datetime.now(UTC)
+                    try:
+                        tick = scheduled_tick_at(
+                            task.cron_expression,
+                            timezone=task.cron_timezone,
+                            now=now_,
+                            lookback_seconds=task.misfire_grace_seconds + 60,
+                        )
+                    except CronValidationError:
+                        tick = None  # 防御：cron 被并发改非法（reconcile 已挡，几不可达）→ 墙钟兜底
+                    scheduled_at = tick or now_.replace(second=0, microsecond=0)
                 stale_seconds = task.timeout_seconds or _DEFAULT_STALE_SECONDS
                 since = datetime.now(UTC) - timedelta(seconds=stale_seconds)
                 concurrency_skip = (
@@ -150,8 +178,9 @@ class TaskExecutor:
         except TimeoutError:
             return "failure", "scheduled_task.TIMEOUT", f"执行超时(> {timeout_seconds}s)", None
         except Exception as exc:
-            return "failure", type(exc).__name__, str(exc)[:_ERR_MSG_MAX], None
-        return "success", None, None, (summary[:_SUMMARY_MAX] if summary else None)
+            # F6：脱敏兜底——handler 异常文本可能含连接串/密钥（纵深防御，不裸写入库）。
+            return "failure", type(exc).__name__, _redact(str(exc))[:_ERR_MSG_MAX], None
+        return "success", None, None, (_redact(summary)[:_SUMMARY_MAX] if summary else None)
 
     async def _finish(  # noqa: PLR0913 —— 执行终态字段多且全显式传，内部 helper 可放宽
         self,
