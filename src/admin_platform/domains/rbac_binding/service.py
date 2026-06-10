@@ -154,24 +154,19 @@ class RbacBindingService:
         dept_ids: list[int],
         *,
         operator: AuditActor,
-        scope: DataScope | None = None,
     ) -> list[int]:
         action = "system:role:bind_depts"
         try:
+            # 提权防护（hardening-r1 E1，用户拍板 2026-06-10）：role-dept 是【全局角色】的数据范围
+            # 写——非超管持 system:role:edit 可把自己辖区部门授权给任意全局角色的全部持有人（跨用户
+            # 数据扩散，无对象级授权边界）。与 user-role/role-menu 同口径收紧为超管专属（原按 scope
+            # 委派非超管，那只能挡「绑不可见部门」，挡不住「把可见部门扩散给辖区外角色持有人」）。
+            self._require_super_admin(operator)
             role = await self._require_role(role_id)
             deduped = list(dict.fromkeys(dept_ids))
             await self._require_ids_exist(
                 self._dept_repo.list_existing_ids, deduped, DEPT_IDS_INVALID, "dept"
             )
-            # 数据权限写侧（Codex 风险 #2 + Round-3 写侧对称）：set_role_depts 是先全删后插的全量
-            # 替换。非超管操作时，① 新增 ids 必须可见；② 既有绑定也必须全部可见——否则全删会
-            # 静默清除范围外（不可见）部门绑定（scoped operator 篡改了范围外数据），与读侧 403
-            # 对称，强制此类角色由超管操作。超管 scope=ALL → is_dept_visible 恒 True，不受限。
-            if scope is not None:
-                existing = await self._role_repo.list_custom_dept_ids_for_role(role_id)
-                for dept_id in (*deduped, *existing):
-                    if not is_dept_visible(scope, dept_id):
-                        raise self._forbidden_scope()
             await self._role_repo.set_role_depts(role_id, deduped)
         except AppError as exc:
             await self._audit_fail(operator, action, "role", role_id, exc)

@@ -185,7 +185,14 @@ def create_app() -> FastAPI:
     # Redis 由 idempotency 或登录防护任一启用即创建（Codex 深审解耦：登录防护不再隐式
     # 依赖 idempotency_enabled）。idempotency middleware 仅在 idempotency_enabled 时挂。
     if settings.idempotency_enabled or settings.auth_login_guard_enabled:
-        redis = Redis.from_url(settings.redis_url, decode_responses=False)
+        # socket 超时（M2 hardening-r1）：未设时 TCP 黑洞会让认证路径 ``await redis.*`` 永久挂起，
+        # login_guard 的 fail-closed（异常分支）对挂起无效 → 登录全量悬挂。设超时把挂起转异常。
+        redis = Redis.from_url(
+            settings.redis_url,
+            decode_responses=False,
+            socket_timeout=settings.redis_socket_timeout_seconds,
+            socket_connect_timeout=settings.redis_socket_timeout_seconds,
+        )
         app.state.redis = redis
     if settings.idempotency_enabled:
         app.add_middleware(

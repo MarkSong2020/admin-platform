@@ -53,9 +53,9 @@ def test_idempotency_lock_ttl_overrides_via_env(monkeypatch: pytest.MonkeyPatch)
     assert Settings().idempotency_lock_ttl_seconds == 180
 
 
-def test_access_token_ttl_default_is_2h() -> None:
-    """P0 只发 access token、不做 refresh，默认 TTL 2h（7200s）收敛失窃窗口。"""
-    assert Settings().auth_access_token_ttl_seconds == 7200
+def test_access_token_ttl_default_is_30min() -> None:
+    """默认 TTL 30min（1800s，hardening-r1 E2）：access 不可即时撤销，TTL = 踢人后最长残留窗口。"""
+    assert Settings().auth_access_token_ttl_seconds == 1800
 
 
 def test_access_token_ttl_overrides_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
