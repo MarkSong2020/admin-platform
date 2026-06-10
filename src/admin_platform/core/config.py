@@ -185,6 +185,19 @@ class Settings(BaseSettings):
     # 调度器默认时区（cron 每任务可单独配 cron_timezone；此为兜底，库时间一律 UTC）。
     scheduler_timezone: str = "Asia/Shanghai"
 
+    # ---- P5 文件管理（本地文件系统存储 + 可插拔 StorageBackend，spec 2026-06-11）----
+    # 存储后端选择。v1 仅 "local"（本地 fs）；接口稳定后可接 "s3"，业务层不改。
+    file_storage_backend: str = "local"
+    # 本地存储根目录（相对 CWD；LocalFileStorage resolve 成绝对并守卫子路径不越界）。
+    file_storage_root: str = "var/uploads"
+    # 单文件上传上限（字节）。边读边累计实际写入量比对，不信任 Content-Length（可伪造）。
+    # 默认 50MB；下限 1KB（更小无意义），上限 5GB（再大应走分片/对象存储直传，排期）。
+    file_max_upload_size_bytes: int = Field(default=52428800, ge=1024, le=5368709120)
+    # 允许上传的扩展名白名单（小写、无点）。配合声明 content-type + 魔数头三重校验。
+    file_allowed_extensions: list[str] = Field(
+        default=["pdf", "png", "jpg", "jpeg", "gif", "xlsx", "docx", "txt", "csv", "zip"]
+    )
+
     @field_validator("database_url")
     @classmethod
     def _validate_database_url_scheme(cls, value: str) -> str:

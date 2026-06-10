@@ -177,6 +177,48 @@ MENU_TREE: tuple[SeedMenu, ...] = (
                 edit_perm=Permissions.SYSTEM_NOTICE_EDIT,
                 remove_perm=Permissions.SYSTEM_NOTICE_REMOVE,
             ),
+            # 文件管理（对标 RuoYi sys_oss）：菜单(C) + 查/上传/下载/删 4 按钮(F)。
+            # 手写（非 _resource_menu 标准五件）：动作是 upload/download 而非 add/edit。
+            SeedMenu(
+                seed_key="system:file",
+                name="文件管理",
+                menu_type="C",
+                path="file",
+                component="system/file/index",
+                perms=Permissions.SYSTEM_FILE_LIST,
+                icon="upload",
+                sort_order=9,
+                children=(
+                    SeedMenu(
+                        Permissions.SYSTEM_FILE_QUERY,
+                        "文件查询",
+                        "F",
+                        perms=Permissions.SYSTEM_FILE_QUERY,
+                        sort_order=1,
+                    ),
+                    SeedMenu(
+                        Permissions.SYSTEM_FILE_UPLOAD,
+                        "文件上传",
+                        "F",
+                        perms=Permissions.SYSTEM_FILE_UPLOAD,
+                        sort_order=2,
+                    ),
+                    SeedMenu(
+                        Permissions.SYSTEM_FILE_DOWNLOAD,
+                        "文件下载",
+                        "F",
+                        perms=Permissions.SYSTEM_FILE_DOWNLOAD,
+                        sort_order=3,
+                    ),
+                    SeedMenu(
+                        Permissions.SYSTEM_FILE_REMOVE,
+                        "文件删除",
+                        "F",
+                        perms=Permissions.SYSTEM_FILE_REMOVE,
+                        sort_order=4,
+                    ),
+                ),
+            ),
         ),
     ),
     SeedMenu(
