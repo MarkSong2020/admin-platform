@@ -37,6 +37,13 @@
 - **canonical 前导零漂移**：数字格式 code 列 `007`→`7` 不可逆（openpyxl 先按格式读类型）。需导入模板预设文本格式列 + 可选「文本列拒绝 numeric cell」。
 - 通用 `ExcelExporter` 列级 opt-out formula 转义（当前默认全开）。
 
+**R2–R5 多轮对抗审查 loop 已修**（2026-06-11，全程绿：make check 630 单测 + integration 208 + check-db 无漂移）：
+- **R5 存储型控制字符 DoS**（adversarial agent 实跑复现）：`PostCreate.name/code` 无字符集约束，含 openpyxl 非法控制字符（0x00-08/0b-0c/0e-1f）的岗位进库后让 `GET /posts/export` 整表导出抛 `IllegalCharacterError` → 对全体永久 500（低权限「岗位新增」用户投毒一行即可）。修：`excel/writer._canonical` 剥除（结构性兜底，让导出不可能因非法字符失败）+ `PostCreate/Update` L1 `CleanText` 拒绝，defense-in-depth 两层。
+- **R5 skeptic 扩面 U+FFFE/U+FFFF 非字符**：能过控制字符正则但生成损坏 .xlsx（XML 1.0 Char 上限 U+FFFD）/ 让 import 对上传者 500。修：writer 剥除（codepoint 表）+ L1 拒绝同源闭合。
+- **R5 reader 迭代期异常兜底**：`except` 此前只包 `load_workbook`，`iter_rows` 期间 ParseError（如含 U+FFFE 的文件）漏成 500，与 docstring 声称不符。修：扩 `except` 到行迭代（抽 `_parse_rows` helper 降 PLR0912 复杂度），转 INVALID_FILE。
+- **R4 reader 回退守护测试**：valid-zip-non-xlsx（openpyxl 抛 KeyError 非 BadZipFile）测试锁住宽 `except` 不被收窄回退而退化 500。
+- **R2 formula `\n` + export 审计**：formula 触发集补 `\n` 开头；导出补 `audited_write`（数据外泄取证点）+ 集成 caplog 断言 import/export 各 emit 一条成功审计。
+
 ## 2. 通用机制 `admin_platform/excel/`（无状态，零 domain 知识）
 
 ```
@@ -73,7 +80,7 @@ PostExcelRow(BaseModel):  # 导入行 schema（canonical str 输入，Pydantic c
 | 方法 | 路径 | 权限 | 审计 | 语义 |
 |---|---|---|---|---|
 | POST | `/posts/import` | system:post:import | ✓ | multipart xlsx（≤`excel_max_upload_size` 流式校验，超限 413）；**一步全有全无**：全量校验通过→单事务批量写入；行级错误→imported=0 + **不写任何行**，**200** + `PostImportSummary{imported, errors}`（业务结果，errors 始终可见，不走 ProblemDetail 脱敏）。**例外**（对抗审查）：并发撞 `uq_posts_code` 竞态→409 `post.CODE_DUPLICATE`（非 200，DB 兜底防部分写）；非法 xlsx→`INVALID_FILE`（200 errors）；超大→413 |
-| GET | `/posts/export` | system:post:export | —（排期） | 全量（上限 file_excel_max_rows）→ xlsx 流；超限 422 |
+| GET | `/posts/export` | system:post:export | ✓（R2 补） | 全量（上限 file_excel_max_rows）→ xlsx 流；超限 422。导出是数据外泄取证点，`audited_write` 记「谁导出多少字节」 |
 
 新增权限点 `system:post:{import,export}`（authz/permissions.py + seed post 菜单按钮 + 三集一致测试）。
 
