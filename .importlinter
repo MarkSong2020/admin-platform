@@ -122,3 +122,21 @@ source_modules =
 forbidden_modules =
     admin_platform.domains.*.repository
 allow_indirect_imports = True
+
+# C10（excel-leaf）：通用 Excel 机制是无状态叶子（schema 驱动的 xlsx 解析/生成），与 authz（C8）
+#   同为「被依赖方基座」——禁直接 import fastapi/sqlalchemy/domains/core，保持可跨域复用、可单测、
+#   不被业务/框架污染。domain 在自己的 excel.py 放绑定适配器，反向依赖 admin_platform.excel。
+[importlinter:contract:excel-leaf]
+name = C10 excel must not import fastapi/sqlalchemy/domains/core (pure leaf mechanism)
+type = forbidden
+source_modules =
+    admin_platform.excel
+    admin_platform.excel.*
+forbidden_modules =
+    fastapi
+    sqlalchemy
+    admin_platform.domains
+    admin_platform.domains.*
+    admin_platform.core
+    admin_platform.core.*
+allow_indirect_imports = True
