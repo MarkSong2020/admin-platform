@@ -32,6 +32,7 @@ PROBE_DOMAIN="src/admin_platform/domains/${MODULE}"
 PROBE_TEST_UNIT="tests/unit/test_${MODULE}_service.py"
 PROBE_TEST_API="tests/api/test_${MODULE}_api.py"
 ENV_PY="migrations/env.py"
+SCHEMA_DOC="doc/architecture/DATA_MODEL.md"
 
 # Generator 在首次跑时会顺手创建 domains/__init__.py（详见 new_module.py
 # _target_paths 注释）。记录进入前是否存在，cleanup 时按原状态还原，避免
@@ -44,7 +45,8 @@ DIRTY="$(git status --porcelain -- \
   "src/admin_platform/domains" \
   "tests/unit" \
   "tests/api" \
-  "$ENV_PY" 2>/dev/null || true)"
+  "$ENV_PY" \
+  "$SCHEMA_DOC" 2>/dev/null || true)"
 if [ -n "$DIRTY" ]; then
   echo "==> smoke: ABORT — 工作区在 generator 相关路径有未提交改动；先 commit/stash：" >&2
   echo "$DIRTY" >&2
@@ -74,12 +76,20 @@ on_exit() {
   if [ -f "$ENV_PY" ]; then
     git checkout -- "$ENV_PY" >/dev/null 2>&1 || true
   fi
+  # 还原 schema-doc 对 DATA_MODEL.md 的 regenerate（含临时 smoke_probe 表），入口已校验其干净。
+  git checkout -- "$SCHEMA_DOC" >/dev/null 2>&1 || true
   exit "$rc"
 }
 trap on_exit EXIT
 
 echo "==> smoke: make new-module name=${MODULE} with-model=1"
 make -s new-module name="$MODULE" with-model=1 >/dev/null
+
+# with-model 生成了 smoke_probe 表 → regenerate DATA_MODEL.md，让 make check 的 dump_schema
+# --check（H7 门禁）不因临时模块 drift 误失败（反映「加模块 → schema-doc → check」真实流程）；
+# cleanup 时 git checkout 还原（入口已把 DATA_MODEL.md 纳入 dirty check 白名单）。
+echo "==> smoke: make schema-doc（含临时 smoke_probe 表，cleanup 还原）"
+make -s schema-doc >/dev/null
 
 echo "==> smoke: make check"
 make -s check
