@@ -24,7 +24,7 @@
 - [`role_menus`](#role_menus)（5 列）
 - [`scheduled_task_logs`](#scheduled_task_logs)（18 列）
 - [`users`](#users)（9 列）
-- [`auth_refresh_tokens`](#auth_refresh_tokens)（13 列）
+- [`auth_refresh_tokens`](#auth_refresh_tokens)（14 列）
 - [`user_posts`](#user_posts)（5 列）
 - [`user_roles`](#user_roles)（5 列）
 
@@ -363,7 +363,8 @@
 | `revoked_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 撤销时间(非空=已撤销) |  |
 | `revoked_reason` | VARCHAR(32) | NULL | — | 撤销原因(rotated/logout/reuse_detected/concurrency_limit/expired_cleanup) |  |
 | `issued_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | — | 签发时间(UTC) |  |
-| `expires_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | — | 过期时间(UTC,absolute上限) |  |
+| `expires_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | — | 过期时间(UTC,min(idle,family_absolute)) |  |
+| `family_absolute_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | — | family绝对过期上限(UTC,首登锚定,轮换透传不随清理漂移) |  |
 | `last_used_at` | TIMESTAMP WITH TIME ZONE | NULL | — | 最后轮换时间(UTC) |  |
 | `id` | BIGINT | NOT NULL | — | 主键 | PK |
 | `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
@@ -375,6 +376,7 @@
 - UNIQUE （列级 `unique=True`，DDL 由 PG 自动命名）：(token_hash)
 - FK `None`：(user_id) → users.id
 - INDEX `ix_auth_refresh_tokens_expires_at`：(expires_at)
+- INDEX `ix_auth_refresh_tokens_family`：(family_id)
 - INDEX `ix_auth_refresh_tokens_user_active`：(user_id, revoked_at, expires_at)
 - INDEX `ix_auth_refresh_tokens_user_family`：(user_id, family_id)
 
@@ -393,8 +395,8 @@
 约束 / 索引：
 
 - UNIQUE `uq_user_posts`：(user_id, post_id)
-- FK `None`：(user_id) → users.id
 - FK `None`：(post_id) → posts.id
+- FK `None`：(user_id) → users.id
 - INDEX `ix_user_posts_post`：(post_id)
 - INDEX `ix_user_posts_user`：(user_id)
 

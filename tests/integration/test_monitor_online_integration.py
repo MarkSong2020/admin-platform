@@ -56,6 +56,13 @@ def _hash() -> str:
     return uuid.uuid4().hex + uuid.uuid4().hex  # 唯一 64 字符 token_hash
 
 
+def _rt(**kw: object) -> RefreshToken:
+    """构造 RefreshToken：默认补 family_absolute_at（H2 新增 NOT NULL 列，在线查询不依赖其值）。"""
+    kw.setdefault("family_absolute_at", _FUTURE)
+    model = RefreshToken
+    return model(**kw)  # type: ignore[arg-type]
+
+
 async def _wipe() -> None:
     async with db_session() as s:
         await s.execute(text("TRUNCATE TABLE auth_refresh_tokens, users, audit_events CASCADE"))
@@ -78,7 +85,7 @@ async def _seed() -> dict[str, uuid.UUID | int]:
         f1, f2, f3, f4 = (uuid.uuid4() for _ in range(4))
         # F1（alice）：轮换链——旧 token 已撤销(rotated) + 新 token 活动。
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=f1,
                 user_id=alice.id,
@@ -91,7 +98,7 @@ async def _seed() -> dict[str, uuid.UUID | int]:
             )
         )
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=f1,
                 user_id=alice.id,
@@ -103,7 +110,7 @@ async def _seed() -> dict[str, uuid.UUID | int]:
         )
         # F2（bob）：单 token 活动。
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=f2,
                 user_id=bob.id,
@@ -114,7 +121,7 @@ async def _seed() -> dict[str, uuid.UUID | int]:
         )
         # F3（alice）：全撤销 → 非活动。
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=f3,
                 user_id=alice.id,
@@ -127,7 +134,7 @@ async def _seed() -> dict[str, uuid.UUID | int]:
         )
         # F4（alice）：已过期 → 非活动。
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=f4,
                 user_id=alice.id,
@@ -258,7 +265,7 @@ async def _seed_three_active() -> list[str]:
         t_a, t_b, t_c = (_T0 + timedelta(hours=h) for h in (3, 2, 1))
         # FA：轮换 family（旧撤销 + 新活动），last_active=t_a。
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=fa,
                 user_id=user.id,
@@ -271,7 +278,7 @@ async def _seed_three_active() -> list[str]:
             )
         )
         s.add(
-            RefreshToken(
+            _rt(
                 jti=uuid.uuid4(),
                 family_id=fa,
                 user_id=user.id,
@@ -283,7 +290,7 @@ async def _seed_three_active() -> list[str]:
         )
         for fam, ts in ((fb, t_b), (fc, t_c)):
             s.add(
-                RefreshToken(
+                _rt(
                     jti=uuid.uuid4(),
                     family_id=fam,
                     user_id=user.id,

@@ -19,6 +19,7 @@ from admin_platform.core.config import get_settings
 from admin_platform.core.security import hash_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth import login_guard
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
 
@@ -224,3 +225,33 @@ async def test_captcha_one_time_use_consumed(client: AsyncClient) -> None:
     gone = await r.get(f"auth:captcha:{cap['captcha_id']}")
     await r.aclose()
     assert gone is None
+
+
+# ---- M5：登录防护盲区补测（软锁写入 / IP 限流 429，此前 coverage omit 掩盖零执行）----
+
+
+async def test_record_failure_writes_soft_lock_at_threshold() -> None:
+    """M5：record_failure 累加到 lock_threshold 时自动写软锁 key（真实写入路径，非手工植入）。"""
+    r = Redis.from_url(_REDIS_URL)
+    await r.flushdb()
+    threshold = get_settings().auth_login_lock_threshold
+    for _ in range(threshold):
+        await login_guard.record_failure(r, username="bob", client_ip="9.9.9.9")
+    locked = await r.get("auth:lock:user:bob")
+    await r.aclose()
+    assert locked is not None  # 达阈值经 record_failure 自动写软锁（此前零测试覆盖该分支）
+
+
+async def test_ip_rate_limit_returns_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M5：IP 维度失败达上限 → 端点 429 LOGIN_RATE_LIMITED（pre_check→service 映射真实触发）。"""
+    monkeypatch.setenv("APP_AUTH_LOGIN_IP_LIMIT", "2")
+    get_settings.cache_clear()
+    await _seed()
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        for _ in range(2):
+            await c.post("/api/v1/auth/login", json={"username": "alice", "password": "wrong"})
+        res = await c.post("/api/v1/auth/login", json={"username": "alice", "password": "wrong"})
+    await dispose_engine()
+    assert res.status_code == 429
+    assert res.json()["type"] == "auth.LOGIN_RATE_LIMITED"

@@ -96,9 +96,11 @@ def _render_table(table: Table, cls: type | None) -> str:
 
     # 约束 / 索引（PK 已在备注，这里列复合约束与索引）。
     extras: list[str] = []
+    # H7：约束/索引名可能为空（列级 unique=True / 未命名 FK），仅按 name 排序时 tie-break 落到
+    # set 迭代顺序（受 PYTHONHASHSEED 影响 → --check 随机 pass/fail）。补列名做确定性 tie-break。
     uniques = sorted(
         (c for c in table.constraints if isinstance(c, UniqueConstraint)),
-        key=lambda c: c.name or "",
+        key=lambda c: (c.name or "", tuple(col.name for col in c.columns)),
     )
     for uq in uniques:
         cols = ", ".join(col.name for col in uq.columns)
@@ -106,13 +108,19 @@ def _render_table(table: Table, cls: type | None) -> str:
         extras.append(f"- UNIQUE {label}：({cols})")
     fks = sorted(
         (c for c in table.constraints if isinstance(c, ForeignKeyConstraint)),
-        key=lambda c: c.name or "",
+        key=lambda c: (
+            c.name or "",
+            tuple(c.column_keys),
+            tuple(el.target_fullname for el in c.elements),
+        ),
     )
     for fk in fks:
         local = ", ".join(fk.column_keys)
         target = ", ".join(el.target_fullname for el in fk.elements)
         extras.append(f"- FK `{fk.name}`：({local}) → {target}")
-    for idx in sorted(table.indexes, key=lambda i: i.name or ""):
+    for idx in sorted(
+        table.indexes, key=lambda i: (i.name or "", tuple(col.name for col in i.columns))
+    ):
         cols = ", ".join(col.name for col in idx.columns)
         uniq = " UNIQUE" if idx.unique else ""
         extras.append(f"- INDEX{uniq} `{idx.name}`：({cols})")
