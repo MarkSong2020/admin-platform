@@ -151,8 +151,15 @@ async def import_posts(
 
 
 @router.get("/export", operation_id="posts_export", responses=EXPORT_ERROR_RESPONSES)
-async def export_posts(svc: ServiceDep, _user: ExportGuard) -> Response:
-    content = await svc.export_posts()
+async def export_posts(svc: ServiceDep, user: ExportGuard) -> Response:
+    # 导出审计（对抗审查 R2）：全量导出岗位是数据外泄取证点，记「谁导出」（写操作之外的读取证链）。
+    content = await audited_write(
+        user,
+        Permissions.SYSTEM_POST_EXPORT,
+        "post",
+        coro=svc.export_posts(),
+        display=lambda data: f"导出岗位 Excel（{len(data)} 字节）",
+    )
     return Response(
         content=content,
         media_type=_XLSX_MEDIA_TYPE,

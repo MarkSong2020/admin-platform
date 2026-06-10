@@ -8,19 +8,38 @@ name / code / sort_order / status。``status`` 用 ``Literal`` 限定为 active 
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 StatusValue = Literal["active", "disabled"]
+
+# openpyxl 视为非法的控制字符（0x00-08 / 0x0b-0c / 0x0e-1f；不含合法的 \t \n \r）。岗位名/编码含这些
+# 字符会让 Excel 导出在 ``worksheet.append`` 抛 IllegalCharacterError（存储型 DoS，对抗审查 R5：低权限
+# 用户投毒一行即可让全表导出对所有人永久 500）。L1 入口在此拒绝（import 行→VALIDATION RowError /
+# create→422）；``excel/writer`` 另有剥除兜底，两层 defense-in-depth。
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+# BMP 非字符 U+FFFE/U+FFFF（chr() 避免源码含字面非字符）——XML 1.0 Char 上限 U+FFFD，能过控制字符
+# 正则但进库后让导出生成损坏 .xlsx（对抗审查 R5 skeptic 扩面发现），L1 同源拒绝。
+_NONCHARS = frozenset((chr(0xFFFE), chr(0xFFFF)))
+
+
+def _reject_control_chars(value: str) -> str:
+    if _CONTROL_CHARS_RE.search(value) or _NONCHARS.intersection(value):
+        raise ValueError("不能包含 Excel 非法字符")
+    return value
+
+
+CleanText = Annotated[str, AfterValidator(_reject_control_chars)]
 
 
 class PostCreate(BaseModel):
     """POST payload。id / 时间戳由 DB 维护，不可由客户端设。"""
 
-    name: str = Field(min_length=1, max_length=64, description="岗位名称")
-    code: str = Field(min_length=1, max_length=64, description="岗位编码（全局唯一）")
+    name: CleanText = Field(min_length=1, max_length=64, description="岗位名称")
+    code: CleanText = Field(min_length=1, max_length=64, description="岗位编码（全局唯一）")
     sort_order: int = Field(default=0, ge=0, le=999999, description="显示顺序（防 int4 越界）")
     status: StatusValue = Field(default="active", description="岗位状态（active / disabled）")
 
@@ -29,8 +48,12 @@ class PostUpdate(BaseModel):
     """PATCH payload —— 字段全可选（merge 语义）。"""
 
     model_config = ConfigDict(from_attributes=True)
-    name: str | None = Field(default=None, min_length=1, max_length=64, description="岗位名称")
-    code: str | None = Field(default=None, min_length=1, max_length=64, description="岗位编码")
+    name: CleanText | None = Field(
+        default=None, min_length=1, max_length=64, description="岗位名称"
+    )
+    code: CleanText | None = Field(
+        default=None, min_length=1, max_length=64, description="岗位编码"
+    )
     sort_order: int | None = Field(
         default=None, ge=0, le=999999, description="显示顺序（防 int4 越界）"
     )
