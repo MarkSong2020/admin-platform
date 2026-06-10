@@ -28,6 +28,18 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P5 文件管理：对标 RuoYi sys_oss + P5 范围重圈（codegen 砍除）（2026-06-11）
+
+[spec](./docs/specs/2026-06-11-p5-file-management.md) · 用户拍板 + Codex PK 收敛 + 对抗审查（Codex 二审 + adversarial agent 两独立来源）
+
+- **P5 范围重新圈定**：**砍** RuoYi 在线 codegen（后台选表生成代码）+ introspection 逆向——AI 时代过时（coding agent 直接读表生成五层 CRUD + 测试 + 迁移 + doc 比 velocity 模板灵活；绿地项目无遗留表逆向场景）；**保留** `make new-module` CLI——它不是 codegen，是 agent 生成时的「确定性护栏」（五层结构/import-linter/schema-doc/column-comment 自动注册），「新模块必走 make new-module」规则不变。P5 剩 **Excel 导入导出**（待用户单独授权新依赖 openpyxl/xlsxwriter，codex-pk 红线）
+- **域** `domains/file/`（迁移 0019：`files` 表 object_key/storage_backend/original_filename/content_type/size_bytes/sha256/uploader_id FK→users.id RESTRICT/status/deleted_at 软删）：五层 + `storage.py`（StorageBackend 抽象 + LocalFileStorage）。**零新依赖**（python-multipart 随 fastapi[standard] 已装）
+- **端点** `/api/v1/files`：list/query/upload(multipart UploadFile 流式)/download(StreamingResponse 流式)/remove(软删元数据 + commit 后 BackgroundTasks 物理删)。6 权限点 `system:file:{list,query,upload,download,remove}` 过三集合契约 + seed 手写菜单块对标 RuoYi OSS
+- **安全模型（defense-in-depth）**：扩展名白名单 + 魔数头弱类型校验 + 边写边累计 size/sha256（不信 Content-Length）+ object_key=uuid4 分桶 + 路径穿越守卫 + Content-Disposition 注入防御（剥 CRLF/引号）+ X-Content-Type-Options: nosniff
+- **对抗审查修复**（Codex 二审 + adversarial agent 两独立来源印证）：P1 commit-after-unlink 数据丢失（remove 改 commit 后 BackgroundTasks 物理删）/ P1 Content-Disposition 注入 / P2 nosniff XSS / P2 upload 孤儿清理（repo.create 失败清物理文件）/ object_key 不进 FileRead（最小暴露）。排期项（spec §1）：orphan sweeper / ASGI body 上限 / 下载-删除 TOCTOU / content-type 白名单 / OOXML 深度校验 / 下载审计
+- 测试：`make check` 598 ✓（原 537）/ `make test-integration` 205 ✓（原 189）/ migration 0002→0019
+- ⚠️ 迁移 0019 仅本地 dev + CI 临时容器跑过，**生产/共享库迁移待单独授权**
+
 ### P4c 定时任务：APScheduler + 多 worker 安全 + handler registry（2026-06-10）
 
 [spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) §4 · Codex PK medium 收敛 + 人值守拍板 + 4 视角对抗审查 2 轮

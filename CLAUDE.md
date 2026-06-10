@@ -16,9 +16,9 @@
 → [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 监控/任务已落地）
+## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 监控/任务 + P5 文件管理已落地）
 
-`make check` 537 ✓ / `make test-integration` 189 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
+`make check` 598 ✓ / `make test-integration` 205 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
@@ -33,7 +33,8 @@
 | P3 运营配置：字典（类型+数据双资源 / FK RESTRICT / 单默认 / 消费端点）+ 参数（热更新读穿 / 内置禁删）+ 通知公告 | ✓ |
 | P4a/P4b 监控：服务监控（psutil CPU/内存/磁盘/进程）+ 缓存监控（Redis INFO 降级）+ 在线用户（活动 family 派生 + 强制下线审计） | ✓ |
 | P4c 定时任务：APScheduler + PG leader election + DB execution claim（多 worker 红线）+ handler registry 白名单（防 RCE）+ 手动触发 + 执行日志 | ✓ |
-| P5 工具（代码生成 / Excel / 文件）/ P6 Vue 前端 | 待做 |
+| P5 文件管理：对标 RuoYi sys_oss（StorageBackend 抽象 + LocalFileStorage / 零新依赖 / 扩展名白名单 + 魔数校验 + 流式 + 软删 + commit 后物理删） | ✓ |
+| P5 工具（**codegen 砍除（AI 时代）** / 文件管理✓ / Excel 待依赖授权）/ P6 Vue 前端 | 进行中 |
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
@@ -41,7 +42,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`doc/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：**P5 工具**（代码生成对标 / Excel 导入导出 / 文件上传）/ P6 Vue 前端。**P4 监控/任务全落地**（spec [`docs/specs/2026-06-10-p4-monitoring-tasks.md`](./docs/specs/2026-06-10-p4-monitoring-tasks.md)）：P4a/P4b 服务/缓存监控（psutil + Redis INFO 白名单 + 降级）+ 在线用户（活动 refresh token family 派生，login_time 取轮换原点 + 强制下线 audited，仅撤 refresh）；**P4c 定时任务**（Codex PK medium 收敛 + 人值守拍板 §4，时区 Asia/Shanghai）：APScheduler `AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行（红线）** + **handler registry 白名单防 RCE**（管理员只选预注册 handler_key，非任意调用串）+ 手动触发 + 执行日志。关键纪律：`scheduler_enabled` 默认 False（CRUD/手动触发不依赖调度器）、手动并发靠任务行 FOR UPDATE 串行化、orphan running 靠 stale 阈值不冻调度。P4c 排期项：6 字段秒级 cron / SIGKILL 显式启动恢复 / 自动重试，见 spec §4 非目标。⚠️ **迁移 0016 + 0013-0015 生产/共享库迁移仍待单独授权**（仅本地 dev + CI 临时容器跑过）。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
+下一步：**P5 剩 Excel 导入导出**（待用户单独授权新依赖 openpyxl/xlsxwriter，codex-pk 红线）/ P6 Vue 前端。**P5 文件管理已落地**（spec [`docs/specs/2026-06-11-p5-file-management.md`](./docs/specs/2026-06-11-p5-file-management.md)，用户 2026-06-11 拍板 + Codex PK 收敛）：P5 范围重新圈定——**砍 RuoYi 在线 codegen + introspection 逆向**（AI 时代过时：coding agent 直接读表生成五层 CRUD + 测试 + 迁移 + doc 比 velocity 模板灵活，绿地项目无遗留表逆向场景）；**保留 `make new-module` CLI**（不是 codegen，是 agent 生成时的「确定性护栏」——五层结构/import-linter/schema-doc/column-comment 自动注册，AI 时代防结构漂移更有用，「新模块必走 make new-module」规则不变）。**文件管理对标 RuoYi sys_oss**：`domains/file/` 五层 + `storage.py`（StorageBackend 抽象 + LocalFileStorage，**零新依赖**，python-multipart 随 fastapi[standard] 已装）；migration `0019_p5_file_management`（files 表 object_key/storage_backend/sha256/uploader_id FK→users.id RESTRICT/软删）；5 端点 `/api/v1/files` list/query/upload(multipart 流式)/download(StreamingResponse 流式)/remove(软删 + commit 后 BackgroundTasks 物理删)，6 权限点 `system:file:*` 过三集合契约 + seed 手写菜单块对标 RuoYi OSS；安全模型（defense-in-depth）：扩展名白名单 + 魔数头弱类型校验 + 边写边累计 size/sha256（不信 Content-Length）+ object_key=uuid4 分桶 + 路径穿越守卫 + Content-Disposition 注入防御（剥 CRLF/引号）+ X-Content-Type-Options: nosniff；对抗审查（Codex 二审 + adversarial agent 两独立来源）修复：P1 commit-after-unlink 数据丢失（改 commit 后 BackgroundTasks 物理删）/ P1 Content-Disposition 注入 / P2 nosniff XSS / P2 upload 孤儿清理 / object_key 不进 FileRead。排期项（spec §1）：orphan sweeper / ASGI body 上限 / 下载-删除 TOCTOU / content-type 白名单 / OOXML 深度校验 / 下载审计。**P4 监控/任务全落地**（spec [`docs/specs/2026-06-10-p4-monitoring-tasks.md`](./docs/specs/2026-06-10-p4-monitoring-tasks.md)）：P4a/P4b 服务/缓存监控（psutil + Redis INFO 白名单 + 降级）+ 在线用户（活动 refresh token family 派生，login_time 取轮换原点 + 强制下线 audited，仅撤 refresh）；**P4c 定时任务**（Codex PK medium 收敛 + 人值守拍板 §4，时区 Asia/Shanghai）：APScheduler `AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行（红线）** + **handler registry 白名单防 RCE**（管理员只选预注册 handler_key，非任意调用串）+ 手动触发 + 执行日志。关键纪律：`scheduler_enabled` 默认 False（CRUD/手动触发不依赖调度器）、手动并发靠任务行 FOR UPDATE 串行化、orphan running 靠 stale 阈值不冻调度。P4c 排期项：6 字段秒级 cron / SIGKILL 显式启动恢复 / 自动重试，见 spec §4 非目标。⚠️ **迁移 0019 + 0016 + 0013-0015 生产/共享库迁移仍待单独授权**（仅本地 dev + CI 临时容器跑过）。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
 
 ## AI 工作约束
 
