@@ -14,9 +14,10 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from admin_platform.core.idempotency import (
     IDEMPOTENCY_KEY_INVALID_CODE,
@@ -227,7 +228,8 @@ def test_same_key_same_body_in_flight_returns_409() -> None:
     store = _MemoryStore()
     body = b'{"name":"x"}'
     body_hash = hashlib.sha256(body).hexdigest()
-    store.data["idem:/items:abc"] = json.dumps(
+    # H4：缓存键含认证主体；无 AuthMiddleware 时 subject=anon → idem:anon:<path>:<key>。
+    store.data["idem:anon:/items:abc"] = json.dumps(
         {"state": "in_progress", "body_hash": body_hash}
     ).encode()
 
@@ -254,7 +256,7 @@ def test_lock_release_via_completed_payload_allows_replay() -> None:
     first = client.post("/items", json={"name": "x"}, headers=headers)
     assert first.status_code == 200
     # The stored payload must already be in completed state at this point.
-    stored = json.loads(store.data["idem:/items:abc"])
+    stored = json.loads(store.data["idem:anon:/items:abc"])
     assert stored["state"] == "completed"
 
     # Retry → replay (no 409, no double-execute).
@@ -262,6 +264,41 @@ def test_lock_release_via_completed_payload_allows_replay() -> None:
     assert second.status_code == 200
     assert second.headers[REPLAY_HEADER] == "true"
     assert second.json()["call"] == 1
+
+
+def test_idempotency_key_scoped_to_subject() -> None:
+    """H4：缓存键含认证主体——用户 A 的 Idempotency-Key 被用户 B 重放不命中 A 的缓存（防越权重放）。"""
+    store = _MemoryStore()
+    app = FastAPI()
+    app.add_middleware(IdempotencyMiddleware, store=store, ttl_seconds=60)
+
+    class _SetSubject(BaseHTTPMiddleware):  # 模拟 AuthMiddleware 在 request.state 设主体
+        async def dispatch(self, request: Request, call_next: Any) -> Any:
+            request.state.user_id = request.headers.get("X-Test-User", "")
+            return await call_next(request)
+
+    app.add_middleware(_SetSubject)  # 外层（Idempotency 之前执行，设 subject）
+
+    call_count = {"value": 0}
+
+    @app.post("/items")
+    @idempotent
+    def create_item(payload: _Payload) -> dict[str, Any]:
+        call_count["value"] += 1
+        return {"name": payload.name, "call": call_count["value"]}
+
+    client = TestClient(app)
+    r1 = client.post(
+        "/items", json={"name": "x"}, headers={"Idempotency-Key": "shared", "X-Test-User": "1"}
+    )
+    assert r1.status_code == 200 and r1.json()["call"] == 1
+    # 用户 2 同 key 同 body：不命中用户 1 缓存 → 真执行（call 2），非重放他人响应。
+    r2 = client.post(
+        "/items", json={"name": "x"}, headers={"Idempotency-Key": "shared", "X-Test-User": "2"}
+    )
+    assert r2.status_code == 200 and r2.json()["call"] == 2
+    assert REPLAY_HEADER not in r2.headers
+    assert "idem:1:/items:shared" in store.data and "idem:2:/items:shared" in store.data
 
 
 def test_get_request_skips_idempotency() -> None:
@@ -303,7 +340,7 @@ def test_failure_response_keeps_lock_for_short_retry_window() -> None:
     res = client.post("/fail", json={}, headers={"Idempotency-Key": "k"})
     assert res.status_code == 400
     # Lock was acquired but not overwritten with completed.
-    stored = json.loads(store.data["idem:/fail:k"])
+    stored = json.loads(store.data["idem:anon:/fail:k"])
     assert stored["state"] == "in_progress"
 
 
