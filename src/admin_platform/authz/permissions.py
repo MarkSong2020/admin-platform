@@ -52,6 +52,8 @@ class Permissions:
     SYSTEM_POST_ADD: Final = "system:post:add"
     SYSTEM_POST_EDIT: Final = "system:post:edit"
     SYSTEM_POST_REMOVE: Final = "system:post:remove"
+    SYSTEM_POST_IMPORT: Final = "system:post:import"
+    SYSTEM_POST_EXPORT: Final = "system:post:export"
 
     # ---- system:operlog（操作/审计日志，对标 RuoYi sys_oper_log，只读）----
     SYSTEM_OPERLOG_LIST: Final = "system:operlog:list"

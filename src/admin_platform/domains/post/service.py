@@ -14,16 +14,23 @@
 from __future__ import annotations
 
 from admin_platform.core.errors import AppError
+from admin_platform.domains.post.excel import POST_EXCEL_COLUMNS
 from admin_platform.domains.post.repository import PostRepository
 from admin_platform.domains.post.schemas import (
     PostCreate,
+    PostImportRowError,
+    PostImportSummary,
     PostPage,
     PostRead,
     PostUpdate,
 )
+from admin_platform.excel import ExcelExporter, ExcelImporter
 
 NOT_FOUND_CODE = "post.NOT_FOUND"
 CODE_DUPLICATE_CODE = "post.CODE_DUPLICATE"
+EXPORT_TOO_LARGE_CODE = "post.EXPORT_TOO_LARGE"
+# Excel 导入/导出行数上限（配置化排期，spec §1 非目标）。
+_EXCEL_MAX_ROWS = 10000
 
 
 class PostService:
@@ -69,6 +76,69 @@ class PostService:
         ok = await self._repo.delete(item_id)
         if not ok:
             raise self._not_found(item_id)
+
+    # ---- Excel 导入导出（P5，一步全有全无 + 全量错误报告）---------------------
+
+    async def import_posts(self, content: bytes) -> PostImportSummary:
+        """全量校验（Pydantic 逐行 + 文件内/库内 code 重复）：errors 非空 → imported=0 不写；
+        全通过 → 单事务批量写入。导入错误随 200 返回（业务结果，errors 始终可见，非系统错误）。"""
+        importer = ExcelImporter(PostCreate, POST_EXCEL_COLUMNS, max_rows=_EXCEL_MAX_ROWS)
+        result = importer.parse(content)
+        errors = [
+            PostImportRowError(row=e.row, column=e.column, code=e.code, message=e.message)
+            for e in result.errors
+        ]
+
+        # 文件内 code 重复（跨行）
+        seen: dict[str, int] = {}
+        for parsed in result.rows:
+            if parsed.data.code in seen:
+                errors.append(
+                    PostImportRowError(
+                        row=parsed.row,
+                        column="岗位编码",
+                        code="DUPLICATE_IN_FILE",
+                        message=f"文件内 code 重复: {parsed.data.code}",
+                    )
+                )
+            else:
+                seen[parsed.data.code] = parsed.row
+
+        # 库内 code 重复
+        existing = await self._repo.list_existing_codes([p.data.code for p in result.rows])
+        for parsed in result.rows:
+            if parsed.data.code in existing:
+                errors.append(
+                    PostImportRowError(
+                        row=parsed.row,
+                        column="岗位编码",
+                        code="DB_DUPLICATE",
+                        message=f"库内已存在 code: {parsed.data.code}",
+                    )
+                )
+
+        if errors:
+            return PostImportSummary(imported=0, errors=errors)  # 全有全无：不写任何行
+        imported = await self._repo.bulk_create([p.data for p in result.rows])
+        return PostImportSummary(imported=imported)
+
+    async def export_posts(self) -> bytes:
+        """全量导出（行数上限兜底；超限 422，提示用筛选/后台任务）。"""
+        rows = await self._repo.list_for_export(limit=_EXCEL_MAX_ROWS + 1)
+        if len(rows) > _EXCEL_MAX_ROWS:
+            raise AppError(
+                code=EXPORT_TOO_LARGE_CODE,
+                title="导出超过行数上限",
+                detail=f"超过 {_EXCEL_MAX_ROWS} 行，请用筛选或后台任务（排期）",
+                status_code=422,
+            )
+        exporter = ExcelExporter(POST_EXCEL_COLUMNS)
+        return exporter.write(
+            [
+                {"name": r.name, "code": r.code, "sort_order": r.sort_order, "status": r.status}
+                for r in rows
+            ]
+        )
 
     async def _check_code_unique(self, existing: object, payload: PostUpdate) -> None:
         """改 code 且与现值不同时校验全局唯一（未改 code 跳过）。"""

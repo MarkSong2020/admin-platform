@@ -131,3 +131,27 @@ def test_update_invalid_status_rejected_422() -> None:
 def test_list_size_above_max_is_rejected() -> None:
     res = _superadmin_client().get("/api/v1/posts?size=101")
     assert res.status_code == 422
+
+
+# ---- Excel 导入导出权限矩阵 + 校验（P5）-----------------------------------
+
+_XLSX = (
+    "p.xlsx",
+    b"PK\x03\x04stub",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+
+def test_import_without_permission_returns_403() -> None:
+    res = _no_perm_client().post("/api/v1/posts/import", files={"upload": _XLSX})
+    assert res.status_code == 403
+
+
+def test_export_without_permission_returns_403() -> None:
+    assert _no_perm_client().get("/api/v1/posts/export").status_code == 403
+
+
+def test_import_missing_file_returns_422() -> None:
+    # 缺 multipart 文件字段（upload 必填）→ 422，在 service/DB 依赖前短路。
+    res = _superadmin_client().post("/api/v1/posts/import")
+    assert res.status_code == 422

@@ -28,6 +28,17 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > 完整 commit 见 git log，路线图见
 > [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
+### P5 Excel 导入导出：通用 excel 机制 + post 绑定 + formula injection 防御（2026-06-11）
+
+[spec](./docs/specs/2026-06-11-p5-excel-import-export.md) · 对标 RuoYi 导入导出 · Codex PK + Explore agent 两来源印证（一处 push back）+ 对抗审查（Codex 二审 + adversarial agent 两独立来源）
+
+- **通用机制** `admin_platform/excel/`（顶层叶子模块，零 domain 知识）：reader（openpyxl read-only 流式 + schema 驱动逐行 Pydantic 校验 + 坏行不阻断全量错误）/ writer（write-only 流式 + formula injection 防御）/ schemas（ExcelColumn/RowError/ParsedRow/ImportResult）。新增 **import-linter C10 契约**（excel 禁 import fastapi/sqlalchemy/domains/core，纯叶子，类比 authz C8）
+- **第一版绑定 post 岗位**（最小复杂度示范，避开 user 密码/scope、dict FK/单默认）：`domains/post/excel.py` 列适配（复用 PostCreate 作导入行 schema）+ service `import_posts`/`export_posts` + repository `list_existing_codes`/`bulk_create`/`list_for_export`
+- **2 端点**：`POST /api/v1/posts/import`（multipart xlsx，**一步全有全无** + 全量错误，**始终 200 + PostImportSummary{imported, errors}** 业务通道；并发撞 uq_posts_code → 409；超大 → 413）+ `GET /api/v1/posts/export`（全量 + 行数上限）。新增 2 权限点 `system:post:{import,export}`（三集一致 + seed `_resource_menu` 加 extra_buttons）。**无新迁移**（复用 posts 表）。新依赖 **openpyxl 3.1.5**（pyproject + uv.lock）
+- **关键决策**（Codex PK + Explore agent 两来源印证 + 一处 push back）：excel/ 顶层叶子（非 core 红线）/ post 第一版 / **一步全有全无**（push back Codex 的两步暂存——一步同样避免部分写 + 全量报告，省暂存基建）/ 导入错误走 200+summary.errors（非 422，因 ProblemDetail.errors 受 debug 脱敏，生产看不到行级反馈）
+- **对抗审查修复**（Codex 二审 + adversarial agent 两来源印证）：**P0** Excel formula injection（导出 cell 以 =/+/-/@ 开头被 Excel 当公式执行 → writer 前缀单引号文本化）/ **P0** import 无 size 上限 OOM（→ 流式累计 + excel_max_upload_size_bytes 超限 413）；**P1** 审计 imported=0 记 success（→ display 标注错误数）/「始终 200」并发契约（→ spec 标并发 409 例外）；**P2** 非法 xlsx → 500（→ INVALID_FILE 业务错误）/ sort_order int4 越界（→ ge/le 约束）/ canonical 前导零漂移（→ docstring 诚实标注）。排期：zip bomb 深度防御 / 文本列强制 / 两步预览
+- 测试：`make check` 621 ✓（原 598）/ `make test-integration` 207 ✓（原 205，新增 post Excel 往返 2）/ 无新迁移
+
 ### P5 文件管理：对标 RuoYi sys_oss + P5 范围重圈（codegen 砍除）（2026-06-11）
 
 [spec](./docs/specs/2026-06-11-p5-file-management.md) · 用户拍板 + Codex PK 收敛 + 对抗审查（Codex 二审 + adversarial agent 两独立来源）
