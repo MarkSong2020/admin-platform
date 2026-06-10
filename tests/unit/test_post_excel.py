@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import ValidationError
 
 from admin_platform.core.errors import AppError
 from admin_platform.domains.post.excel import POST_EXCEL_COLUMNS
@@ -134,3 +135,27 @@ async def test_import_sort_order_out_of_range_rejected() -> None:
     assert summary.imported == 0
     assert any(e.code == "VALIDATION" for e in summary.errors)
     assert repo.created == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": "\x0b评估专员", "code": "a"},  # name 含垂直制表（0x0b）
+        {"name": "ok", "code": "a\x00b"},  # code 含 NUL（0x00）
+    ],
+)
+async def test_post_create_rejects_control_char(payload: dict[str, str]) -> None:
+    # L1 入口防御（对抗审查 R5 存储型 DoS）：含 openpyxl 非法控制字符的 name/code → PostCreate 拒绝。
+    # 防止其进库后让 ``GET /posts/export`` 整表导出对全体永久 500。reader 逐行用 PostCreate 校验，
+    # 故导入路径同受此拦截（坏行 → VALIDATION RowError）。注：正常 xlsx 通道无法注入这些字符
+    # （openpyxl 写时即拒），真实注入需 create JSON `` 或手构 OOXML `_x000B_`，故此处直测 schema。
+    with pytest.raises(ValidationError):
+        PostCreate(name=payload["name"], code=payload["code"])
+
+
+async def test_post_create_rejects_noncharacter() -> None:
+    # U+FFFE/U+FFFF 非字符能过控制字符正则，但进库后让导出生成损坏 .xlsx（对抗审查 R5 skeptic 扩面）→
+    # L1 同源拒绝（chr() 构造，避免源码含字面非字符）。
+    for nonchar in (chr(0xFFFE), chr(0xFFFF)):
+        with pytest.raises(ValidationError):
+            PostCreate(name=nonchar + "x", code="ok")

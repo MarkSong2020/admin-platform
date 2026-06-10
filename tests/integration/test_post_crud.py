@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -314,3 +315,33 @@ async def test_excel_import_db_duplicate_no_write(client: AsyncClient) -> None:
     assert any(e["code"] == "DB_DUPLICATE" for e in body["errors"])
     # 库内仍只有预建的 eng（未写新行）
     assert (await client.get("/api/v1/posts")).json()["total"] == 1
+
+
+def _audit_actions(caplog: pytest.LogCaptureFixture, *, status: str) -> list[str]:
+    """取审计事件 action（按结果状态过滤）——审计经 admin_platform.audit logger 发 audit_event。"""
+    actions: list[str] = []
+    for record in caplog.records:
+        event = getattr(record, "audit_event", None)
+        if event is not None and event["result"]["status"] == status:
+            actions.append(event["action"])
+    return actions
+
+
+async def test_excel_import_export_emit_audit(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # 导入/导出是数据进出取证点（导出=数据外泄取证）——须各 emit 一条成功审计（对抗审查 R5 补盲区：
+    # 新增的 export audited_write 此前零测试断言）。
+    content = ExcelExporter(POST_EXCEL_COLUMNS).write(
+        [{"name": "工程师", "code": "eng", "sort_order": 1, "status": "active"}]
+    )
+    with caplog.at_level(logging.INFO, logger="admin_platform.audit"):
+        imp = await client.post(
+            "/api/v1/posts/import", files={"upload": ("p.xlsx", content, _XLSX_MEDIA)}
+        )
+        assert imp.status_code == 200, imp.text
+        exp = await client.get("/api/v1/posts/export")
+        assert exp.status_code == 200
+    actions = _audit_actions(caplog, status="success")
+    assert "system:post:import" in actions
+    assert "system:post:export" in actions

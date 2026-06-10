@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import zipfile
 from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
@@ -138,5 +139,74 @@ def test_writer_normal_value_not_escaped() -> None:
 def test_invalid_xlsx_returns_business_error() -> None:
     # 损坏/非 xlsx 内容 → INVALID_FILE 业务错误，不冒泡 500
     result = ExcelImporter(_SampleRow, _COLUMNS).parse(b"this is not a zip/xlsx at all")
+    assert result.rows == []
+    assert any(e.code == "INVALID_FILE" for e in result.errors)
+
+
+def test_writer_escapes_newline_prefix_formula() -> None:
+    # \n 开头的公式也转义（R2 闭合第二轮发现的理论缺口）
+    content = ExcelExporter(_COLUMNS).write([{"name": "\n=1+1", "code": "x", "count": "1"}])
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet is not None
+    assert sheet.cell(row=2, column=1).data_type == "s"
+    assert sheet.cell(row=2, column=1).value == "'\n=1+1"
+
+
+def test_writer_strips_illegal_control_chars() -> None:
+    # 含 openpyxl 非法控制字符（\x0b 垂直制表）的值 → writer 剥除，导出不抛 IllegalCharacterError。
+    # 对抗审查 R5 存储型 DoS 兜底：低权限用户投毒一行即可让全表导出对所有人永久 500，writer 层剥除
+    # 让导出在结构上不可能因非法字符失败。
+    content = ExcelExporter(_COLUMNS).write([{"name": "\x0b评估专员", "code": "c1", "count": "1"}])
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet is not None
+    assert sheet.cell(row=2, column=1).value == "评估专员"  # 非法字符已剥除
+
+
+def test_writer_strips_illegal_char_then_escapes_exposed_formula() -> None:
+    # 剥除前导非法字符后若暴露出公式触发字符，仍正确转义（剥除发生在 formula 判断之前）。
+    content = ExcelExporter(_COLUMNS).write([{"name": "\x00=1+1", "code": "c", "count": "1"}])
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet is not None
+    assert sheet.cell(row=2, column=1).data_type == "s"
+    assert sheet.cell(row=2, column=1).value == "'=1+1"
+
+
+def test_valid_zip_non_xlsx_returns_business_error() -> None:
+    # 有效 zip 但非 xlsx（缺 workbook part）→ openpyxl 抛 KeyError（非 BadZipFile）→ reader 的宽
+    # ``except Exception`` 仍捕获成 INVALID_FILE，不退化 500。守护该回退：收窄到具体异常类型会漏
+    # openpyxl 对此类文件的多类拒绝异常（KeyError/OSError），此测试锁住任何收窄改动会直接红。
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("hello.txt", "not an xlsx workbook")
+    result = ExcelImporter(_SampleRow, _COLUMNS).parse(buffer.getvalue())
+    assert result.rows == []
+    assert any(e.code == "INVALID_FILE" for e in result.errors)
+
+
+def test_writer_strips_noncharacter() -> None:
+    # U+FFFE/U+FFFF 非字符不被 openpyxl ILLEGAL 集捕获（worksheet.append 不抛），却会生成损坏 .xlsx
+    # （XML 1.0 Char 上限 U+FFFD）——writer 剥除后导出文件可正常重开（对抗审查 R5 skeptic 扩面闭合）。
+    content = ExcelExporter(_COLUMNS).write(
+        [{"name": chr(0xFFFE) + "甲", "code": chr(0xFFFF) + "x1", "count": "1"}]
+    )
+    sheet = load_workbook(BytesIO(content)).active  # 能重开即未损坏
+    assert sheet is not None
+    assert sheet.cell(row=2, column=1).value == "甲"
+    assert sheet.cell(row=2, column=2).value == "x1"
+
+
+def test_reader_invalid_xml_char_in_sheet_returns_business_error() -> None:
+    # sheet XML 内含 XML 非法字符（U+FFFE 的 UTF-8 字节）→ load_workbook 成功但 iter_rows 解析抛 →
+    # reader 迭代期 except 兜底转 INVALID_FILE，不退化 500（对抗审查 R5 skeptic：此前 reader 的 except
+    # 只包 load_workbook，iter_rows 期间异常漏成 500，与 docstring「损坏 xlsx 转 INVALID_FILE」不符）。
+    good = ExcelExporter(_COLUMNS).write([{"name": "甲", "code": "x1", "count": "1"}])
+    buf_out = BytesIO()
+    with zipfile.ZipFile(BytesIO(good)) as zin, zipfile.ZipFile(buf_out, "w") as zout:
+        for item in zin.namelist():
+            data = zin.read(item)
+            if item.startswith("xl/worksheets/"):
+                data = data.replace(b"x1", b"x1\xef\xbf\xbe")  # 注入 U+FFFE（UTF-8）破坏 sheet XML
+            zout.writestr(item, data)
+    result = ExcelImporter(_SampleRow, _COLUMNS).parse(buf_out.getvalue())
     assert result.rows == []
     assert any(e.code == "INVALID_FILE" for e in result.errors)
