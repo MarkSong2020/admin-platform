@@ -109,3 +109,25 @@ class PostRepository:
         )
         result = await self._session.execute(stmt)
         return [int(i) for i in result.scalars().all()]
+
+    # ---- Excel 导入导出（P5）-------------------------------------------------
+
+    async def list_existing_codes(self, codes: list[str]) -> set[str]:
+        """返回 ``codes`` 中库内已存在的子集（导入前库内重复校验；空入参返回空集）。"""
+        if not codes:
+            return set()
+        result = await self._session.execute(select(Post.code).where(Post.code.in_(codes)))
+        return {str(c) for c in result.scalars().all()}
+
+    async def bulk_create(self, payloads: list[PostCreate]) -> int:
+        """批量插入（导入全有全无：调用方已做全量校验，此处单事务 flush）。"""
+        for payload in payloads:
+            self._session.add(Post(**payload.model_dump()))
+        await self._session.flush()
+        return len(payloads)
+
+    async def list_for_export(self, *, limit: int) -> list[Post]:
+        """全量导出（按 sort_order, id 有序；limit 用于超限检测，传 max+1）。"""
+        stmt = select(Post).order_by(Post.sort_order, Post.id).limit(limit)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())

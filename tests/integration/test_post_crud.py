@@ -32,9 +32,14 @@ from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.post.api import router as post_router
+from admin_platform.domains.post.excel import POST_EXCEL_COLUMNS
 from admin_platform.domains.post.models import Post
 from admin_platform.domains.post.repository import PostRepository
+from admin_platform.domains.post.schemas import PostCreate
 from admin_platform.domains.user.models import User
+from admin_platform.excel import ExcelExporter, ExcelImporter
+
+_XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 pytestmark = pytest.mark.integration
 
@@ -263,3 +268,49 @@ async def test_set_user_posts_concurrent_last_writer_wins(client: AsyncClient) -
         posts = await PostRepository(session).list_posts_for_user(uid)
     assert len(posts) == 1
     assert posts[0].id in {p1, p2}
+
+
+# ---- Excel 导入导出端到端往返（P5）----------------------------------------
+
+
+async def test_excel_import_export_roundtrip(client: AsyncClient) -> None:
+    content = ExcelExporter(POST_EXCEL_COLUMNS).write(
+        [
+            {"name": "工程师", "code": "eng", "sort_order": 1, "status": "active"},
+            {"name": "经理", "code": "mgr", "sort_order": 2, "status": "disabled"},
+        ]
+    )
+    res = await client.post(
+        "/api/v1/posts/import", files={"upload": ("p.xlsx", content, _XLSX_MEDIA)}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["imported"] == 2
+    assert body["errors"] == []
+    # 入库确认
+    listing = (await client.get("/api/v1/posts")).json()
+    assert {p["code"] for p in listing["items"]} == {"eng", "mgr"}
+    # 导出往返：canonical row 一致
+    exp = await client.get("/api/v1/posts/export")
+    assert exp.status_code == 200
+    assert exp.headers["content-type"].startswith("application/vnd.openxmlformats")
+    parsed = ExcelImporter(PostCreate, POST_EXCEL_COLUMNS).parse(exp.content)
+    assert {p.data.code for p in parsed.rows} == {"eng", "mgr"}
+    assert {(p.data.name, p.data.status) for p in parsed.rows} == {
+        ("工程师", "active"),
+        ("经理", "disabled"),
+    }
+
+
+async def test_excel_import_db_duplicate_no_write(client: AsyncClient) -> None:
+    await _create(client, code="eng", name="已存在")
+    content = ExcelExporter(POST_EXCEL_COLUMNS).write([{"name": "新", "code": "eng"}])
+    res = await client.post(
+        "/api/v1/posts/import", files={"upload": ("p.xlsx", content, _XLSX_MEDIA)}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["imported"] == 0  # 全有全无：库内重复 → 不写
+    assert any(e["code"] == "DB_DUPLICATE" for e in body["errors"])
+    # 库内仍只有预建的 eng（未写新行）
+    assert (await client.get("/api/v1/posts")).json()["total"] == 1

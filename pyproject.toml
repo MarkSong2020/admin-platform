@@ -23,6 +23,7 @@ dependencies = [
     "psutil>=6",
     # P4c 定时任务：APScheduler 3.x（AsyncIOScheduler + CronTrigger）；4.x 是 API 重写，pin <4。
     "apscheduler>=3.10,<4",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]

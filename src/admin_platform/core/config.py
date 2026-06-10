@@ -197,6 +197,9 @@ class Settings(BaseSettings):
     file_allowed_extensions: list[str] = Field(
         default=["pdf", "png", "jpg", "jpeg", "gif", "xlsx", "docx", "txt", "csv", "zip"]
     )
+    # P5 Excel 导入上传上限（独立于通用文件上传，默认更小）。导入端点流式累计超此即 413，
+    # 防超大 xlsx 整体读入内存 OOM（对抗审查 P0）。下限 1KB，上限 100MB。
+    excel_max_upload_size_bytes: int = Field(default=10485760, ge=1024, le=104857600)
 
     @field_validator("database_url")
     @classmethod
