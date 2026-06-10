@@ -55,7 +55,7 @@ class SeedRole:
     sort_order: int = 0
 
 
-def _resource_menu(  # noqa: PLR0913 —— 显式命名 5 个 perm 常量比位置元组清晰，config builder 可放宽
+def _resource_menu(  # noqa: PLR0913 —— 显式命名 perm 常量比位置元组清晰，config builder 可放宽
     *,
     resource: str,
     cn: str,
@@ -65,13 +65,18 @@ def _resource_menu(  # noqa: PLR0913 —— 显式命名 5 个 perm 常量比位
     add_perm: str,
     edit_perm: str,
     remove_perm: str,
+    extra_buttons: tuple[SeedMenu, ...] = (),
 ) -> SeedMenu:
-    """一个资源域的「菜单(C) + 增删改查 4 按钮(F)」标准块（对标若依 system:{resource}:*）。"""
+    """一个资源域的「菜单(C) + 增删改查 4 按钮(F)」标准块（对标若依 system:{resource}:*）。
+
+    ``extra_buttons``：超出增删改查的额外按钮（如导入/导出），追加到标准四件之后。
+    """
     buttons = (
         SeedMenu(query_perm, f"{cn}查询", "F", perms=query_perm, sort_order=1),
         SeedMenu(add_perm, f"{cn}新增", "F", perms=add_perm, sort_order=2),
         SeedMenu(edit_perm, f"{cn}修改", "F", perms=edit_perm, sort_order=3),
         SeedMenu(remove_perm, f"{cn}删除", "F", perms=remove_perm, sort_order=4),
+        *extra_buttons,
     )
     return SeedMenu(
         seed_key=f"system:{resource}",
@@ -146,6 +151,22 @@ MENU_TREE: tuple[SeedMenu, ...] = (
                 add_perm=Permissions.SYSTEM_POST_ADD,
                 edit_perm=Permissions.SYSTEM_POST_EDIT,
                 remove_perm=Permissions.SYSTEM_POST_REMOVE,
+                extra_buttons=(
+                    SeedMenu(
+                        Permissions.SYSTEM_POST_IMPORT,
+                        "岗位导入",
+                        "F",
+                        perms=Permissions.SYSTEM_POST_IMPORT,
+                        sort_order=5,
+                    ),
+                    SeedMenu(
+                        Permissions.SYSTEM_POST_EXPORT,
+                        "岗位导出",
+                        "F",
+                        perms=Permissions.SYSTEM_POST_EXPORT,
+                        sort_order=6,
+                    ),
+                ),
             ),
             _resource_menu(
                 resource="dict",

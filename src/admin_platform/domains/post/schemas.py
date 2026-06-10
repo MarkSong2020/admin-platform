@@ -21,7 +21,7 @@ class PostCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=64, description="岗位名称")
     code: str = Field(min_length=1, max_length=64, description="岗位编码（全局唯一）")
-    sort_order: int = Field(default=0, description="显示顺序")
+    sort_order: int = Field(default=0, ge=0, le=999999, description="显示顺序（防 int4 越界）")
     status: StatusValue = Field(default="active", description="岗位状态（active / disabled）")
 
 
@@ -31,7 +31,9 @@ class PostUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     name: str | None = Field(default=None, min_length=1, max_length=64, description="岗位名称")
     code: str | None = Field(default=None, min_length=1, max_length=64, description="岗位编码")
-    sort_order: int | None = Field(default=None, description="显示顺序")
+    sort_order: int | None = Field(
+        default=None, ge=0, le=999999, description="显示顺序（防 int4 越界）"
+    )
     status: StatusValue | None = Field(default=None, description="岗位状态（active / disabled）")
 
 
@@ -57,3 +59,27 @@ class PostPage(BaseModel):
     size: int
     total: int
     total_pages: int
+
+
+class PostImportRowError(BaseModel):
+    """导入行级错误（业务结果，随 200 返回——非系统错误，不走 ProblemDetail 脱敏通道）。"""
+
+    row: int = Field(description="Excel 行号（含表头，数据首行=2）")
+    column: str | None = Field(default=None, description="列头；None=整行级")
+    code: str = Field(
+        description="错误码（VALIDATION/DUPLICATE_IN_FILE/DB_DUPLICATE/MISSING_COLUMN/...）"
+    )
+    message: str = Field(description="错误说明")
+
+
+class PostImportSummary(BaseModel):
+    """Excel 导入结果（全有全无）：errors 非空则 imported=0 且未写任何行。
+
+    导入校验错误是**业务结果**（用户数据反馈），随 200 返回 errors 全量；不走 422/ProblemDetail
+    （系统错误通道，errors 受 debug 脱敏，生产看不到行级反馈）。
+    """
+
+    imported: int = Field(description="成功导入的岗位数（有错误时为 0）")
+    errors: list[PostImportRowError] = Field(
+        default_factory=list, description="全量行级错误（非空则未写入任何行）"
+    )
