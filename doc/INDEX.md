@@ -8,7 +8,7 @@
 git clone <repo> && cd admin-platform
 make init          # uv sync + pre-commit install
 make compose-up    # 起本地 Postgres（端口 5432；Redis 是 opt-in，详见 compose.yaml）
-make migrate       # 应用 Alembic 迁移（0001 baseline + 0002 users 表）
+make migrate       # 应用 Alembic 迁移（当前 head 0018；0013–0018 仅本地 dev + CI 跑过，生产迁移 gated）
 make dev           # 起 FastAPI dev server（端口 8000，hot reload）
 ```
 
@@ -16,9 +16,9 @@ make dev           # 起 FastAPI dev server（端口 8000，hot reload）
 
 1. **`GET /healthz`** → `200`（进程存活）
 2. **`GET /readyz`** → `200`（DB 可达；compose 起来后）
-3. **`GET /docs`** → OpenAPI 文档（当前是 health + 错误响应契约；认证 / 业务端点随 Task 5+ 落地）
+3. **`GET /docs`** → OpenAPI 文档（health + 错误响应契约 + 认证 / RBAC / 审计 / 字典·参数·通知 / 监控·定时任务等已落地端点）
 
-> 当前已有 auth + user CRUD（单租户）；下一步 P1 RBAC。对标路线图见 [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
+> 当前 P0–P4 全落地（auth + RBAC + 审计持久化 + 字典·参数·通知 + 监控·在线用户·定时任务，单租户），在 `hardening-r1` 分支做对抗审查修复；下一步 P5 工具 / P6 Vue 前端。对标路线图见 [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
 新建业务模块：
 
