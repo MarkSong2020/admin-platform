@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     # 下限 5s（亚秒级锁与 handler 冷启会有竞态）；上限 1h（更长就应该
     # 走 DB idempotency_keys 表，而不是 Redis 锁）。
     idempotency_lock_ttl_seconds: int = Field(default=30, ge=5, le=3600)
+    # 认证/幂等共享 Redis 客户端的 socket 超时（秒，hardening-r1 M2）：未设超时时 TCP 黑洞会让
+    # login_guard / captcha 的 ``await redis.*`` 永久挂起 —— fail-closed（异常分支）对挂起无效，
+    # 登录全量悬挂。设超时把挂起转成异常走 fail-closed。下限 0.1s（太小误杀慢网络），上限 30s。
+    redis_socket_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30)
 
     # ASGI lifespan 启动时立即 probe DB + Redis。True 时不可达依赖会让 startup
     # 失败 → uvicorn 退出 → K8s 不把 pod 标记为 ready。False（向后兼容默认）
@@ -128,10 +132,11 @@ class Settings(BaseSettings):
             "/api/v1/auth/captcha",
         ]
     )
-    # access token 存活时长（秒）。P0 只签发 access token，不做 refresh，
-    # 所以 TTL 短一点（默认 2h）以收敛失窃 token 的暴露窗口；refresh + 撤销
-    # 下放 P1（须存 jti+hash 才能撤销）。下限 60s —— 比这更短令牌还没用就过期。
-    auth_access_token_ttl_seconds: int = Field(default=7200, ge=60)
+    # access token 存活时长（秒），默认 30min（hardening-r1 E2，用户拍板 2026-06-10）。
+    # access 无状态、不可即时撤销：强制下线 / 撤权 / 停用只能等其自然过期，TTL 即「踢人后的
+    # 最长残留窗口」。refresh 轮换续期对用户无感，故短 TTL 不损体验却收敛失窃/越权窗口 4 倍
+    # （原 7200s）。即时阻断 access 需 jti denylist（列入 roadmap）。下限 60s。
+    auth_access_token_ttl_seconds: int = Field(default=1800, ge=60)
 
     # ---- P1.4 登录增强：refresh token（opaque + HMAC 落库可撤销，spec 2026-06-09）----
     # pepper：HMAC-SHA256(pepper, secret) 的密钥，独立于 auth_jwt_secret（泄露隔离）。

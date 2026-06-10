@@ -23,7 +23,7 @@ from admin_platform.core.errors import (
     AUTH_LOGIN_RATE_LIMITED,
     AppError,
 )
-from admin_platform.core.security import issue_access_token, verify_password
+from admin_platform.core.security import averify_password, issue_access_token
 from admin_platform.db.session import db_session
 from admin_platform.domains.auth import login_guard
 from admin_platform.domains.auth.captcha import generate_captcha, verify_captcha
@@ -156,11 +156,10 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
         password_hash = (
             active_user.password_hash if active_user is not None else _DUMMY_PASSWORD_HASH
         )
-        password_ok = verify_password(password, password_hash)
+        # argon2 verify 下沉线程池（M1）：不堵事件循环（dummy hash 路径同样下沉，时序仍一致）。
+        password_ok = await averify_password(password, password_hash)
 
         if active_user is None or not password_ok:
-            if redis is not None:
-                await login_guard.record_failure(redis, username=username, client_ip=client_ip)
             _emit_login_failed(username)
             failed_user_id = active_user.id if active_user is not None else None
             login_failed = True
@@ -177,6 +176,10 @@ async def login(  # noqa: PLR0913 —— 登录用例需 captcha/ip/redis 上下
 
     # 业务 session 块已退出（连接释放）。失败：块外落登录日志 + raise（审计已在块内 emit 进缓冲）。
     if login_failed:
+        # record_failure（redis 计数）移出业务事务块（M2 hardening-r1）：Redis 慢/挂时不再连带
+        # 占住 DB 连接（与 review F2 把 record_login_attempt 移出块外同口径）。
+        if redis is not None:
+            await login_guard.record_failure(redis, username=username, client_ip=client_ip)
         await record_login_attempt(
             username=username,
             status="failure",

@@ -241,20 +241,23 @@ async def test_non_superadmin_cannot_bind_role_menus() -> None:
     await dispose_engine()
 
 
-async def test_non_superadmin_can_bind_visible_dept_to_role() -> None:
-    # 边界：role-dept 是数据范围绑定（非权限图谱）→ 不收超管专属，非超管绑【可见】部门仍成功。
-    # 与上面两条共同界定「权限图谱写=超管专属 / 数据范围写=带 scope 委派」。
+async def test_non_superadmin_cannot_bind_dept_to_role() -> None:
+    # role-dept 是【全局角色】的数据范围写，hardening-r1 E1 收超管专属（用户拍板 2026-06-10）：
+    # 非超管持 system:role:edit 也不得绑——防把辖区部门扩散给任意角色持有人 → 403 FORBIDDEN_BY_ROLE，
+    # 先于可见性/存在性校验（与 user-role / role-menu 同口径）。
     ids = await _seed()
     async with _client(_LimitedProvider(visible=frozenset({ids["d1"]})), user_id="2") as c:
-        res = await c.put(f"/api/v1/roles/{ids['r1']}/depts", json={"dept_ids": [ids["d1"]]})
-        assert res.status_code == 200, res.text
-        assert res.json()["ids"] == [ids["d1"]]
+        # 绑可见 d1 / 不可见 d2 一律 403 ROLE（写权先被超管 gate 拦下，不再分 SCOPE）。
+        for dept in (ids["d1"], ids["d2"]):
+            res = await c.put(f"/api/v1/roles/{ids['r1']}/depts", json={"dept_ids": [dept]})
+            assert res.status_code == 403
+            assert res.json()["type"] == "auth.FORBIDDEN_BY_ROLE"
     await dispose_engine()
 
 
-async def test_non_superadmin_cannot_wipe_invisible_dept_binding() -> None:
-    # Round-3 写侧对称：超管把 r1 绑 d1+d2；非超管(仅见 d1) PUT [d1] 想全量替换会静默清除不可见的
-    # d2 绑定（scoped operator 篡改范围外数据）→ 应 403，与读侧 403 对称（既有绑定含不可见 → 超管专属）。
+async def test_role_dept_write_superadmin_only_preserves_existing() -> None:
+    # E1 收超管专属后，非超管 PUT 直接 403 ROLE（写被拒）→ 既有 d1+d2 绑定不被全量替换清除（数据
+    # 完整）；读侧非超管含不可见 d2 仍 403 SCOPE（读侧委派对称保留）。超管核验绑定未变。
     ids = await _seed()
     async with _client(_SuperProvider()) as c:
         assert (
@@ -266,26 +269,14 @@ async def test_non_superadmin_cannot_wipe_invisible_dept_binding() -> None:
     async with _client(_LimitedProvider(visible=frozenset({ids["d1"]})), user_id="2") as c:
         res = await c.put(f"/api/v1/roles/{ids['r1']}/depts", json={"dept_ids": [ids["d1"]]})
         assert res.status_code == 403
-        assert res.json()["type"] == "auth.FORBIDDEN_BY_SCOPE"
-        # 既有 d1+d2 绑定未被清除（写被拒，数据完整）。
-        got = await c.get(f"/api/v1/roles/{ids['r1']}/depts")
-        # 非超管读该角色（含不可见 d2）→ 读侧 403（对称），改用超管核验未被清除。
-        assert got.status_code == 403
+        assert res.json()["type"] == "auth.FORBIDDEN_BY_ROLE"
+        # 读侧：非超管读含不可见 d2 的绑定 → 403 SCOPE（读侧委派对称保留）。
+        assert (await c.get(f"/api/v1/roles/{ids['r1']}/depts")).status_code == 403
     async with _client(_SuperProvider()) as c:
         assert set((await c.get(f"/api/v1/roles/{ids['r1']}/depts")).json()["ids"]) == {
             ids["d1"],
             ids["d2"],
         }
-    await dispose_engine()
-
-
-async def test_non_superadmin_cannot_bind_invisible_dept_to_role() -> None:
-    ids = await _seed()
-    # 非超管只可见 d1；给角色绑 d2（不可见）→ 403 FORBIDDEN_BY_SCOPE。
-    async with _client(_LimitedProvider(visible=frozenset({ids["d1"]})), user_id="2") as c:
-        res = await c.put(f"/api/v1/roles/{ids['r1']}/depts", json={"dept_ids": [ids["d2"]]})
-        assert res.status_code == 403
-        assert res.json()["type"] == "auth.FORBIDDEN_BY_SCOPE"
     await dispose_engine()
 
 

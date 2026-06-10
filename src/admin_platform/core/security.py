@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
+import anyio.to_thread
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -74,6 +75,22 @@ def verify_password(password: str, password_hash: str) -> bool:
         # 存量 hash 损坏 / 非 argon2 格式 / 被篡改 —— 返 False，但记脱敏 warning 供告警。
         logger.warning("verify_password: 存量 hash 无法校验（损坏或格式不支持）")
         return False
+
+
+# ---- argon2 异步包装（M1 hardening-r1）----
+# argon2id 是阻塞 CPU（默认 m=64MiB/t=3/p=4，单次数十 ms）。直接在 async 登录/建用户路径同步
+# 调用会卡住事件循环（所有并发请求、健康检查、调度 tick 一起排队）。下沉线程池（argon2-cffi
+# 计算期释放 GIL，线程下沉真实有效），与 monitor/collector.py 对 psutil 阻塞调用同一纪律。
+
+
+async def averify_password(password: str, password_hash: str) -> bool:
+    """``verify_password`` 的异步包装：下沉线程池，不堵事件循环。"""
+    return await anyio.to_thread.run_sync(verify_password, password, password_hash)
+
+
+async def ahash_password(password: str) -> str:
+    """``hash_password`` 的异步包装：下沉线程池，不堵事件循环。"""
+    return await anyio.to_thread.run_sync(hash_password, password)
 
 
 # ---- access token 签发 ----
