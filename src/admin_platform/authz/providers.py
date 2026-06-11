@@ -10,7 +10,24 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from admin_platform.authz.scope import DataScope
+from admin_platform.authz.scope import DataScope, ScopeType
+
+
+@dataclass(frozen=True)
+class AuthzContext:
+    """``require_permission`` 单次加载的授权快照——合并 is_active / is_super_admin / permissions /
+    data_scope，让每请求只借**一个** DB 连接（对抗审查 P1-A 根治）。
+
+    原 ``_dep`` 是同步依赖（跑 anyio 线程池），逐个调 4 个 ``a_*`` 方法、每个经 ``from_thread`` 桥回
+    宿主 loop 且各开独立 ``db_session()`` → 每请求 2-4 连接借用 + 线程池(默认 40) > 连接池(15) 时
+    高并发耗尽 / 级联阻塞。改为 ``_dep`` async 一次 ``await a_load_authz_context`` → 单 session
+    合并查询、零线程桥。``_dep`` 据本快照做短路决策与审计（审计留在 core 层，不下沉 provider）。
+    """
+
+    is_active: bool
+    is_super_admin: bool
+    permissions: frozenset[str]
+    data_scope: DataScope
 
 
 @dataclass(frozen=True)
@@ -96,6 +113,21 @@ class PermissionProvider(ABC):
 
     async def a_get_effective_data_scope(self, user_id: int) -> DataScope:
         return self.get_effective_data_scope(user_id)
+
+    async def a_load_authz_context(self, user_id: int) -> AuthzContext:
+        """单次加载授权快照（``require_permission`` 用）。默认组合 ``a_*`` 方法——内存 stub 走此，无需
+        单 session 优化；``DbPermissionProvider`` 覆盖做单 session 合并查询。按短路顺序：停用 → 直接
+        返回（不查 permissions/scope）；超管 → 不查 permissions/scope（短路用 ALL 范围）。
+        """
+        if not await self.a_get_is_active(user_id):
+            return AuthzContext(
+                False, False, frozenset(), DataScope(ScopeType.SELF, user_id=user_id)
+            )
+        if await self.a_get_is_super_admin(user_id):
+            return AuthzContext(True, True, frozenset(), DataScope(ScopeType.ALL, user_id=user_id))
+        permissions = await self.a_get_user_permissions(user_id)
+        data_scope = await self.a_get_effective_data_scope(user_id)
+        return AuthzContext(True, False, permissions, data_scope)
 
     @abstractmethod
     def invalidate_user(self, user_id: int) -> None:

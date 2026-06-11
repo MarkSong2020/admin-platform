@@ -12,7 +12,7 @@ data_scope（视作 ALL 范围）；但**不绕过**登录（``require_current_u
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from http import HTTPStatus
 from typing import Annotated
@@ -57,7 +57,7 @@ def get_menu_provider() -> MenuProvider:
     raise RuntimeError("MenuProvider 未接线（待组合根注入 DbMenuProvider）")
 
 
-def require_permission(perm: str) -> Callable[..., CurrentUser]:
+def require_permission(perm: str) -> Callable[..., Awaitable[CurrentUser]]:
     """产出校验权限点 ``perm`` 的 FastAPI 依赖（默认 deny）。
 
     用法（守卫端点 + 注入填充后的 user）::
@@ -92,16 +92,21 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
             )
         )
 
-    def _dep(
+    async def _dep(
         base_user: Annotated[CurrentUser, Depends(require_current_user)],
         provider: Annotated[PermissionProvider, Depends(get_permission_provider)],
     ) -> CurrentUser:
         user_id = int(base_user.user_id)
 
-        # 账号状态请求期校验（spec §2.3「不绕过账号状态」+ Codex 深审）：持有效 token 但账号
-        # 停用（status != active）即使是超管 / 有角色也一律 403——放在超管短路之前，停用账号
-        # 不享任何短路。get_is_active 默认 True（内存 stub），真实 DbPermissionProvider 查 DB。
-        if not provider.get_is_active(user_id):
+        # 对抗审查 P1-A 根治：单次 ``await`` 合并加载授权快照（is_active / is_super_admin /
+        # permissions / data_scope）。本依赖改 async（不再跑 anyio 线程池），provider 单 session 一次
+        # 往返——替代原先逐个调 4 个 ``get_*`` 同步方法、每个经 from_thread 桥 + 独立 db_session（每请求
+        # 2-4 连接借用，线程池 > 连接池时高并发耗尽）。决策与审计仍在本层（短路语义、emit 留 core）。
+        ctx = await provider.a_load_authz_context(user_id)
+
+        # 账号状态请求期校验（spec §2.3「不绕过账号状态」+ Codex 深审）：持有效 token 但账号停用
+        # 即使是超管 / 有角色也一律 403——快照按短路顺序构建，停用账号不享任何短路。
+        if not ctx.is_active:
             _emit_denied(user_id, AUTH_ACCOUNT_DISABLED)
             raise AppError(
                 code=AUTH_ACCOUNT_DISABLED,
@@ -111,7 +116,7 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
             )
 
         # 超管短路：覆盖 RBAC + data_scope（ALL 范围）；登录已由 require_current_user 保证。
-        if provider.get_is_super_admin(user_id):
+        if ctx.is_super_admin:
             return replace(
                 base_user,
                 is_super_admin=True,
@@ -119,8 +124,7 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
             )
 
         # 默认 deny：未显式拥有该权限点即拒绝。
-        permissions = provider.get_user_permissions(user_id)
-        if perm not in permissions:
+        if perm not in ctx.permissions:
             _emit_denied(user_id, AUTH_FORBIDDEN_BY_ROLE)
             raise AppError(
                 code=AUTH_FORBIDDEN_BY_ROLE,
@@ -129,13 +133,12 @@ def require_permission(perm: str) -> Callable[..., CurrentUser]:
                 status_code=int(HTTPStatus.FORBIDDEN),
             )
 
-        data_scope = provider.get_effective_data_scope(user_id)
         return replace(
             base_user,
             is_super_admin=False,
-            permissions=permissions,
-            dept_id=data_scope.dept_id,
-            data_scope=data_scope,
+            permissions=ctx.permissions,
+            dept_id=ctx.data_scope.dept_id,
+            data_scope=ctx.data_scope,
         )
 
     return _dep
