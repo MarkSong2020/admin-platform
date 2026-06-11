@@ -35,7 +35,9 @@
 | P4c 定时任务：APScheduler + PG leader election + DB execution claim（多 worker 红线）+ handler registry 白名单（防 RCE）+ 手动触发 + 执行日志 | ✓ |
 | P5 文件管理：对标 RuoYi sys_oss（StorageBackend 抽象 + LocalFileStorage / 零新依赖 / 扩展名白名单 + 魔数校验 + 流式 + 软删 + commit 后物理删） | ✓ |
 | P5 Excel 导入导出：通用 `admin_platform/excel/`（reader/writer/schemas 零 domain 知识 + import-linter C10 叶子契约）+ post 绑定（import/export 2 端点 + formula injection 防御 + 一步全有全无 + 全量错误）+ openpyxl 3.1.5 | ✓ |
-| P5 工具（**codegen 砍除（AI 时代）** / 文件管理✓ / Excel 导入导出✓）/ P6 Vue 前端 | 进行中 |
+| P5 工具（**codegen 砍除（AI 时代）** / 文件管理✓ / Excel 导入导出✓） | ✓ |
+| P6.0 前端工程基线：create-vue 脚手架（Vue3.5+TS strict+Vite8+Pinia+Router5）+ openapi-fetch 类型化 client / transport（blob/multipart/RFC9457）/ session（single-flight refresh + emitter）三件套 + 动态路由+seed 覆盖契约 + dependency-cruiser 分层机检 + CI 6 门 + pre-commit 提交门 | ✓ |
+| P6.1+ 前端页面：登录闭环 / RBAC 五页 / 运营监控 / 文件 Excel | 进行中 |
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位**已废弃**，回归单租户对标 RuoYi。多租户拆除背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md)（废弃说明）+ roadmap §3「单租户回归重构」。
 
