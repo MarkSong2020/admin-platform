@@ -193,7 +193,7 @@ main.ts 挂载前 bootstrap():
 
 | 切片 | 范围 | 可验证目标 |
 |---|---|---|
-| **P6.0** | 工程基线 **+ 高风险前置 spike** | 脚手架 + 全 CI 门 + 本地提交门 + `dump_openapi.py` + openapi 类型生成 + 登录页壳 + `session.ts` + auth/permission store。**必测**：① 全 seed 页面组件覆盖（前端读 `seed_page_components.json`，规范化大小写精确）② 壳组件 allowlist ③ blob 下载 wrapper ④ multipart 上传 wrapper ⑤ **session single-flight + 失效 typed error + 分层负向** → `lint && typecheck && test:unit && build && depcruise && openapi-drift（DB-free）` 全绿 |
+| **P6.0 ✓ 已落地** | 工程基线 **+ 高风险前置 spike** | 脚手架 + 全 CI 门 + 本地提交门 + `dump_openapi.py` + openapi 类型生成 + 登录页壳 + `session.ts` + auth/permission store。**必测**：① 全 seed 页面组件覆盖（前端读 `seed_page_components.json`，规范化大小写精确）② 壳组件 allowlist ③ blob 下载 wrapper ④ multipart 上传 wrapper ⑤ **session single-flight + 失效 typed error + 分层负向** → `lint && typecheck && test:unit && build && depcruise && openapi-drift（DB-free）` 全绿 |
 | **P6.1** | 登录闭环 | 登录 + 验证码 + getInfo/getRouters + bootstrap 时序 + Layout/Sidebar/Breadcrumb + v-hasPermi → E2E：刷新深链、401 静默续期、refresh 失败跳登录、登录缺 refresh fail fast、按钮权限显隐 |
 | **P6.2** | RBAC 五页 | 用户/角色/菜单/部门/岗位 CRUD → 每页 E2E；按钮级权限隐藏可验证 |
 | **P6.3** | 运营/监控 | 字典/参数/通知（不渲染 raw HTML）+ 操作/登录日志 + 在线用户/服务缓存监控/定时任务 |
