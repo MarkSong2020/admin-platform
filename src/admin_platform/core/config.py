@@ -8,13 +8,17 @@ Errata #4 —— 官方源优先级（init kwargs > env > .env > secrets > defau
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
+
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+Environment = Literal["local", "dev", "staging", "production"]
 
 # 允许的 URL scheme。``database_url`` / ``redis_url`` 类型保持 ``str`` 而不是
 # 换成 Pydantic 的 URL 类型，这样下游消费方（``create_async_engine`` /
@@ -44,6 +48,11 @@ _ALLOWED_JWT_ALGORITHMS = (
     "ES512",
 )
 
+# API 业务路由挂载根。若 auth_public_paths 含它的前缀祖先（``/`` / ``/api`` / ``/api/v1``），
+# AuthMiddleware 会对整个命名空间放行（is_public_path 是前缀匹配），auth_enabled=True 形同虚设。
+# 生产门禁据此拒绝命名空间遮蔽的宽前缀（Codex PK P1.2）。具体公开端点（``/api/v1/auth/login``）不受影响。
+_API_ROOT_PREFIX = "/api/v1"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -61,6 +70,10 @@ class Settings(BaseSettings):
     # 权威注册表与命名规则。
     # README 的 sed-rename 流程克隆模板时会和包名一起替换这个值。
     service_id: str = "admin_platform"
+    # 部署环境标识。默认 "local"（保持现有零强制行为，不破坏本地/CI）。设为 "production"
+    # 时触发 ``_enforce_production_safety`` 生产门禁：auth / debug / pepper 必须就位才放行启动，
+    # 防「忘开鉴权 / 漏关 debug / 空 pepper」的脚手架默认值裸奔到生产。
+    environment: Environment = "local"
     debug: bool = False
     # 用 Literal 约束 —— Pydantic 在 Settings 构造时就拒掉 typo（如
     # APP_LOG_LEVEL=INOF），不会推迟到后面 configure_logging() 才报错。
@@ -249,6 +262,48 @@ class Settings(BaseSettings):
                     f"auth_jwt_secret 长度 {len(self.auth_jwt_secret)} < {min_len} "
                     f"(HS* 算法要求至少 {min_len} bytes, RFC 7518 §3.2)"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_production_safety(self) -> Self:
+        # environment=production 生产门禁：脚手架默认值（auth 关、debug、空 pepper）对内网/本地无害，
+        # 但裸奔到生产即高危。这里在 Settings 构造时 fail-fast，把「忘配安全项」从运行期事故提前到
+        # 启动期拒绝。**本 validator 检查的致命项**一次性收齐再抛（运维一眼看全本层缺项）；注意空
+        # auth_jwt_secret 由前序 _validate_auth_secret_when_enabled 单独先抛，不与此处聚合（强制
+        # auth_enabled=True 会连带触发它）——故空 secret + 本层缺项可能分两次暴露（Codex PK Risk#5 诚实标注）。
+        if self.environment != "production":
+            return self
+        violations: list[str] = []
+        if not self.auth_enabled:
+            violations.append("auth_enabled 必须为 True（生产不允许关闭鉴权）")
+        if self.debug:
+            violations.append("debug 必须为 False（生产不允许暴露调试细节/堆栈）")
+        if not self.auth_refresh_token_pepper:
+            violations.append("auth_refresh_token_pepper 不能为空（refresh token 签发/校验依赖它）")
+        # 命名空间遮蔽：public path 是 API 根的前缀祖先时，AuthMiddleware 对整个 /api/v1 放行。
+        shadowing = [
+            p
+            for p in self.auth_public_paths
+            if (_API_ROOT_PREFIX + "/").startswith(p.rstrip("/") + "/")
+        ]
+        if shadowing:
+            violations.append(
+                f"auth_public_paths 含命名空间宽前缀 {shadowing}，会让 AuthMiddleware 对 "
+                f"{_API_ROOT_PREFIX} 全量免鉴权放行；只列具体公开端点（如 {_API_ROOT_PREFIX}/auth/login）"
+            )
+        if violations:
+            raise ValueError("environment=production 安全门禁未通过: " + "; ".join(violations))
+        # 建议项：缺失不阻断启动（合法部署可能有外部探活/反代承担），仅告警留痕。
+        if not self.startup_eager_connect:
+            logger.warning(
+                "生产建议设 APP_STARTUP_EAGER_CONNECT=true：依赖不可达时 startup fail-fast，"
+                "避免 pod 被标记 ready 后才在首个请求暴露故障。"
+            )
+        if not self.auth_login_guard_enabled:
+            logger.warning(
+                "生产建议设 APP_AUTH_LOGIN_GUARD_ENABLED=true 并配 Redis：开启登录验证码 + 失败限流，"
+                "缺失时登录端点无暴力破解防护。"
+            )
         return self
 
 
