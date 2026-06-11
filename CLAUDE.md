@@ -18,7 +18,7 @@
 
 ## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 监控/任务 + P5 文件管理/Excel 导入导出已落地）
 
-`make check` 621 ✓ / `make test-integration` 207 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
+`make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
 
 **进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 

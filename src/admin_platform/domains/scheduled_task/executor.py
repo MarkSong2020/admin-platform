@@ -34,6 +34,9 @@ _ERR_MSG_MAX = 1024
 _SUMMARY_MAX = 1024
 # 孤儿 running 兜底：无 timeout_seconds 的任务，超过此秒数的 running 视为崩溃遗留、不计入并发判定。
 _DEFAULT_STALE_SECONDS = 3600
+# manual 手动触发经同步 HTTP 执行，长占请求连接/事务（schedule 后台触发不占）：manual 路径强制
+# 兜底超时上限，最长 5min；task.timeout_seconds=None（不设）时也兜底，schedule 仍用任务级值（可至 86400）。
+_MANUAL_RUN_MAX_TIMEOUT = 300
 
 # F6：执行日志脱敏兜底——error_message / result_summary 可能含 handler 异常里的连接串/密钥
 # （admin-only 日志，但 handler registry 是扩展点，纵深防御屏蔽常见敏感模式胜过裸写）。
@@ -84,8 +87,15 @@ class TaskExecutor:
         if skipped:
             return ExecutionOutcome(execution_id=execution_id, status="skipped", log_id=log_id)
 
+        # manual 触发同步占 HTTP 连接/请求事务 → 施加兜底上限（最长 5min）；schedule 后台触发
+        # 不占连接，沿用任务级 timeout_seconds。
+        effective_timeout = timeout_seconds
+        if trigger_type == "manual":
+            effective_timeout = min(
+                timeout_seconds or _MANUAL_RUN_MAX_TIMEOUT, _MANUAL_RUN_MAX_TIMEOUT
+            )
         status, error_code, error_message, result_summary = await self._invoke(
-            handler_key, params, timeout_seconds
+            handler_key, params, effective_timeout
         )
         await self._finish(log_id, task_id, status, error_code, error_message, result_summary)
         return ExecutionOutcome(execution_id=execution_id, status=status, log_id=log_id)
