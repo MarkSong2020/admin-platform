@@ -1,0 +1,17 @@
+[
+  "monitor/cache/index",
+  "monitor/job/index",
+  "monitor/logininfor/index",
+  "monitor/online/index",
+  "monitor/operlog/index",
+  "monitor/server/index",
+  "system/config/index",
+  "system/dept/index",
+  "system/dict/index",
+  "system/file/index",
+  "system/menu/index",
+  "system/notice/index",
+  "system/post/index",
+  "system/role/index",
+  "system/user/index"
+]
