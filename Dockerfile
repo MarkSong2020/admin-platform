@@ -30,6 +30,13 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
+# 本镜像是**生产产物**：默认激活 core.config 生产门禁（Settings._enforce_production_safety）。
+# 缺 auth_enabled / 空 pepper / debug=true 等不安全配置时 startup 直接 fail-fast，不让脚手架默认值
+# 裸奔到生产（Codex PK P1.1：门禁开关本身不能可漏配）。本地 dev / CI 不跑此镜像（host 直跑
+# uvicorn / pytest，APP_ENVIRONMENT 未设 → 默认 local）；如需用本镜像跑非生产，显式覆盖
+# APP_ENVIRONMENT=local。
+ENV APP_ENVIRONMENT=production
+
 # tini is PID 1 — it reaps zombie processes (single-worker uvicorn doesn't
 # fork, but any future shell-out / background subprocess would orphan
 # otherwise) and forwards SIGTERM/SIGINT cleanly to the ASGI app for K8s
