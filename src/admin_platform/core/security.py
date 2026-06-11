@@ -73,6 +73,10 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False  # 正常的密码不匹配
     except VerificationError, InvalidHashError:
         # 存量 hash 损坏 / 非 argon2 格式 / 被篡改 —— 返 False，但记脱敏 warning 供告警。
+        # 消歧（对抗审查 P2）：上面 ``except A, B:`` 是 PEP 758（Python 3.14+）的**无括号多异常捕获**，
+        # 捕获 VerificationError 与 InvalidHashError 两类——**非** Python-2 的 ``except E, var:``（把异常
+        # 绑定到名字 var），二者字面同形易误读。ruff format 在 3.14 下强制此无括号风格（加括号会被改回），
+        # 故以注释消歧而非改语法。InvalidHashError 不是 VerificationError 子类，两类都须显式列出。
         logger.warning("verify_password: 存量 hash 无法校验（损坏或格式不支持）")
         return False
 
