@@ -3,8 +3,8 @@
 > 单租户后台管理脚手架（对标 RuoYi / 若依）。FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest。
 > 派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 
-**当前阶段：P1 RBAC + 登录增强已落地，P1.5 安全加固中**（应用版本 `v0.0.1`）。对标 RuoYi（若依）的
-单租户后台管理脚手架，已有 JWT 认证 + RBAC（部门/角色/菜单/岗位 + 数据权限）+ 登录增强；后续长出审计 / 字典 / 前端。
+**当前阶段：P0–P5 全落地（认证 / RBAC / 审计 / 运营配置 / 监控与定时任务 / 文件与 Excel），下一步 P6 Vue 前端**（应用版本 `v0.0.1`）。对标 RuoYi（若依）的
+单租户后台管理脚手架：JWT 认证 + RBAC（部门/角色/菜单/岗位 + 数据权限）+ 审计持久化 + 字典/参数/通知 + 服务/缓存监控 + 定时任务 + 文件管理 + Excel 导入导出。
 
 ---
 
@@ -36,10 +36,10 @@ make new-module name=product with-model=1     # 含 ORM model
 
 generator 细节与 domain 五层蓝本 → [`doc/standards/CODE_GENERATOR.md`](./doc/standards/CODE_GENERATOR.md)
 
-## 🎯 当前状态（v0.0.1 — P1 RBAC + 登录增强已落地，对标 RuoYi）
+## 🎯 当前状态（v0.0.1 — P0–P5 全落地，对标 RuoYi）
 
-- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 378 ✓ / `make coverage` 门槛 85%
-- **进度**：JWT 认证 + Argon2 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归 ✓；P1 RBAC（部门/角色/菜单/岗位 + RuoYi 数据权限 + getInfo/getRouters + audit_event.v1）✓；P1.4 登录增强（refresh 轮换/验证码/限流）✓；进行中 P1.5 安全加固
+- **Python 3.14**（`requires-python = ">=3.14"`）+ **测试**：`make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%。注意：`make coverage` 是 **fast-lane**（单测 + API，DB-free），refresh 轮换 / 定时任务调度 / RBAC 绑定 / repository 等 DB·Redis-bound 路径的覆盖在 `make test-integration`（需 docker compose），不在 fast-lane 门槛内
+- **进度**：JWT + Argon2 + user 五层 CRUD + CLI 建超管 ✓；P0.9 单租户回归 ✓；P1 RBAC（部门/角色/菜单/岗位 + RuoYi 数据权限 + getInfo/getRouters + audit_event.v1）✓；P1.4 登录增强（refresh 轮换/验证码/限流）✓；P1.5 安全加固 ✓；P2 审计持久化（audit_events + login_logs + operlog/logininfor 查询）✓；P3 字典/参数/通知 ✓；P4 服务·缓存监控 + 在线用户 + 定时任务（APScheduler + PG leader election + DB claim + handler 白名单）✓；P5 文件管理（对标 sys_oss）+ Excel 导入导出 ✓；下一步 P6 Vue 前端
 - **对标路线图** → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)（RuoYi 功能矩阵 + 分阶段）
 - **方向变更**：原 SaaS 多租户定位已废弃（2026-06-05），回归单租户。背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md) 废弃说明
 - **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）→ [`CHANGELOG.md`](./CHANGELOG.md)
