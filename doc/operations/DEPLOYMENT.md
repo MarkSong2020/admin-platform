@@ -58,6 +58,7 @@ readinessProbe:
 
 | 项 | env | 注意 |
 |---|---|---|
+| `APP_ENVIRONMENT` | `production` | **门禁总开关**。设 `production` 触发 `core.config` 生产门禁：缺 `auth_enabled` / 空 pepper / `debug=true` / `auth_public_paths` 含命名空间宽前缀（`/api` 等）→ startup fail-fast。**生产镜像 Dockerfile 已默认 `production`**；本地 / CI 不跑镜像（host 直跑 → 默认 `local`）。如用本镜像跑非生产须显式覆盖 `local` |
 | `APP_DATABASE_URL` | `postgresql+asyncpg://USER:PASS@HOST:5432/DB` | **绝不**用默认值 `app:app@localhost`；生产走 secret 注入 |
 | `APP_REDIS_URL` | `redis://...:6379/0` | idempotency 用；不可达时降级，但金额场景应监控 Redis 健康 |
 | `APP_DEBUG` | `False` | **绝不**在生产 / staging 设 True（会让错误响应填诊断信息）|
@@ -96,7 +97,7 @@ readinessProbe:
 |---|---|---|---|
 | Redis socket 超时 | `APP_REDIS_SOCKET_TIMEOUT_SECONDS` | `2.0` | idempotency / 缓存监控 / 在线用户派生用；不可达时降级，超时过大会拖慢请求 |
 
-> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0018**；其中 `0013–0018`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。
+> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0019**；其中 `0013–0019`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复 / P5 文件管理）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。
 
 ## 资源 sizing 建议
 
@@ -246,6 +247,7 @@ CI/CD 平台由业务团队按 ADR 决议自选（阿里云效 / Jenkins / GitLa
 - [ ] `APP_AUTH_JWT_SECRET` ≥ 32 字节、`APP_AUTH_REFRESH_TOKEN_PEPPER` 非空（均经 secret 注入，不入仓）
 - [ ] `APP_AUTH_LOGIN_GUARD_ENABLED=true`（生产；验证码 + 登录限流）
 - [ ] `APP_AUDIT_TRUST_X_FORWARDED_FOR` 仅在可信反代覆盖 XFF 时开
+- [ ] **【硬要求】pod 端口（8000）仅 ingress / 可信反代可达（NetworkPolicy 隔离）**。Dockerfile 的 `uvicorn --proxy-headers --forwarded-allow-ips *` 让 `request.client.host` 取自 `X-Forwarded-For` —— 登录失败限流（`APP_AUTH_LOGIN_IP_LIMIT`）与审计 IP 均依赖它。**若 pod 端口被直连绕过 ingress，客户端可伪造 XFF 污染审计并按伪造 IP 分桶绕过限流**（`APP_AUDIT_TRUST_X_FORWARDED_FOR=false` 仅控制 app 层是否二次解析 XFF，**挡不住** uvicorn 层已信任的代理头）。生产强约束：要么 NetworkPolicy 锁端口，要么把 `--forwarded-allow-ips` 收窄为可信反代 CIDR（排期：统一 IP 取值 helper + CIDR 注入，见 Codex PK P1.3）
 - [ ] `APP_IDEMPOTENCY_LOCK_TTL_SECONDS` ≥ **最慢业务 handler 实际耗时 + 上游重试窗口**（v0.4.9+；默认 30s 适用于秒级 POST。若业务 handler 可达数十秒、外网回调或上游 60s 重试，必须显式调高，否则锁过期后并发重试会绕过 in-flight 保护造成**重复扣款 / 重复创单**。验证：以 P99 handler 延迟为基线，乘以 1.5 ~ 2 倍。）
 
 ## 排障

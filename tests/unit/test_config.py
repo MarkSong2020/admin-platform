@@ -195,3 +195,98 @@ def test_env_example_covers_all_settings_fields() -> None:
 
     assert not missing, f".env.example missing APP_* keys for Settings fields: {sorted(missing)}"
     assert not extra, f".env.example has APP_* keys that no longer map to Settings: {sorted(extra)}"
+
+
+# ---- 生产门禁 _enforce_production_safety（hardening：脚手架默认值裸奔到生产的 fail-fast）----
+
+# environment=production 的合法基线：auth 开 + 强 secret + pepper + debug 关。
+# 各测试在此基础上单独打破一项，验证门禁逐项把关。
+_PROD_OK = {
+    "environment": "production",
+    "auth_enabled": True,
+    "auth_jwt_secret": "x" * 32,  # HS256 要求 ≥32 bytes
+    "auth_refresh_token_pepper": "prod-pepper",
+    "debug": False,
+}
+
+
+def test_environment_defaults_to_local() -> None:
+    """默认 local —— 保持现有零强制行为，不破坏本地/CI。"""
+    assert Settings().environment == "local"
+
+
+def test_non_production_does_not_enforce_safety() -> None:
+    """local/dev/staging 不触发门禁：auth 关 + debug 开 + 空 pepper 均可构造（脚手架默认即此态）。"""
+    for env in ("local", "dev", "staging"):
+        settings = Settings(environment=env, auth_enabled=False, debug=True)
+        assert settings.environment == env
+
+
+def test_production_happy_path_passes() -> None:
+    """production 全部安全项就位时正常构造。"""
+    settings = Settings(**_PROD_OK)
+    assert settings.environment == "production"
+    assert settings.auth_enabled is True
+
+
+def test_production_rejects_auth_disabled() -> None:
+    """production 关鉴权 → 启动期拒绝。"""
+    with pytest.raises(ValidationError, match="auth_enabled 必须为 True"):
+        Settings(**{**_PROD_OK, "auth_enabled": False})
+
+
+def test_production_rejects_debug_enabled() -> None:
+    """production 开 debug → 启动期拒绝（不允许暴露堆栈/调试细节）。"""
+    with pytest.raises(ValidationError, match="debug 必须为 False"):
+        Settings(**{**_PROD_OK, "debug": True})
+
+
+def test_production_rejects_empty_pepper() -> None:
+    """production 空 refresh pepper → 启动期拒绝。"""
+    with pytest.raises(ValidationError, match="auth_refresh_token_pepper 不能为空"):
+        Settings(**{**_PROD_OK, "auth_refresh_token_pepper": ""})
+
+
+def test_production_empty_secret_caught_by_existing_validator() -> None:
+    """production 强制 auth_enabled=True 会连带触发已有 secret 校验：空 secret 被 _validate_auth_secret_when_enabled 拦下。"""
+    with pytest.raises(ValidationError, match="auth_jwt_secret 不能为空"):
+        Settings(**{**_PROD_OK, "auth_jwt_secret": ""})
+
+
+def test_production_aggregates_all_violations() -> None:
+    """多项缺失一次性收齐（运维一眼看全，不用改一处重启再撞下一处）。"""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(environment="production", auth_enabled=True, auth_jwt_secret="x" * 32, debug=True)
+    message = str(exc_info.value)
+    assert "debug 必须为 False" in message
+    assert "auth_refresh_token_pepper 不能为空" in message
+
+
+def test_production_enforced_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """门禁经 APP_ENVIRONMENT=production env var 也生效（真实部署注入路径）。"""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    with pytest.raises(ValidationError, match="auth_enabled 必须为 True"):
+        Settings()
+
+
+def test_production_default_public_paths_pass() -> None:
+    """脚手架默认 auth_public_paths 全是具体端点，不触发命名空间遮蔽检查。"""
+    assert Settings(**_PROD_OK).auth_public_paths  # 默认值未被改写即通过
+
+
+@pytest.mark.parametrize("broad", ["/", "/api", "/api/v1", "/api/v1/"])
+def test_production_rejects_namespace_shadowing_public_path(broad: str) -> None:
+    """production 下 public_paths 含 /、/api、/api/v1 级宽前缀 → 拒绝（AuthMiddleware 会全量放行）。"""
+    with pytest.raises(ValidationError, match="命名空间宽前缀"):
+        Settings(**{**_PROD_OK, "auth_public_paths": ["/healthz", broad]})
+
+
+def test_production_allows_specific_public_path() -> None:
+    """具体公开端点（含 /api/v1 下的具体子路径）不被误拒——只拦命名空间级宽前缀。"""
+    settings = Settings(
+        **{
+            **_PROD_OK,
+            "auth_public_paths": ["/healthz", "/api/v1/auth/login", "/api/v1/public/ping"],
+        }
+    )
+    assert "/api/v1/public/ping" in settings.auth_public_paths
