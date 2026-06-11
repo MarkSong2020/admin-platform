@@ -17,7 +17,8 @@
     "format": "prettier --write --experimental-cli src/",
     "openapi:generate": "openapi-typescript ./openapi/admin-platform.json -o ./src/api/generated/types.ts",
     "openapi:dump": "cd .. && uv run python scripts/dump_openapi.py --output frontend/openapi/admin-platform.json",
-    "openapi-drift": "pnpm openapi:dump && pnpm openapi:generate && git -C .. diff --exit-code -- frontend/openapi/admin-platform.json frontend/src/api/generated"
+    "openapi-drift": "pnpm openapi:dump && pnpm openapi:generate && git -C .. diff --exit-code -- frontend/openapi/admin-platform.json frontend/src/api/generated",
+    "depcruise": "depcruise \"src/**/*.ts\" \"src/**/*.vue\" --config .dependency-cruiser.cjs"
   },
   "dependencies": {
     "element-plus": "^2.8.0",
