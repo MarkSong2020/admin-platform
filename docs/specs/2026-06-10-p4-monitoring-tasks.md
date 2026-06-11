@@ -62,6 +62,8 @@
 
 **非目标 / 排期**：6 字段秒级 cron；SIGKILL 后显式启动恢复（标 abandoned，已有 stale 过滤兜底不冻调度）；自动重试；独立 scheduler 进程；**stale 过滤的固有权衡**——治「孤儿冻死任务」必然重开一个等于「timeout↔实际完成」间隙的并发窗口（handler 实跑超过 `timeout_seconds` 且 `wait_for` 尚未 trip 时，`count_running` 漏算它），极小 timeout 下可能短暂违反 `allow_concurrent=False`；彻底消除需显式启动恢复（标 abandoned），留后续。
 
+**调度器自治执行不进统一审计流**（对抗审查 P1-B，2026-06-11 用户拍板「先 spec 声明边界」）：HTTP 手动触发（`POST /{task_id}/run`）经 `audited_write` emit `rbac_write` 成功审计；但**调度器后台自治触发**（`scheduler._fire`→`executor.run`，`trigger_type="schedule"` / `actor_user_id=None`）只写 `ScheduledTaskLog` 域内执行日志（对标 RuoYi `sys_job_log`，含 task_id / 状态 / started_at / 输出 / 异常），**不产生 `audit_event`**。这是有意边界：`audit_events` 是 **HTTP 操作审计流**（含 actor / IP / UA / request_id），自治执行无 HTTP 上下文、无 request session，`record_audit_committed` 在非 HTTP 下走 `append_audit_event` 缓冲、而无请求缓冲即 no-op（不落库）。合规追溯靠 `ScheduledTaskLog` 兜底（非完全不可追溯）。若后续要求自治执行也进 `audit_events`（跨域 operlog 可查自动任务），需在 `executor._finish` 后显式 `DbAuditSink().persist([event])` 落库（**不能**靠 `record_audit_committed` 的缓冲回退路径，那条在非 HTTP 下 no-op），留排期。
+
 ## 5. 权限与机检（三集合一致：registry == 路由用 == seed 菜单）
 
 | 资源 | perms | 菜单 |

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from anyio.from_thread import run as run_in_host_loop
 
-from admin_platform.authz.providers import PermissionProvider
+from admin_platform.authz.providers import AuthzContext, PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.db.session import db_session
 from admin_platform.domains.dept.repository import DeptRepository
@@ -150,6 +150,36 @@ class DbPermissionProvider(PermissionProvider):
         async with db_session() as session:
             roles = await RoleRepository(session).list_roles_for_user(user_id)
             return frozenset(r.code for r in roles)
+
+    async def a_load_authz_context(self, user_id: int) -> AuthzContext:
+        """单 session 合并加载授权快照（对抗审查 P1-A 根治）：替代 ``_dep`` 原先逐个调 4 个 ``a_*``、
+        每个 from_thread 桥 + 独立 ``db_session()`` 的每请求 2-4 连接借用。
+
+        按短路顺序复用同一 session（核心目标：每请求仅 **1** 连接 checkout，替代改前最多 4 连接）：
+        停用 / 用户不存在 → 直接 deny 快照；超管 → 不查 permissions/scope（ALL 范围）；普通用户才查
+        ``menu.perms`` 权限集 + O2 归一 data_scope。账号状态校验与 ``a_get_is_super_admin`` 同源
+        （停用超管不短路，spec §2.3）。注（对抗审查 skeptic）：普通路径 ``user.get`` 发**两次** users
+        SELECT —— repository 用 ``select().where()`` 不走 ``session.get()`` 的 identity-map 短路；但
+        同连接同事务、对象实例复用无 stale，真正零往返需 repo 切 ``session.get()``（排期，非安全项）。
+        """
+        async with db_session() as session:
+            user = await UserRepository(session).get(user_id)
+            if user is None or user.status != "active":
+                return AuthzContext(
+                    False, False, frozenset(), DataScope(ScopeType.SELF, user_id=user_id)
+                )
+            if user.is_super_admin:
+                return AuthzContext(
+                    True, True, frozenset(), DataScope(ScopeType.ALL, user_id=user_id)
+                )
+            permissions = await MenuRepository(session).list_perms_for_user(user_id)
+            data_scope = await compute_effective_data_scope(
+                user_id,
+                user_repo=UserRepository(session),
+                role_repo=RoleRepository(session),
+                dept_repo=DeptRepository(session),
+            )
+            return AuthzContext(True, False, permissions, data_scope)
 
     # ---- 失效语义（P1 无缓存，no-op；接口先冻结，P2 接 Redis 时实现）----
 
