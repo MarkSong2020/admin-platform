@@ -18,7 +18,7 @@ make dev           # 起 FastAPI dev server（端口 8000，hot reload）
 2. **`GET /readyz`** → `200`（DB 可达；compose 起来后）
 3. **`GET /docs`** → OpenAPI 文档（health + 错误响应契约 + 认证 / RBAC / 审计 / 字典·参数·通知 / 监控·定时任务等已落地端点）
 
-> 当前 P0–P4 全落地（auth + RBAC + 审计持久化 + 字典·参数·通知 + 监控·在线用户·定时任务，单租户）+ P5 文件管理已落地（对标 RuoYi sys_oss，spec [`../docs/specs/2026-06-11-p5-file-management.md`](../docs/specs/2026-06-11-p5-file-management.md)）+ P5 Excel 导入导出已落地（对标 RuoYi 导入导出，通用 `admin_platform/excel/` + post 绑定，spec [`../docs/specs/2026-06-11-p5-excel-import-export.md`](../docs/specs/2026-06-11-p5-excel-import-export.md)）；P5 范围 codegen 砍除（AI 时代），下一步 P6 Vue 前端。对标路线图见 [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
+> 当前 P0–P4 全落地（auth + RBAC + 审计持久化 + 字典·参数·通知 + 监控·在线用户·定时任务，单租户）+ P5 文件管理已落地（对标 RuoYi sys_oss，spec [`../docs/specs/2026-06-11-p5-file-management.md`](../docs/specs/2026-06-11-p5-file-management.md)）+ P5 Excel 导入导出已落地（对标 RuoYi 导入导出，通用 `admin_platform/excel/` + post 绑定，spec [`../docs/specs/2026-06-11-p5-excel-import-export.md`](../docs/specs/2026-06-11-p5-excel-import-export.md)）；P5 范围 codegen 砍除（AI 时代），下一步 P6 Vue 前端（技术栈选型与架构设计稿 v2 已出，经 Codex high 对抗 review，待落地，spec [`../docs/specs/2026-06-11-p6-frontend-design.md`](../docs/specs/2026-06-11-p6-frontend-design.md)）。对标路线图见 [`../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
 新建业务模块：
 
