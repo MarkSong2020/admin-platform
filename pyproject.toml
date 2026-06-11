@@ -98,6 +98,7 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 # ---- Pytest -----------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
