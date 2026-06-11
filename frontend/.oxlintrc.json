@@ -6,5 +6,15 @@
   },
   "categories": {
     "correctness": "error"
-  }
+  },
+  "ignorePatterns": ["src/api/generated/**", "dist/**", "dist-ssr/**"],
+  "overrides": [
+    {
+      "files": ["**/*.spec.ts", "**/*.test.ts"],
+      "rules": {
+        "vitest/require-mock-type-parameters": "off",
+        "typescript/no-non-null-asserted-optional-chain": "off"
+      }
+    }
+  ]
 }
