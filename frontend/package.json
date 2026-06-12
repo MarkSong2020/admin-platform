@@ -21,7 +21,8 @@
     "depcruise": "depcruise \"src/**/*.ts\" \"src/**/*.vue\" --config .dependency-cruiser.cjs"
   },
   "dependencies": {
-    "element-plus": "^2.8.0",
+    "@element-plus/icons-vue": "^2.3.1",
+    "element-plus": "^2.14.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.32",
     "vue-router": "^5.0.4"
