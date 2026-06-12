@@ -68,6 +68,11 @@ export function hasRefresh(): boolean {
   return !!sessionStorage.getItem(REFRESH_STORAGE_KEY)
 }
 
+/** 读当前 refresh token（logout 请求体需要；无则 null）。 */
+export function getRefreshToken(): string | null {
+  return sessionStorage.getItem(REFRESH_STORAGE_KEY)
+}
+
 export function attachAuthHeaders(headers: Headers): void {
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
 }

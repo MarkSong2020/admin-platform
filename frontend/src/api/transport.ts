@@ -29,6 +29,28 @@ export function normalizeApiError(err: unknown): SessionExpiredError | ApiError 
 }
 
 /**
+ * 已解析 body 侧归一：优先读 RFC9457 ProblemDetail 的 type/title/status/detail。
+ * 供 normalizeResponseError（自己读 body）与 openapi-fetch 调用方（body 已被 openapi-fetch 消费、
+ * 仅剩解析后的 error 对象）共用，归一化逻辑单一来源。
+ */
+export function normalizeProblemBody(
+  body: unknown,
+  fallbackStatus: number,
+  fallbackMessage = '请求失败',
+): ApiError {
+  if (body && typeof body === 'object') {
+    const pd = body as Record<string, unknown>
+    return {
+      code: typeof pd.type === 'string' ? pd.type : `HTTP_${fallbackStatus}`,
+      status: typeof pd.status === 'number' ? pd.status : fallbackStatus,
+      message: typeof pd.title === 'string' ? pd.title : fallbackMessage,
+      detail: typeof pd.detail === 'string' ? pd.detail : undefined,
+    }
+  }
+  return { code: `HTTP_${fallbackStatus}`, status: fallbackStatus, message: fallbackMessage }
+}
+
+/**
  * 非 2xx Response 侧归一：优先解析 RFC9457 ProblemDetail（spec §3.1）。
  * blob/multipart 接口失败时后端仍返回 JSON ProblemDetail，这里读出 type/title/status/detail。
  */
@@ -37,18 +59,9 @@ export async function normalizeResponseError(res: Response): Promise<ApiError> {
   try {
     body = await res.clone().json()
   } catch {
-    // 非 JSON（纯文本/空）→ 下面用 status 兜底
+    // 非 JSON（纯文本/空）→ normalizeProblemBody 用 status 兜底
   }
-  if (body && typeof body === 'object') {
-    const pd = body as Record<string, unknown>
-    return {
-      code: typeof pd.type === 'string' ? pd.type : `HTTP_${res.status}`,
-      status: typeof pd.status === 'number' ? pd.status : res.status,
-      message: typeof pd.title === 'string' ? pd.title : res.statusText || '请求失败',
-      detail: typeof pd.detail === 'string' ? pd.detail : undefined,
-    }
-  }
-  return { code: `HTTP_${res.status}`, status: res.status, message: res.statusText || '请求失败' }
+  return normalizeProblemBody(body, res.status, res.statusText || '请求失败')
 }
 
 function withTimeout(ms: number): { signal: AbortSignal; done: () => void } {
