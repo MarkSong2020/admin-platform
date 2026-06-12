@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-// See here how to get started:
-// https://playwright.dev/docs/intro
-test('visits the app root url', async ({ page }) => {
+// 未登录访问根路径 → 守卫重定向登录页（深链 redirect 回跳参数）
+test('未登录访问根路径重定向到登录页', async ({ page }) => {
   await page.goto('/')
-  await expect(page.locator('h1')).toHaveText('You did it!')
+  await expect(page).toHaveURL(/\/login\?redirect=/)
+  await expect(page.locator('.login-shell')).toContainText('登录')
 })
