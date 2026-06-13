@@ -43,6 +43,22 @@ const MENUS = [
     created_at: '',
     updated_at: '',
   },
+  // node1 的第二个子节点，未绑定 → 让 node1 处于「半选」而非全选，真正走 getHalfCheckedKeys 路径
+  {
+    id: 3,
+    name: '角色管理',
+    menu_type: 'C',
+    parent_id: 1,
+    path: 'role',
+    component: 'system/role/index',
+    perms: 'system:role:list',
+    icon: '',
+    sort_order: 1,
+    visible: true,
+    status: 'active',
+    created_at: '',
+    updated_at: '',
+  },
 ]
 
 function mountDialog() {
@@ -95,8 +111,12 @@ describe('RoleMenuDialog', () => {
     expect(setRoleMenus).toHaveBeenCalledTimes(1)
     const [roleId, ids] = vi.mocked(setRoleMenus).mock.calls[0]!
     expect(roleId).toBe(7)
-    // 已选叶子 id=2 应在提交集合内（半选父 id=1 也会随级联纳入）
+    // 已选叶子 id=2 在提交集合内
     expect(ids).toContain(2)
+    // 半选父 id=1 必须纳入（getHalfCheckedKeys），否则后端授权树丢中间目录
+    expect(ids).toContain(1)
+    // 未选的兄弟 id=3 不得纳入
+    expect(ids).not.toContain(3)
   })
 
   it('roleId 为 null 时不加载', async () => {
