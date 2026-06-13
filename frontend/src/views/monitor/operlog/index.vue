@@ -9,6 +9,7 @@ import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import OperlogDetailDialog from './components/OperlogDetailDialog.vue'
 import { listOperlog, type AuditEventRead } from '@/api/operlog'
+import { formatDateTime } from '@/utils/format'
 
 interface OperlogQuery {
   event_type?: string
@@ -28,11 +29,6 @@ const detailPk = ref<number | null>(null)
 function openDetail(row: AuditEventRead): void {
   detailPk.value = row.id
   detailVisible.value = true
-}
-
-/** ISO 时间转本地可读串（无值显示占位）。 */
-function fmtTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : '-'
 }
 
 onMounted(() => {
@@ -73,7 +69,7 @@ onMounted(() => {
     <!-- 列表 -->
     <el-table v-loading="table.loading.value" :data="table.rows.value" border>
       <el-table-column label="时间" min-width="170">
-        <template #default="{ row }">{{ fmtTime(row.occurred_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.occurred_at) }}</template>
       </el-table-column>
       <el-table-column prop="event_type" label="事件类型" min-width="150" show-overflow-tooltip />
       <el-table-column prop="title" label="标题" min-width="140" show-overflow-tooltip />

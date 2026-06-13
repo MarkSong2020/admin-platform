@@ -11,6 +11,7 @@ import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import { listOnline, kickOnline, type OnlineSession } from '@/api/online'
 import { normalizeApiError, type ApiError } from '@/api/transport'
+import { formatDateTime } from '@/utils/format'
 
 const table = useCrudTable<OnlineSession, Record<string, never>>({
   fetchPage: async (params) => {
@@ -66,9 +67,15 @@ onMounted(() => {
   <div class="online-page">
     <el-table v-loading="table.loading.value" :data="table.rows.value" border>
       <el-table-column prop="username" label="用户名" min-width="140" />
-      <el-table-column prop="login_time" label="登录时间" min-width="180" />
-      <el-table-column prop="last_active_time" label="最后活动时间" min-width="180" />
-      <el-table-column prop="expires_at" label="过期时间" min-width="180" />
+      <el-table-column label="登录时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.login_time) }}</template>
+      </el-table-column>
+      <el-table-column label="最后活动时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.last_active_time) }}</template>
+      </el-table-column>
+      <el-table-column label="过期时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.expires_at) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
           <el-button

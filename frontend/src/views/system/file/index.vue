@@ -17,6 +17,7 @@ import {
   type FileRead,
 } from '@/api/file'
 import { normalizeApiError } from '@/api/transport'
+import { formatBytes, formatDateTime } from '@/utils/format'
 
 const table = useCrudTable<FileRead, Record<string, never>>({
   fetchPage: async (params) => {
@@ -25,14 +26,6 @@ const table = useCrudTable<FileRead, Record<string, never>>({
   },
   removeItem: deleteFile,
 })
-
-/** 字节转可读单位（KB/MB/GB），仅展示用。 */
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(2)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KB`
-  return `${bytes} B`
-}
 
 const uploadRef = ref<UploadInstance>()
 
@@ -91,7 +84,9 @@ onMounted(() => {
           {{ formatBytes(row.size_bytes) }}
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="上传时间" min-width="180" />
+      <el-table-column label="上传时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button

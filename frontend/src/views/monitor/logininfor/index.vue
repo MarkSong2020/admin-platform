@@ -8,6 +8,7 @@ import { onMounted } from 'vue'
 import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import { listLogininfor, type LoginLogRead } from '@/api/logininfor'
+import { formatDateTime } from '@/utils/format'
 
 interface LogininforQuery {
   username?: string
@@ -20,11 +21,6 @@ const table = useCrudTable<LoginLogRead, LogininforQuery>({
     return { items: page.items, total: page.total }
   },
 })
-
-/** ISO 时间转本地可读串（无值显示占位）。 */
-function fmtTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : '-'
-}
 
 onMounted(() => {
   void table.refresh()
@@ -58,7 +54,7 @@ onMounted(() => {
     <!-- 列表 -->
     <el-table v-loading="table.loading.value" :data="table.rows.value" border>
       <el-table-column label="登录时间" min-width="170">
-        <template #default="{ row }">{{ fmtTime(row.login_at_utc) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.login_at_utc) }}</template>
       </el-table-column>
       <el-table-column prop="username" label="用户名" min-width="140" />
       <el-table-column label="状态" width="90">

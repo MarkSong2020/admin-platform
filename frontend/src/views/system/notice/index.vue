@@ -10,6 +10,7 @@ import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import NoticeFormDialog from './components/NoticeFormDialog.vue'
 import { listNotices, deleteNotice, type NoticeRead, type NoticeType } from '@/api/notice'
+import { formatDateTime } from '@/utils/format'
 
 interface NoticeQuery {
   notice_type?: NoticeType
@@ -100,7 +101,9 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" min-width="180" />
+      <el-table-column label="创建时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button v-hasPermi="'system:notice:edit'" link type="primary" @click="openEdit(row)">

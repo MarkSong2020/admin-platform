@@ -12,6 +12,7 @@ import JobFormDialog from './components/JobFormDialog.vue'
 import JobLogDialog from './components/JobLogDialog.vue'
 import { listJobs, deleteJob, runJob, type ScheduledTaskRead } from '@/api/job'
 import { type ApiError } from '@/api/transport'
+import { formatDateTime } from '@/utils/format'
 
 interface JobQuery {
   status?: string
@@ -125,9 +126,9 @@ onMounted(() => {
           {{ row.last_status ?? '-' }}
         </template>
       </el-table-column>
-      <el-table-column prop="next_run_at" label="下次执行" min-width="180">
+      <el-table-column label="下次执行" min-width="180">
         <template #default="{ row }">
-          {{ row.next_run_at ?? '-' }}
+          {{ formatDateTime(row.next_run_at) }}
         </template>
       </el-table-column>
       <el-table-column label="操作" width="240" fixed="right">
