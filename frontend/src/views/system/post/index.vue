@@ -5,10 +5,13 @@
  * v-hasPermi 仅控按钮可见性（UX 层），后端 RBAC 才是安全边界。
  */
 import { onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import PostFormDialog from './components/PostFormDialog.vue'
-import { listPosts, deletePost, type PostRead } from '@/api/posts'
+import PostImportDialog from './components/PostImportDialog.vue'
+import { listPosts, deletePost, exportPosts, type PostRead } from '@/api/posts'
+import { normalizeApiError } from '@/api/transport'
 
 interface PostQuery {
   keyword?: string
@@ -23,6 +26,8 @@ const table = useCrudTable<PostRead, PostQuery>({
 })
 
 const formVisible = ref(false)
+const importVisible = ref(false)
+const exporting = ref(false)
 const editing = ref<PostRead | null>(null)
 
 function openCreate(): void {
@@ -33,6 +38,18 @@ function openCreate(): void {
 function openEdit(row: PostRead): void {
   editing.value = row
   formVisible.value = true
+}
+
+/** 导出全量岗位为 posts.xlsx（blob 下载）。 */
+async function handleExport(): Promise<void> {
+  exporting.value = true
+  try {
+    await exportPosts()
+  } catch (err) {
+    ElMessage.error(normalizeApiError(err).message)
+  } finally {
+    exporting.value = false
+  }
 }
 
 onMounted(() => {
@@ -62,6 +79,12 @@ onMounted(() => {
     <div class="toolbar">
       <el-button v-hasPermi="'system:post:add'" type="primary" @click="openCreate">
         新增
+      </el-button>
+      <el-button v-hasPermi="'system:post:import'" @click="importVisible = true">
+        导入
+      </el-button>
+      <el-button v-hasPermi="'system:post:export'" :loading="exporting" @click="handleExport">
+        导出
       </el-button>
     </div>
 
@@ -104,6 +127,7 @@ onMounted(() => {
     />
 
     <PostFormDialog v-model:visible="formVisible" :editing="editing" @saved="table.refresh()" />
+    <PostImportDialog v-model:visible="importVisible" @imported="table.refresh()" />
   </div>
 </template>
 

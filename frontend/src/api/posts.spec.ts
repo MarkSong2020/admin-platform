@@ -1,6 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { __resetSessionForTest } from './session'
-import { listPosts, getPost, createPost, updatePost, deletePost } from './posts'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { __resetSessionForTest, setTokens } from './session'
+import {
+  listPosts,
+  getPost,
+  createPost,
+  updatePost,
+  deletePost,
+  importPosts,
+  exportPosts,
+} from './posts'
 
 /** 记录每次 fetch 的 method / url / body，供断言路径与请求体。 */
 interface Captured {
@@ -118,5 +126,98 @@ describe('posts api', () => {
       ),
     )
     await expect(deletePost(5)).rejects.toMatchObject({ code: 'post.IN_USE', status: 409 })
+  })
+})
+
+describe('posts excel import/export', () => {
+  beforeEach(() => {
+    // import/export 经 transport，attachAuthHeaders 需要 token 才注入。
+    setTokens({ accessToken: 'a1', refreshToken: 'r1' })
+  })
+
+  it('importPosts 以 multipart 发送，字段名 upload，成功返回 summary', async () => {
+    // transport 以 fetch(url, {body: form}) 调用，init.body 即原始 FormData 实例，
+    // 直接断言字段名（jsdom 不可靠解析 multipart 流，故不走 req.formData()）。
+    let method = ''
+    let pathname = ''
+    let form: FormData | null = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        method = init?.method ?? 'GET'
+        pathname = new URL(String(input)).pathname
+        form = init?.body instanceof FormData ? init.body : null
+        return jsonResponse({ imported: 3, errors: [] })
+      }),
+    )
+    const file = new File(['xlsx-bytes'], 'posts.xlsx')
+    const summary = await importPosts(file)
+    expect(summary.imported).toBe(3)
+    expect(summary.errors).toEqual([])
+    expect(method).toBe('POST')
+    expect(pathname).toBe('/api/v1/posts/import')
+    expect(form!.has('upload')).toBe(true)
+  })
+
+  it('importPosts 行级错误随 200 返回 errors（不抛业务异常，一步全有全无）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          imported: 0,
+          errors: [
+            { row: 2, column: 'code', code: 'VALIDATION', message: '编码必填' },
+            { row: 3, column: null, code: 'DUPLICATE_IN_FILE', message: '文件内重复' },
+          ],
+        }),
+      ),
+    )
+    const summary = await importPosts(new File(['x'], 'bad.xlsx'))
+    expect(summary.imported).toBe(0)
+    expect(summary.errors).toHaveLength(2)
+    expect(summary.errors![0]).toMatchObject({ row: 2, column: 'code', message: '编码必填' })
+  })
+
+  it('importPosts 413 超大 → 抛归一化 ApiError（传输级失败不吞）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({ type: 'file.TOO_LARGE', title: '文件过大', status: 413 }, 413),
+      ),
+    )
+    await expect(importPosts(new File(['x'], 'big.xlsx'))).rejects.toMatchObject({
+      code: 'file.TOO_LARGE',
+      status: 413,
+    })
+  })
+
+  describe('exportPosts', () => {
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+
+    beforeEach(() => {
+      clickSpy.mockImplementation(() => {})
+      // 仅打桩 createObjectURL/revokeObjectURL（jsdom 未实现），保留 URL 构造能力。
+      URL.createObjectURL = vi.fn(() => 'blob:mock') as unknown as typeof URL.createObjectURL
+      URL.revokeObjectURL = vi.fn() as unknown as typeof URL.revokeObjectURL
+    })
+
+    afterEach(() => {
+      clickSpy.mockReset()
+    })
+
+    it('exportPosts 命中 GET /posts/export 并以 blob 触发保存', async () => {
+      let captured: Request | null = null
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          captured = input instanceof Request ? input : new Request(String(input), init)
+          return new Response('xlsx-binary', { status: 200 })
+        }),
+      )
+      await exportPosts()
+      expect(captured!.method).toBe('GET')
+      expect(new URL(captured!.url).pathname).toBe('/api/v1/posts/export')
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    })
   })
 })
