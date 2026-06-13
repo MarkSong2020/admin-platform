@@ -8,6 +8,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getOperlog, type AuditEventDetail } from '@/api/operlog'
 import { normalizeApiError } from '@/api/transport'
+import { formatDateTime } from '@/utils/format'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
@@ -73,7 +74,7 @@ watch(
       <el-descriptions-item label="路径">{{ detail?.path ?? '-' }}</el-descriptions-item>
       <el-descriptions-item label="IP">{{ detail?.ip ?? '-' }}</el-descriptions-item>
       <el-descriptions-item label="耗时(ms)">{{ detail?.duration_ms ?? '-' }}</el-descriptions-item>
-      <el-descriptions-item label="发生时间">{{ detail?.occurred_at }}</el-descriptions-item>
+      <el-descriptions-item label="发生时间">{{ formatDateTime(detail?.occurred_at) }}</el-descriptions-item>
       <el-descriptions-item label="脱敏">{{ detail?.redaction_applied ? '是' : '否' }}</el-descriptions-item>
       <el-descriptions-item label="Request ID">{{ detail?.request_id ?? '-' }}</el-descriptions-item>
       <el-descriptions-item label="Trace ID">{{ detail?.trace_id ?? '-' }}</el-descriptions-item>

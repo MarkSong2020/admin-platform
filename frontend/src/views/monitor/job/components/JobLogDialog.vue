@@ -7,6 +7,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import TablePagination from '@/components/TablePagination.vue'
 import { listJobLogs, type ScheduledTaskLogRead } from '@/api/job'
+import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{
   /** 目标任务 id；null = 未选中（对话框不应打开）。 */
@@ -71,8 +72,12 @@ watch(visible, (open) => {
           <el-tag :type="tagType(row.status)">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="started_at" label="开始时间" min-width="180" />
-      <el-table-column prop="finished_at" label="结束时间" min-width="180" />
+      <el-table-column label="开始时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.started_at) }}</template>
+      </el-table-column>
+      <el-table-column label="结束时间" min-width="180">
+        <template #default="{ row }">{{ formatDateTime(row.finished_at) }}</template>
+      </el-table-column>
       <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
       <el-table-column
         prop="result_summary"

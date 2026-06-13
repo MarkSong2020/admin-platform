@@ -51,6 +51,13 @@ module.exports = {
       to: { path: '^src/(views|layouts|router|api)/' },
     },
     {
+      name: 'utils-leaf',
+      comment: 'utils 叶子层仅可依赖第三方/无依赖，禁止 import 任何业务层（api/stores/views/layouts/router/directives/components/composables）',
+      severity: 'error',
+      from: { path: '^src/utils/' },
+      to: { path: '^src/(api|stores|views|layouts|router|directives|components|composables)/' },
+    },
+    {
       name: 'no-circular',
       comment: '禁止循环依赖',
       severity: 'error',

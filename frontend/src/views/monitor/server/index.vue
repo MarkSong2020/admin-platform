@@ -8,17 +8,10 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getServerMetrics, type ServerMetrics } from '@/api/server'
 import { normalizeApiError, type ApiError } from '@/api/transport'
+import { formatBytes } from '@/utils/format'
 
 const metrics = ref<ServerMetrics | null>(null)
 const loading = ref(false)
-
-/** 字节转可读单位（GB/MB），仅展示用。 */
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(2)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KB`
-  return `${bytes} B`
-}
 
 function toMessage(err: unknown): string {
   if (err !== null && typeof err === 'object' && 'code' in err && 'message' in err) {
