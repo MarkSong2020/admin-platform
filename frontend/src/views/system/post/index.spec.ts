@@ -5,7 +5,7 @@ import ElementPlus, { ElMessageBox, type MessageBoxData } from 'element-plus'
 import PostPage from './index.vue'
 import { hasPermi } from '@/directives/has-permi'
 import { usePermissionStore } from '@/stores/permission'
-import { listPosts, createPost, deletePost } from '@/api/posts'
+import { listPosts, createPost, deletePost, exportPosts, importPosts } from '@/api/posts'
 
 vi.mock('@/api/posts', () => ({
   listPosts: vi.fn(),
@@ -13,6 +13,8 @@ vi.mock('@/api/posts', () => ({
   createPost: vi.fn(),
   updatePost: vi.fn(),
   deletePost: vi.fn(),
+  exportPosts: vi.fn(),
+  importPosts: vi.fn(),
 }))
 
 const POSTS = [
@@ -59,6 +61,9 @@ beforeEach(() => {
   })
   vi.mocked(createPost).mockReset()
   vi.mocked(deletePost).mockReset()
+  vi.mocked(exportPosts).mockReset()
+  vi.mocked(exportPosts).mockResolvedValue(undefined)
+  vi.mocked(importPosts).mockReset()
   document.body.innerHTML = ''
 })
 
@@ -90,6 +95,24 @@ describe('岗位管理页', () => {
     expect(listPosts).toHaveBeenLastCalledWith(
       expect.objectContaining({ page: 1, keyword: '研发' }),
     )
+  })
+
+  it('点导入 → 打开导入对话框', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const importBtn = wrapper.findAll('button').find((b) => b.text().includes('导入'))
+    await importBtn!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('导入岗位')
+  })
+
+  it('点导出 → 调 exportPosts', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const exportBtn = wrapper.findAll('button').find((b) => b.text().includes('导出'))
+    await exportBtn!.trigger('click')
+    await flushPromises()
+    expect(exportPosts).toHaveBeenCalledTimes(1)
   })
 
   it('删除走二次确认 → deletePost', async () => {
