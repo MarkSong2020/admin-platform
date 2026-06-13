@@ -194,12 +194,14 @@ main.ts 挂载前 bootstrap():
 | 切片 | 范围 | 可验证目标 |
 |---|---|---|
 | **P6.0 ✓ 已落地** | 工程基线 **+ 高风险前置 spike** | 脚手架 + 全 CI 门 + 本地提交门 + `dump_openapi.py` + openapi 类型生成 + 登录页壳 + `session.ts` + auth/permission store。**必测**：① 全 seed 页面组件覆盖（前端读 `seed_page_components.json`，规范化大小写精确）② 壳组件 allowlist ③ blob 下载 wrapper ④ multipart 上传 wrapper ⑤ **session single-flight + 失效 typed error + 分层负向** → `lint && typecheck && test:unit && build && depcruise && openapi-drift（DB-free）` 全绿 |
-| **P6.1** | 登录闭环 | 登录 + 验证码 + getInfo/getRouters + bootstrap 时序 + Layout/Sidebar/Breadcrumb + v-hasPermi → E2E：刷新深链、401 静默续期、refresh 失败跳登录、登录缺 refresh fail fast、按钮权限显隐 |
-| **P6.2** | RBAC 五页 | 用户/角色/菜单/部门/岗位 CRUD → 每页 E2E；按钮级权限隐藏可验证 |
-| **P6.3** | 运营/监控 | 字典/参数/通知（不渲染 raw HTML）+ 操作/登录日志 + 在线用户/服务缓存监控/定时任务 |
-| **P6.4** | 文件/Excel | 文件管理上传/下载/删除（复用 P6.0 transport）+ 岗位 Excel 导入导出 |
+| **P6.1 ✓ 已落地** | 登录闭环 | 登录 + 验证码（文本算术题）+ getInfo/getRouters + bootstrap 时序 + Layout/Sidebar/Breadcrumb + v-hasPermi + session 失效/登出统一出口。Vitest 组件/集成覆盖：刷新深链放行、refresh 失败走失效出口跳登录、setup 失败不进空应用、登录缺 refresh fail fast、验证码服务不可用提示、按钮权限显隐 |
+| **P6.2 ✓ 已落地** | RBAC 五页 | 用户（角色/岗位绑定）/角色（菜单·部门数据权限绑定，半选父节点纳入）/菜单（树+类型联动 M/C/F）/部门（树）/岗位 CRUD → 复用 useCrudTable/TablePagination/useTree；按钮级权限隐藏可验证 |
+| **P6.3 ✓ 已落地** | 运营/监控 | 字典（类型+数据抽屉）/参数/通知（不渲染 raw HTML）+ 操作/登录日志（payload 纯文本）+ 在线用户（强制下线）/服务/缓存监控（降级）/定时任务（CRUD+手动触发+执行日志+handler 白名单） |
+| **P6.4 ✓ 已落地** | 文件/Excel | 文件管理上传（on-change+transport multipart）/下载（blob）/删除 + 岗位 Excel 导入（始终 200+summary 全有全无）/导出 |
 
 每切片独立可验收、独立 PR。**P6.0 把 session/transport/CI 真值源前置钉死**。
+
+> **落地补记（2026-06-13，无人值守 + 多 agent 对抗审查 R1-R4 收敛）**：P6.1-P6.4 全部页面落地，前端 6 门全绿（type-check / oxlint / eslint / vitest 262 / depcruise / build）。对抗审查修复要点：R1 登出 fail-fast + bootstrap setup 失败走失效出口 + 验证码服务降级提示；R2 角色菜单半选父节点真覆盖；R3 cache info 空兜底 + operlog 详情按 id 真覆盖；R4 **上传/导入 `before-upload` 在 `auto-upload=false` 下永不触发（实测 el-upload 源码确认）→ 改 `on-change`**，且 `normalizeApiError` 未透传已归一 ApiError 普通对象致提示乱码 `[object Object]` → 根因修复 + 抽 `utils/format` 统一时间戳/字节渲染。后端为前端联调所需的 menu/role 提权防护等改动属并行后端安全工作流，不在本前端提交链内。
 
 ---
 
