@@ -30,6 +30,27 @@ module.exports = {
       to: { path: '^src/views/' },
     },
     {
+      name: 'views-no-layouts',
+      comment: 'views 禁止 import layouts（壳组装归 router composition root）',
+      severity: 'error',
+      from: { path: '^src/views/' },
+      to: { path: '^src/layouts/' },
+    },
+    {
+      name: 'layouts-layer',
+      comment: 'layouts 禁止 import views/router/api（登出/登录后装配走 stores 注入，导航用 useRouter）',
+      severity: 'error',
+      from: { path: '^src/layouts/' },
+      to: { path: '^src/(views|router|api)/' },
+    },
+    {
+      name: 'directives-layer',
+      comment: 'directives 仅可依赖 stores/utils，禁止 import views/layouts/router/api',
+      severity: 'error',
+      from: { path: '^src/directives/' },
+      to: { path: '^src/(views|layouts|router|api)/' },
+    },
+    {
       name: 'no-circular',
       comment: '禁止循环依赖',
       severity: 'error',
