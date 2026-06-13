@@ -100,6 +100,16 @@ onMounted(() => {
           </el-table>
         </el-card>
       </template>
+
+      <!-- 兜底：available=true 但 info 为空（如 Redis 连上但 INFO 超时），避免静默空白 -->
+      <el-alert
+        v-else
+        title="指标异常"
+        description="缓存声明可用但未返回指标，请刷新重试。"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
     </template>
   </div>
 </template>
