@@ -25,6 +25,17 @@ export function normalizeApiError(err: unknown): SessionExpiredError | ApiError 
   if (err instanceof Error) {
     return { code: 'NETWORK', status: 0, message: err.message }
   }
+  // api 层（uploadMultipart/downloadBlob 等）抛出的已是归一化 ApiError 普通对象（非 Error 实例）。
+  // 直接透传，否则会落到下方 String(err) 变成 '[object Object]'（file 页/Excel 导入提示的真实 bug）。
+  if (
+    err !== null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    'status' in err &&
+    'message' in err
+  ) {
+    return err as ApiError
+  }
   return { code: 'UNKNOWN', status: 0, message: String(err) }
 }
 

@@ -7,7 +7,7 @@
  * 仅传输级失败（并发 409 / 超大 413 / 非法 422）才落 ElMessage.error。
  */
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type UploadFile, type UploadInstance } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { importPosts, type PostImportSummary, type PostImportRowError } from '@/api/posts'
 import { normalizeApiError } from '@/api/transport'
@@ -19,16 +19,22 @@ const emit = defineEmits<{
   (e: 'imported'): void
 }>()
 
+const uploadRef = ref<UploadInstance>()
 const uploading = ref(false)
 /** 上次导入结果；null = 尚未导入。 */
 const summary = ref<PostImportSummary | null>(null)
 
-/** el-upload :auto-upload=false 时由 before-upload 接管：走 transport multipart，阻止自身 XHR。 */
-async function handleSelect(rawFile: File): Promise<boolean> {
+/**
+ * el-upload :auto-upload=false 时 before-upload 不触发，用 on-change 接管：
+ * 选中 xlsx（status='ready'）即提取 raw 走 transport multipart 导入（始终 200 业务通道）。
+ * 处理后 clearFiles 让同名文件可重选。
+ */
+async function handleSelect(file: UploadFile): Promise<void> {
+  if (file.status !== 'ready' || !file.raw) return
   uploading.value = true
   summary.value = null
   try {
-    const result = await importPosts(rawFile)
+    const result = await importPosts(file.raw)
     summary.value = result
     const errors: PostImportRowError[] = result.errors ?? []
     if (errors.length === 0) {
@@ -42,8 +48,8 @@ async function handleSelect(rawFile: File): Promise<boolean> {
     ElMessage.error(normalizeApiError(err).message)
   } finally {
     uploading.value = false
+    uploadRef.value?.clearFiles()
   }
-  return false
 }
 
 function close(): void {
@@ -61,9 +67,10 @@ function close(): void {
     @closed="summary = null"
   >
     <el-upload
+      ref="uploadRef"
       :auto-upload="false"
       :show-file-list="false"
-      :before-upload="handleSelect"
+      :on-change="handleSelect"
       accept=".xlsx"
       drag
     >

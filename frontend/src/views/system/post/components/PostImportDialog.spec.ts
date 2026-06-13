@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage, type UploadFile } from 'element-plus'
 import PostImportDialog from './PostImportDialog.vue'
 import { importPosts } from '@/api/posts'
 
@@ -16,13 +16,18 @@ function mountDialog(): VueWrapper {
   })
 }
 
-/** 直接驱动 el-upload 的 before-upload 钩子（绕过隐藏 input 在 jsdom 的不确定行为）。 */
-async function triggerSelect(wrapper: VueWrapper): Promise<boolean> {
+/** 驱动 el-upload 选中 xlsx 时真实触发的 on-change（auto-upload=false 下 before-upload 不触发）。 */
+async function triggerSelect(wrapper: VueWrapper): Promise<void> {
   const upload = wrapper.findComponent({ name: 'ElUpload' })
-  const before = upload.props('beforeUpload') as (f: File) => Promise<boolean>
-  const result = await before(new File(['xlsx'], 'posts.xlsx'))
+  const onChange = upload.props('onChange') as (f: UploadFile) => void | Promise<void>
+  await onChange({
+    name: 'posts.xlsx',
+    status: 'ready',
+    uid: 1,
+    size: 1,
+    raw: new File(['xlsx'], 'posts.xlsx'),
+  } as UploadFile)
   await flushPromises()
-  return result
 }
 
 beforeEach(() => {
@@ -35,9 +40,8 @@ describe('PostImportDialog', () => {
     vi.mocked(importPosts).mockResolvedValue({ imported: 5, errors: [] })
     const wrapper = mountDialog()
     await flushPromises()
-    const blocked = await triggerSelect(wrapper)
+    await triggerSelect(wrapper)
     expect(importPosts).toHaveBeenCalledTimes(1)
-    expect(blocked).toBe(false) // 阻止 el-upload 自身 XHR
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(document.body.textContent).toContain('导入成功，共 5 条')
   })
@@ -63,11 +67,19 @@ describe('PostImportDialog', () => {
     expect(text).toContain('DUPLICATE_IN_FILE')
   })
 
-  it('传输级失败（如 413）→ 走 error 提示，不 emit', async () => {
-    vi.mocked(importPosts).mockRejectedValue({ code: 'file.TOO_LARGE', status: 413, message: '文件过大' })
+  it('传输级失败（如 413）→ 展示归一错误提示，不 emit', async () => {
+    // importPosts 经 uploadMultipart 在非 2xx 抛「已归一 ApiError 普通对象」（非 Error 实例）
+    vi.mocked(importPosts).mockRejectedValue({
+      code: 'file.TOO_LARGE',
+      status: 413,
+      message: '文件过大',
+    })
+    const errorSpy = vi.spyOn(ElMessage, 'error')
     const wrapper = mountDialog()
     await flushPromises()
     await triggerSelect(wrapper)
     expect(wrapper.emitted('imported')).toBeUndefined()
+    // 关键：必须展示真实 message（normalizeApiError 透传已归一对象），而非 '[object Object]'
+    expect(errorSpy).toHaveBeenCalledWith('文件过大')
   })
 })

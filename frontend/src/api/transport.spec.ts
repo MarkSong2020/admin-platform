@@ -16,6 +16,20 @@ describe('normalizeApiError', () => {
     expect(out).not.toBeInstanceOf(SessionExpiredError)
     expect((out as { code: string }).code).toBe('TIMEOUT')
   })
+
+  it('透传已归一的 ApiError 普通对象（不降级成 [object Object]）', () => {
+    // uploadMultipart/downloadBlob 抛的是普通对象（非 Error 实例）；
+    // 旧实现会落到 String(err) 变 '[object Object]'，file 页/Excel 导入提示乱码。
+    const apiError = { code: 'file.TOO_LARGE', status: 413, message: '文件过大' }
+    const out = normalizeApiError(apiError)
+    expect(out).toEqual(apiError)
+    expect((out as { message: string }).message).toBe('文件过大')
+  })
+
+  it('真正未知值（字符串/数字）仍归一为 UNKNOWN', () => {
+    expect((normalizeApiError('boom') as { code: string }).code).toBe('UNKNOWN')
+    expect((normalizeApiError(42) as { code: string }).code).toBe('UNKNOWN')
+  })
 })
 
 describe('normalizeResponseError', () => {
