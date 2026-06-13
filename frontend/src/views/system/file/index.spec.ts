@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import ElementPlus, { ElMessageBox, type MessageBoxData } from 'element-plus'
+import ElementPlus, {
+  ElMessageBox,
+  type MessageBoxData,
+  type UploadFile,
+} from 'element-plus'
 import FilePage from './index.vue'
 import { hasPermi } from '@/directives/has-permi'
 import { usePermissionStore } from '@/stores/permission'
@@ -75,7 +79,7 @@ describe('文件管理页', () => {
     expect(wrapper.text()).toContain('5.00 MB')
   })
 
-  it('选文件触发 before-upload → 调 uploadFile 并刷新', async () => {
+  it('选文件触发 on-change（status=ready）→ 调 uploadFile 并刷新', async () => {
     vi.mocked(uploadFile).mockResolvedValue({
       id: 9,
       original_filename: 'new.txt',
@@ -88,14 +92,31 @@ describe('文件管理页', () => {
     })
     const wrapper = mountPage()
     await flushPromises()
-    // 直接驱动 el-upload 的 before-upload 钩子（避免依赖隐藏 input 的 jsdom 行为）。
+    // 驱动 el-upload 选中文件时真实触发的 on-change（auto-upload=false 下 before-upload 不触发）。
     const upload = wrapper.findComponent({ name: 'ElUpload' })
-    const before = upload.props('beforeUpload') as (f: File) => Promise<boolean>
-    const result = await before(new File(['x'], 'new.txt', { type: 'text/plain' }))
+    const onChange = upload.props('onChange') as (f: UploadFile) => void | Promise<void>
+    const raw = new File(['x'], 'new.txt', { type: 'text/plain' })
+    await onChange({
+      name: 'new.txt',
+      status: 'ready',
+      uid: 1,
+      size: 1,
+      raw,
+    } as UploadFile)
     await flushPromises()
     expect(uploadFile).toHaveBeenCalledTimes(1)
-    expect(result).toBe(false) // 阻止 el-upload 自身 XHR
+    expect(uploadFile).toHaveBeenCalledWith(raw)
     expect(listFiles).toHaveBeenCalledTimes(2) // 上传后刷新
+  })
+
+  it('on-change 非 ready 状态（如上传后 success 回调）不重复触发 uploadFile', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const upload = wrapper.findComponent({ name: 'ElUpload' })
+    const onChange = upload.props('onChange') as (f: UploadFile) => void | Promise<void>
+    await onChange({ name: 'x', status: 'success', uid: 2, size: 1 } as UploadFile)
+    await flushPromises()
+    expect(uploadFile).not.toHaveBeenCalled()
   })
 
   it('点下载 → 调 downloadFile（带 id + 文件名）', async () => {

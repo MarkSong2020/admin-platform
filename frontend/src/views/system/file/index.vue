@@ -2,11 +2,11 @@
 /**
  * 文件管理页（对标 RuoYi sys_oss）。
  * 复用 useCrudTable（列表/分页/删除确认）+ TablePagination；
- * 上传走 el-upload 手动模式（:auto-upload=false 由 before-upload 接管），下载走 blob。
+ * 上传走 el-upload 手动模式（:auto-upload=false + on-change 接管），下载走 blob。
  * v-hasPermi 仅控按钮可见性（UX 层），后端 RBAC 才是安全边界。
  */
-import { onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { ElMessage, type UploadFile, type UploadInstance } from 'element-plus'
 import { useCrudTable } from '@/composables/useCrudTable'
 import TablePagination from '@/components/TablePagination.vue'
 import {
@@ -34,19 +34,24 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`
 }
 
+const uploadRef = ref<UploadInstance>()
+
 /**
- * el-upload :auto-upload=false 时由 before-upload 接管发送：调 uploadFile 走 transport，
- * 成功刷新列表。返回 false 阻止 el-upload 自身的 XHR（我们用自己的 transport 通道）。
+ * el-upload :auto-upload=false 时 before-upload 不触发（仅 autoUpload 走 upload()），
+ * 故用 on-change 接管：选中文件即 status='ready'，提取 raw 走 transport 上传。
+ * 上传后 clearFiles 清内部 fileList——既防堆积，也让同名文件可重选（input 不缓存上次值）。
  */
-async function handleUpload(rawFile: File): Promise<boolean> {
+async function handleFileChange(file: UploadFile): Promise<void> {
+  if (file.status !== 'ready' || !file.raw) return
   try {
-    const created = await uploadFile(rawFile)
+    const created = await uploadFile(file.raw)
     ElMessage.success(`上传成功：${created.original_filename}`)
     await table.refresh()
   } catch (err) {
     ElMessage.error(normalizeApiError(err).message)
+  } finally {
+    uploadRef.value?.clearFiles()
   }
-  return false
 }
 
 async function handleDownload(row: FileRead): Promise<void> {
@@ -67,10 +72,11 @@ onMounted(() => {
     <!-- 工具栏 -->
     <div class="toolbar">
       <el-upload
+        ref="uploadRef"
         v-hasPermi="'system:file:upload'"
         :auto-upload="false"
         :show-file-list="false"
-        :before-upload="handleUpload"
+        :on-change="handleFileChange"
       >
         <el-button type="primary">上传</el-button>
       </el-upload>
