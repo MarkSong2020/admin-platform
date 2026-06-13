@@ -129,6 +129,15 @@ describe('登录页', () => {
     expect(replaceSpy).not.toHaveBeenCalled()
   })
 
+  it('验证码服务不可用（getCaptcha 失败）→ 显示提示，不隐藏整页无反馈', async () => {
+    vi.mocked(getCaptcha).mockRejectedValue(new Error('503 redis down'))
+    const { wrapper } = await mountLogin()
+
+    // 无算术题输入框，但有「暂不可用」提示（避免死循环无反馈）
+    expect(wrapper.find('input[placeholder="计算结果"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('验证码服务暂不可用')
+  })
+
   it('MissingRefreshTokenError → 显示环境配置错误 alert（fail fast）', async () => {
     vi.mocked(login).mockRejectedValue(new MissingRefreshTokenError())
     const { wrapper } = await mountLogin()

@@ -23,12 +23,17 @@ export function registerLogoutDeps(injected: LogoutDeps): void {
 
 /** 登出：后端撤销（best-effort，api 层已容错并 clearTokens）→ 清三 store → reset 动态路由 → 跳登录。 */
 export async function performLogout(): Promise<void> {
+  // 未注册视为装配缺陷，fail fast（与 post-login 一致）：否则清完 store/token
+  // 却不跳转，用户停在需鉴权页面陷入不一致状态且无任何反馈。
+  if (!deps) {
+    throw new Error('logout deps 未注册：main.ts 应先 registerLogoutDeps()')
+  }
   await apiLogout()
   useUserInfoStore().reset()
   useMenuStore().reset()
   usePermissionStore().reset()
-  deps?.resetDynamicRoutes()
-  deps?.redirectToLogin()
+  deps.resetDynamicRoutes()
+  deps.redirectToLogin()
 }
 
 /** 仅供单测重置注入。 */

@@ -122,6 +122,20 @@ describe('守卫 + bootstrap 时序', () => {
     expect(sessionStorage.getItem(REFRESH_KEY)).toBeNull()
   })
 
+  it('refresh 成功但 getInfo 失败：清 token + 失效出口 + 跳登录（不放行空应用）', async () => {
+    sessionStorage.setItem(REFRESH_KEY, 'refresh-1')
+    __setRefreshImplForTest(async () => ({ accessToken: 'a1', refreshToken: 'r2' }))
+    // refresh 成功（token 写回），但 getInfo 5xx → setup 失败
+    vi.mocked(fetchUserInfo).mockRejectedValue(new Error('getInfo 500'))
+
+    await router.push('/system/user')
+
+    // 关键：refresh 成功后若仅靠 hasRefresh 会误放行 → 必须主动走失效出口
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.hasRoute('User')).toBe(false)
+    expect(sessionStorage.getItem(REFRESH_KEY)).toBeNull()
+  })
+
   it('无 refresh：守卫 redirect /login?redirect=<目标>', async () => {
     await router.push('/system/user')
 

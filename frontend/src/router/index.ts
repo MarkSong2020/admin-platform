@@ -10,7 +10,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import Layout from '@/layouts/Layout.vue'
-import { hasRefresh, refreshOnce } from '@/api/session'
+import { clearTokens, emitSessionExpired, hasRefresh, refreshOnce } from '@/api/session'
 import type { RouterVO } from '@/api/auth'
 import { useMenuStore } from '@/stores/menu'
 import { useUserInfoStore } from '@/stores/user-info'
@@ -113,9 +113,14 @@ export function bootstrap(): Promise<void> {
       await refreshOnce()
       await setupAfterLogin()
     } catch {
-      // refresh 失败：session 层已 clearTokens + emit sessionExpired，
-      // 唯一订阅者（stores/session-expiry）清 Pinia + reset 动态路由 + 跳登录；
-      // 其余失败同样不在此重试，标记完成后由守卫按登录态决定去向。
+      // refresh 失败：session 层已 clearTokens + emit sessionExpired（此时 hasRefresh()=false），
+      // 唯一订阅者（stores/session-expiry）清 Pinia + reset 动态路由 + 跳登录。
+      // setup（getInfo/getRouters）失败：token 仍在（hasRefresh()=true）→ 主动走失效出口，
+      // 避免用户带有效 token 却进入无 user/无动态路由的空应用（守卫只看 hasRefresh 会误放行）。
+      if (hasRefresh()) {
+        clearTokens()
+        emitSessionExpired()
+      }
     } finally {
       bootstrapDone = true
       bootstrapInflight = null
