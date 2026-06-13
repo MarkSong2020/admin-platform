@@ -85,12 +85,17 @@ beforeEach(() => {
     total_pages: 1,
   })
   vi.mocked(getOperlog).mockReset()
-  vi.mocked(getOperlog).mockResolvedValue({
-    ...EVENTS[1]!,
-    payload: { reason: 'in_use', target: 'bob' },
-    request_id: 'req-2',
-    trace_id: 'trace-2',
-    user_agent: 'curl/8',
+  // 按 event_pk 返回对应详情：验证「点哪行→取哪行 id→展示该行 payload」整条路径，
+  // 而非固定返回（固定返回会让断言恒过，沦为测 mock 行为）。
+  vi.mocked(getOperlog).mockImplementation(async (eventPk: number) => {
+    const base = EVENTS.find((e) => e.id === eventPk) ?? EVENTS[0]!
+    return {
+      ...base,
+      payload: { event: base.event_type, id: eventPk },
+      request_id: `req-${eventPk}`,
+      trace_id: `trace-${eventPk}`,
+      user_agent: 'curl/8',
+    }
   })
   document.body.innerHTML = ''
 })
@@ -123,6 +128,8 @@ describe('操作日志页', () => {
     await detailBtn!.trigger('click')
     await flushPromises()
     expect(getOperlog).toHaveBeenCalledWith(1)
-    expect(document.body.textContent).toContain('"reason": "in_use"')
+    // 展示的 payload 必须来自 id=1（user.login），证明用对了行 id 而非固定 mock
+    expect(document.body.textContent).toContain('"event": "user.login"')
+    expect(document.body.textContent).toContain('"id": 1')
   })
 })
