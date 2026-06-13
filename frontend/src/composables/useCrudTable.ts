@@ -9,22 +9,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { normalizeApiError, type ApiError } from '@/api/transport'
 
 /**
- * API 层（users.ts 等）抛出的已是归一化 ApiError（普通对象，非 Error 实例），
- * normalizeApiError 对普通对象会降级成 UNKNOWN/status0，故先识别已归一形状直接用，
- * 仅未归一的异常（network/abort/抛 Error）才过 normalizeApiError 兜底。
+ * 归一为展示用 ApiError。normalizeApiError 已能透传归一化的 ApiError 普通对象，
+ * 本函数额外把 SessionExpiredError 降级成展示友好的 SESSION_EXPIRED（避免 session 跳转
+ * 信号以原始 typed error 形态泄漏到列表 UI——跳转由 client/transport 兜底，这里仅取 message）。
  */
 function toApiError(err: unknown): ApiError {
-  if (
-    err !== null &&
-    typeof err === 'object' &&
-    'code' in err &&
-    'status' in err &&
-    'message' in err
-  ) {
-    return err as ApiError
-  }
   const normalized = normalizeApiError(err)
-  // SessionExpiredError 由 client 兜底跳转，这里仅取展示用 message。
+  // SessionExpiredError（非普通 ApiError）→ 列表层只需展示文案。
   return 'code' in normalized
     ? normalized
     : { code: 'SESSION_EXPIRED', status: 401, message: '登录已失效' }
