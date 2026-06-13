@@ -18,6 +18,8 @@ const formRef = ref<FormInstance>()
 const form = reactive({ username: '', password: '', captchaAnswer: '' })
 /** 当前算术题；503（验证码服务不可用）时为 null，提交不带验证码字段。 */
 const captcha = ref<CaptchaResponse | null>(null)
+/** 验证码服务不可用（getCaptcha 失败）。区分「无需验证码」与「服务故障」，避免死循环无反馈。 */
+const captchaUnavailable = ref(false)
 const submitting = ref(false)
 /** 登录响应缺 refresh_token = 环境配置错误（fail fast，区别于常规登录失败分支）。 */
 const envError = ref(false)
@@ -35,8 +37,10 @@ async function refreshCaptcha(): Promise<void> {
   form.captchaAnswer = ''
   try {
     captcha.value = await getCaptcha()
+    captchaUnavailable.value = false
   } catch {
     captcha.value = null
+    captchaUnavailable.value = true
   }
 }
 
@@ -127,6 +131,18 @@ async function handleSubmit(): Promise<void> {
             autocomplete="current-password"
           />
         </el-form-item>
+        <el-alert
+          v-if="captchaUnavailable"
+          class="login-env-alert"
+          type="warning"
+          :closable="false"
+          title="验证码服务暂不可用"
+        >
+          <template #default>
+            请稍后
+            <el-button text type="primary" @click="refreshCaptcha">重试</el-button>
+          </template>
+        </el-alert>
         <el-form-item v-if="captcha" label="验证码" prop="captchaAnswer">
           <div class="login-captcha-row">
             <span class="login-captcha-question">{{ captcha.question }}</span>
