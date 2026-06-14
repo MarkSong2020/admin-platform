@@ -112,6 +112,38 @@ describe('登录页', () => {
     expect(replaceSpy).toHaveBeenCalledWith('/')
   })
 
+  it('redirect 为外部 URL → 落安全兜底 /（防 open-redirect）', async () => {
+    vi.mocked(login).mockResolvedValue({
+      access_token: 'at',
+      token_type: 'bearer',
+      expires_in: 900,
+      refresh_token: 'rt',
+      refresh_expires_in: 86400,
+    })
+    const { wrapper, router } = await mountLogin('https://evil.com/phish')
+    const replaceSpy = vi.spyOn(router, 'replace')
+
+    await fillAndSubmit(wrapper)
+
+    expect(replaceSpy).toHaveBeenCalledWith('/')
+  })
+
+  it('redirect 为协议相对 //evil → 落安全兜底 /', async () => {
+    vi.mocked(login).mockResolvedValue({
+      access_token: 'at',
+      token_type: 'bearer',
+      expires_in: 900,
+      refresh_token: 'rt',
+      refresh_expires_in: 86400,
+    })
+    const { wrapper, router } = await mountLogin('//evil.com')
+    const replaceSpy = vi.spyOn(router, 'replace')
+
+    await fillAndSubmit(wrapper)
+
+    expect(replaceSpy).toHaveBeenCalledWith('/')
+  })
+
   it('CAPTCHA_REQUIRED 错误 → 重新拉验证码，不跳转', async () => {
     vi.mocked(login).mockRejectedValue({
       code: 'auth.CAPTCHA_REQUIRED',

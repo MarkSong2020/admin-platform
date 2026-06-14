@@ -49,6 +49,15 @@ onMounted(() => {
   void refreshCaptcha()
 })
 
+/**
+ * redirect 白名单守卫：仅采用应用内绝对路径，排除协议相对（//evil）与绝对 URL（http(s):），
+ * 杜绝 open-redirect（即便 router.replace 当前把字符串当内部路径解析，也防 vue-router 行为回归）。
+ */
+function safeRedirect(raw: unknown): string {
+  if (typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//')) return raw
+  return '/'
+}
+
 /** 常规登录错误（RFC9457 归一化 ApiError）按错误码分支提示。 */
 function showLoginError(err: ApiError): void {
   switch (err.code) {
@@ -83,8 +92,7 @@ async function handleSubmit(): Promise<void> {
       captcha_answer: captcha.value ? form.captchaAnswer : null,
     })
     await runPostLoginSetup()
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    await router.replace(redirect)
+    await router.replace(safeRedirect(route.query.redirect))
   } catch (err) {
     if (err instanceof MissingRefreshTokenError) {
       envError.value = true
