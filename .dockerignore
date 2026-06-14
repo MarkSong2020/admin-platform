@@ -27,10 +27,10 @@ build/
 tests/
 docs/
 
-# Env / secrets
-.env
-.env.local
-.env.*.local
+# Env / secrets — 排除所有 .env 变体（含 .env.production/.env.staging），防 remote BuildKit
+# 收到 build context 时泄漏密钥；仅放行无密钥的 .env.example 模板。
+.env*
+!.env.example
 
 # Logs
 *.log

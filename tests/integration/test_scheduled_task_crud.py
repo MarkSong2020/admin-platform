@@ -93,6 +93,27 @@ async def test_crud_roundtrip() -> None:
         assert (await c.get(f"{BASE}/{task_id}")).status_code == 404
 
 
+async def test_update_clears_nullable_field_via_explicit_null() -> None:
+    # PATCH 显式传 null 清空 nullable 列（timeout_seconds / remark）并真持久化到 DB——守 service
+    # 用 model_fields_set 而非 is not None（后者吞显式 null，旧值残留，运维以为取消 timeout 实际没取消）。
+    async with _client() as c:
+        created = await c.post(BASE, json={**_VALID, "timeout_seconds": 30, "remark": "x"})
+        assert created.status_code == 201, created.text
+        task_id = created.json()["id"]
+        assert created.json()["timeout_seconds"] == 30
+        assert created.json()["remark"] == "x"
+
+        patched = await c.patch(f"{BASE}/{task_id}", json={"timeout_seconds": None, "remark": None})
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["timeout_seconds"] is None
+        assert patched.json()["remark"] is None
+
+        # GET 复核真持久化（不止响应回显）
+        got = await c.get(f"{BASE}/{task_id}")
+        assert got.json()["timeout_seconds"] is None
+        assert got.json()["remark"] is None
+
+
 async def test_name_unique_409() -> None:
     async with _client() as c:
         assert (await c.post(BASE, json=_VALID)).status_code == 201

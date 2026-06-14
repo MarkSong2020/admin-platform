@@ -295,6 +295,26 @@ async def test_manual_run_outcome_none_409() -> None:
     )  # M10：执行期消失专属码（非 404 NOT_FOUND）
 
 
+class _MissingLogExecutor(TaskExecutor):
+    """run 成功返回 log_id，但回读 get_log 时该日志行已不在（执行后 log 行竞态消失）。"""
+
+    async def run(self, task_id, *, trigger_type, scheduled_at, actor_user_id):  # type: ignore[override]
+        # log_id 非 None（与 RUN_CONFLICT 路径区分），但 repo.logs 里没有这条 → get_log 返 None。
+        return ExecutionOutcome(execution_id=uuid.uuid4(), status="success", log_id=999)
+
+
+async def test_manual_run_log_vanished_404() -> None:
+    """executor 返回 log_id 但回读 get_log 为 None（log 行执行后竞态消失）→ LOG_NOT_FOUND 404。"""
+    repo = _FakeRepo()
+    repo.seed_task(name="j", handler_key="noop")
+    reg = _registry()
+    svc = ScheduledTaskService(repo, reg, _MissingLogExecutor(reg))  # type: ignore[arg-type]
+    with pytest.raises(AppError) as e:
+        await svc.manual_run(1, actor_user_id=1)
+    assert e.value.status_code == 404
+    assert e.value.code == "scheduled_task.LOG_NOT_FOUND"
+
+
 async def test_create_enabled_computes_next_run() -> None:
     svc = _service(_FakeRepo())
     read = await svc.create(_create(name="en", cron_expression="*/5 * * * *", status="enabled"))
@@ -327,6 +347,45 @@ async def test_update_applies_all_fields() -> None:
     assert read.misfire_grace_seconds == 60
     assert read.timeout_seconds == 30
     assert read.remark == "r"
+
+
+async def test_update_clears_nullable_timeout_via_explicit_null() -> None:
+    # nullable 列（timeout_seconds=None 表示「不限时」）显式传 null 必须能清空——PATCH 语义「传了就改」。
+    # 修复前 service 用 `is not None` 判断吞掉显式 null，旧 timeout 继续生效（运维以为取消实际没取消）。
+    repo = _FakeRepo()
+    repo.seed_task(name="j", timeout_seconds=30, remark="keep")
+    svc = _service(repo)
+    read = await svc.update(1, ScheduledTaskUpdate.model_validate({"timeout_seconds": None}))
+    assert read.timeout_seconds is None
+    assert read.remark == "keep"  # 未传的 nullable 字段不受影响
+
+
+async def test_update_clears_nullable_remark_via_explicit_null() -> None:
+    repo = _FakeRepo()
+    repo.seed_task(name="j", timeout_seconds=30, remark="x")
+    svc = _service(repo)
+    read = await svc.update(1, ScheduledTaskUpdate.model_validate({"remark": None}))
+    assert read.remark is None
+    assert read.timeout_seconds == 30  # 未传的字段保持原值
+
+
+async def test_update_omitted_nullable_field_unchanged() -> None:
+    # 区分「显式传 null（清空）」与「未传（不动）」：只改 status 时 timeout/remark 必须原样保留。
+    repo = _FakeRepo()
+    repo.seed_task(name="j", timeout_seconds=30, remark="x")
+    svc = _service(repo)
+    read = await svc.update(1, ScheduledTaskUpdate(status="enabled"))
+    assert read.timeout_seconds == 30
+    assert read.remark == "x"
+
+
+async def test_update_params_null_keeps_not_null_column() -> None:
+    # params_json 是 NOT NULL 列：params=null 不应被清空（保持 `is not None` 忽略语义，不退化成 NULL）。
+    repo = _FakeRepo()
+    repo.seed_task(name="j", handler_key="noop", params_json={"k": "v"})
+    svc = _service(repo)
+    read = await svc.update(1, ScheduledTaskUpdate.model_validate({"params": None}))
+    assert read.params_json == {"k": "v"}
 
 
 async def test_list_tasks_maps_and_paginates() -> None:

@@ -80,6 +80,9 @@ class LoginLog(Base, IdMixin, TimestampMixin):
         Index("ix_login_logs_user_time", "user_id", "login_at_utc"),
         Index("ix_login_logs_status", "status"),
         Index("ix_login_logs_login_at", "login_at_utc"),
+        # 复合索引（status 过滤 + login_at_utc 倒序 + id tiebreaker）——支撑 logininfor「按状态筛 +
+        # 时间倒序」深翻页：PG 反向扫描免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
+        Index("ix_login_logs_status_time", "status", "login_at_utc", "id"),
     )
 
     username: Mapped[str] = mapped_column(String(64), comment="尝试登录的用户名")

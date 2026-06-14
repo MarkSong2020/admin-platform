@@ -166,6 +166,48 @@ async def test_get_missing_returns_404(client: AsyncClient) -> None:
     assert res.json()["type"] == "role.NOT_FOUND"
 
 
+# ---- P1 列表过滤 / 排序 / count 一致（真 DB SQL）---------------------------
+
+
+async def test_list_filter_by_name_keyword(client: AsyncClient) -> None:
+    await _create(client, code="r-admin", name="系统管理员")
+    await _create(client, code="r-audit", name="审计管理员")
+    await _create(client, code="r-guest", name="访客")
+    res = (await client.get("/api/v1/roles", params={"name": "管理员"})).json()
+    assert {r["code"] for r in res["items"]} == {"r-admin", "r-audit"}
+    assert res["total"] == 2  # count 与过滤一致
+
+
+async def test_list_filter_by_code_keyword_and_status(client: AsyncClient) -> None:
+    a = await _create(client, code="cc-1", name="一")
+    await _create(client, code="cc-2", name="二")
+    await _create(client, code="other", name="三")
+    # status 过滤：把 a 停用，按 disabled 过滤只命中 a。
+    await client.patch(f"/api/v1/roles/{a}", json={"status": "disabled"})
+    res = (await client.get("/api/v1/roles", params={"code": "cc", "status": "disabled"})).json()
+    assert {r["code"] for r in res["items"]} == {"cc-1"}
+    assert res["total"] == 1
+
+
+async def test_list_sort_by_sort_order_desc(client: AsyncClient) -> None:
+    r1 = await _create(client, code="o1", name="一")
+    r2 = await _create(client, code="o2", name="二")
+    await client.patch(f"/api/v1/roles/{r1}", json={"sort_order": 5})
+    await client.patch(f"/api/v1/roles/{r2}", json={"sort_order": 1})
+    res = (
+        await client.get("/api/v1/roles", params={"order_by": "sort_order", "order": "desc"})
+    ).json()
+    assert [r["code"] for r in res["items"]] == ["o1", "o2"]
+
+
+async def test_list_invalid_order_by_returns_422(client: AsyncClient) -> None:
+    await _create(client, code="x", name="X")
+    res = await client.get("/api/v1/roles", params={"order_by": "data_scope; DROP TABLE roles"})
+    assert res.status_code == 422
+    assert res.json()["type"] == "framework.SORT_FIELD_INVALID"
+    assert (await client.get("/api/v1/roles")).json()["total"] == 1  # 表未被破坏
+
+
 # ---- 权限矩阵 5 端点 403（非超管、无权限）----------------------------------
 
 

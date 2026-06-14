@@ -36,3 +36,19 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: detect-private-key
+
+  # 前端提交门：接入同一 pre-commit 框架（不引 husky，避免 core.hooksPath 冲突）。
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: frontend-lint
+        language: system
+        entry: bash -c 'cd frontend && pnpm exec eslint . && pnpm exec oxlint .'
+        files: ^frontend/.*\.(ts|vue)$
+        pass_filenames: false
+      - id: frontend-commitlint
+        name: frontend-commitlint
+        language: system
+        entry: frontend/node_modules/.bin/commitlint --config frontend/commitlint.config.cjs --edit
+        stages: [commit-msg]
+        pass_filenames: true

@@ -5,10 +5,16 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
+import pytest
 from openpyxl import Workbook, load_workbook
 from pydantic import BaseModel, Field
 
-from admin_platform.excel import ExcelColumn, ExcelExporter, ExcelImporter
+from admin_platform.excel import (
+    ExcelColumn,
+    ExcelExporter,
+    ExcelImporter,
+    ExcelTooLargeError,
+)
 
 _COLUMNS = [
     ExcelColumn("name", "名称"),
@@ -208,5 +214,62 @@ def test_reader_invalid_xml_char_in_sheet_returns_business_error() -> None:
                 data = data.replace(b"x1", b"x1\xef\xbf\xbe")  # 注入 U+FFFE（UTF-8）破坏 sheet XML
             zout.writestr(item, data)
     result = ExcelImporter(_SampleRow, _COLUMNS).parse(buf_out.getvalue())
+    assert result.rows == []
+    assert any(e.code == "INVALID_FILE" for e in result.errors)
+
+
+# ---- zip bomb / inflated XML DoS 防护（P1，解压前中央目录预检）-------------
+
+
+def _zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
+    """手构 zip（DEFLATE 压缩），用于触发压缩比/解压大小/条目数阈值。"""
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries:
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_zip_bomb_compression_ratio_rejected() -> None:
+    # 单条目「极小压缩 / 极大解压」（高度可压缩的全零 XML）→ 压缩比远超阈值 → 拒
+    payload = b"<x>" + b"0" * (5 * 1024 * 1024) + b"</x>"  # 5MB 全零，DEFLATE 后极小
+    content = _zip_bytes([("xl/sharedStrings.xml", payload)])
+    importer = ExcelImporter(_SampleRow, _COLUMNS, max_compression_ratio=50)
+    with pytest.raises(ExcelTooLargeError):
+        importer.parse(content)
+
+
+def test_zip_bomb_total_uncompressed_rejected() -> None:
+    # 多条目压缩比都不极端，但声明解压总大小超上限 → 拒（即使逐条目压缩比未触发）
+    chunk = bytes(range(256)) * 8192  # 2MB 低可压缩条目，压缩比低，但累计超 5MB 上限
+    content = _zip_bytes([(f"part{i}.bin", chunk) for i in range(4)])  # ~8MB 声明解压
+    importer = ExcelImporter(
+        _SampleRow, _COLUMNS, max_uncompressed_bytes=5 * 1024 * 1024, max_compression_ratio=10_000
+    )
+    with pytest.raises(ExcelTooLargeError):
+        importer.parse(content)
+
+
+def test_zip_bomb_too_many_entries_rejected() -> None:
+    # 海量条目 bomb → 条目数超上限 → 拒
+    content = _zip_bytes([(f"e{i}.txt", b"x") for i in range(40)])
+    importer = ExcelImporter(_SampleRow, _COLUMNS, max_zip_entries=16)
+    with pytest.raises(ExcelTooLargeError):
+        importer.parse(content)
+
+
+def test_normal_xlsx_passes_zip_bomb_guard() -> None:
+    # 回归守门：正常小 xlsx 在默认阈值下不误伤，正常导入成功
+    content = ExcelExporter(_COLUMNS).write(
+        [{"name": "甲", "code": "x1", "count": 1}, {"name": "乙", "code": "x2", "count": 2}]
+    )
+    result = ExcelImporter(_SampleRow, _COLUMNS).parse(content)
+    assert result.errors == []
+    assert [r.data.name for r in result.rows] == ["甲", "乙"]
+
+
+def test_bad_zip_not_treated_as_bomb_falls_through_to_invalid_file() -> None:
+    # 非 zip 字节 → 预检放行（BadZipFile）→ load_workbook 走 INVALID_FILE（非 ExcelTooLargeError）
+    result = ExcelImporter(_SampleRow, _COLUMNS).parse(b"not a zip at all")
     assert result.rows == []
     assert any(e.code == "INVALID_FILE" for e in result.errors)

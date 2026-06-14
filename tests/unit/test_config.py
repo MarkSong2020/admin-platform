@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from admin_platform.core.config import Settings
+from admin_platform.core.config import Settings, get_settings
+from admin_platform.main import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -290,3 +291,62 @@ def test_production_allows_specific_public_path() -> None:
         }
     )
     assert "/api/v1/public/ping" in settings.auth_public_paths
+
+
+# ---- OWASP API9 防护：生产默认关闭交互式文档（/docs、/redoc、/openapi.json）----
+#
+# create_app() 读 get_settings()（lru_cache），故经 APP_* env var 注入生产配置 + 清缓存，
+# 让 create_app 看到 production 设置（与现有 test_production_enforced_via_env 同模式）。
+# 这里把 _PROD_OK 基线（auth/secret/pepper/debug）经 env 给齐，否则生产门禁会拒绝构造。
+
+# _PROD_OK 的 env 形态（同值，键加 APP_ 前缀）—— 满足 _enforce_production_safety 门禁。
+_PROD_OK_ENV = {
+    "APP_ENVIRONMENT": "production",
+    "APP_AUTH_ENABLED": "true",
+    "APP_AUTH_JWT_SECRET": "x" * 32,
+    "APP_AUTH_REFRESH_TOKEN_PEPPER": "prod-pepper",
+    "APP_DEBUG": "false",
+}
+
+
+def _build_app_with_env(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]):
+    """注入 env + 清 get_settings 缓存后构造 app（避免 lru_cache 命中陈旧配置）。"""
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+    try:
+        return create_app()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_production_hides_docs_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产 + 默认（expose=False）→ openapi_url is None，三条文档路由不存在。"""
+    app = _build_app_with_env(monkeypatch, _PROD_OK_ENV)
+    assert app.openapi_url is None
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/openapi.json" not in paths
+    assert "/docs" not in paths
+    assert "/redoc" not in paths
+
+
+def test_production_exposes_docs_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产 + APP_EXPOSE_DOCS_IN_PRODUCTION=true → 三条文档路由恢复存在。"""
+    app = _build_app_with_env(
+        monkeypatch, {**_PROD_OK_ENV, "APP_EXPOSE_DOCS_IN_PRODUCTION": "true"}
+    )
+    assert app.openapi_url == "/openapi.json"
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/openapi.json" in paths
+    assert "/docs" in paths
+    assert "/redoc" in paths
+
+
+def test_local_keeps_docs_exposed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非生产（默认 local）→ 文档路由常开（回归守门：本地/CI 不受影响）。"""
+    app = _build_app_with_env(monkeypatch, {})
+    assert app.openapi_url == "/openapi.json"
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/openapi.json" in paths
+    assert "/docs" in paths
+    assert "/redoc" in paths

@@ -20,6 +20,7 @@ from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
+from admin_platform.core.pagination import PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.dict.deps import get_dict_service
@@ -38,10 +39,6 @@ from admin_platform.domains.dict.service import DictService
 router = APIRouter(prefix="/api/v1/dict", tags=["dict"])
 
 ServiceDep = Annotated[DictService, Depends(get_dict_service)]
-PageQ = Annotated[
-    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
-]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 KeywordQ = Annotated[str | None, Query(description="按字典名称 / 类型模糊过滤")]
 TypeIdQ = Annotated[int | None, Query(description="按字典类型 ID 过滤数据")]
 

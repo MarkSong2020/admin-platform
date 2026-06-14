@@ -10,11 +10,14 @@ from typing import cast
 
 import pytest
 
+from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.errors import AppError
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.repository import UserRepository
-from admin_platform.domains.user.schemas import UserCreate, UserUpdate
+from admin_platform.domains.user.schemas import UserCreate, UserListQuery, UserUpdate
 from admin_platform.domains.user.service import UserService
+
+_Q = UserListQuery()  # 默认空过滤 + order=desc + order_by=None（用默认序）
 
 
 def _user(uid: int, username: str, *, nickname: str = "", is_super_admin: bool = False) -> User:
@@ -42,6 +45,10 @@ class _StubRepo:
         self.updated = updated
         self.get_row = get_row
         self.super_admin_count = super_admin_count
+        # 记录最近一次 list/count 收到的过滤 + 排序 + scope，供 pass-through 断言。
+        self.last_query: object | None = None
+        self.last_order_by: object | None = None
+        self.last_scope: object | None = None
 
     async def find_by_username(self, username: str) -> User | None:
         if self.existing is not None and self.existing.username == username:
@@ -55,11 +62,23 @@ class _StubRepo:
         return self.get_row
 
     async def list_paginated(
-        self, page: int, size: int, *, scope: object | None = None
+        self,
+        query: object,
+        page: int,
+        size: int,
+        *,
+        order_by: object,
+        scope: object | None = None,
     ) -> list[User]:
+        self.last_query = query
+        self.last_order_by = order_by
+        self.last_scope = scope
         return self.rows
 
-    async def count(self, *, scope: object | None = None) -> int:
+    async def count(self, query: object, *, scope: object | None = None) -> int:
+        # count 也收到同一 query + scope（断言 WHERE 与 list 一致 → total 反映过滤后数量）。
+        self.last_query = query
+        self.last_scope = scope
         return len(self.rows)
 
     async def count_super_admins(self) -> int:
@@ -84,7 +103,7 @@ async def test_create_duplicate_username_raises_409() -> None:
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(existing=existing)).create(UserCreate(username="alice", password="pw"))
     assert exc.value.status_code == 409
-    assert exc.value.code == "admin_platform.USERNAME_DUPLICATE"
+    assert exc.value.code == "user.USERNAME_DUPLICATE"
 
 
 @pytest.mark.asyncio
@@ -99,7 +118,7 @@ async def test_get_missing_raises_404() -> None:
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo()).get(999)
     assert exc.value.status_code == 404
-    assert exc.value.code == "admin_platform.USER_NOT_FOUND"
+    assert exc.value.code == "user.NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -112,10 +131,50 @@ async def test_delete_missing_raises_404() -> None:
 @pytest.mark.asyncio
 async def test_list_returns_page() -> None:
     rows = [_user(1, "alice"), _user(2, "bob")]
-    page = await _svc(_StubRepo(rows=rows)).list_(page=1, size=20)
+    page = await _svc(_StubRepo(rows=rows)).list_(_Q, page=1, size=20)
     assert {u.username for u in page.items} == {"alice", "bob"}
     assert page.total == 2
     assert page.total_pages == 1
+
+
+# ---- 过滤 / 排序 / data_scope 叠加（P1 列表增强）------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_invalid_order_by_raises_422() -> None:
+    """防注入守门：order_by 非 allowlist 字段（如 password_hash）→ service 抛 422，绝不进 repo。"""
+    repo = _StubRepo(rows=[_user(1, "alice")])
+    with pytest.raises(AppError) as exc:
+        await _svc(repo).list_(UserListQuery(order_by="password_hash"), page=1, size=20)
+    assert exc.value.status_code == 422
+    assert exc.value.code == "framework.SORT_FIELD_INVALID"
+    # 校验在 repo 之前就拦下 → repo 未被调用（last_query 仍为初始 None）。
+    assert repo.last_query is None
+
+
+@pytest.mark.asyncio
+async def test_list_injection_order_by_raises_422() -> None:
+    """红线：经典注入串 order_by → 422，不拼进 SQL。"""
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo()).list_(
+            UserListQuery(order_by="id; DROP TABLE users"), page=1, size=20
+        )
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_filters_and_scope_passed_through() -> None:
+    """过滤 DTO + data_scope 都透传到 repository 的 list 与 count（WHERE 一致 → total 正确）。
+
+    data_scope 不被新过滤吞掉：非超管 scope（SELF_DEPT，可见部门 {7}）原样传给 list 和 count，
+    过滤是 AND 叠加在数据权限之上（apply_data_scope 在 repo 内先注入，再 .where 过滤）。
+    """
+    repo = _StubRepo(rows=[_user(1, "alice")])
+    query = UserListQuery(username="ali", status="active", dept_id=7)
+    scope = DataScope(scope_type=ScopeType.SELF_DEPT, user_id=1, visible_dept_ids=frozenset({7}))
+    await _svc(repo).list_(query, page=1, size=20, scope=scope)
+    assert repo.last_query is query  # list 收到原过滤 DTO
+    assert repo.last_scope is scope  # count 也收到同一 scope（最后一次调用是 count），不被丢弃
 
 
 @pytest.mark.asyncio
@@ -155,7 +214,7 @@ async def test_delete_last_super_admin_raises_409() -> None:
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(get_row=admin, super_admin_count=1)).delete(1)
     assert exc.value.status_code == 409
-    assert exc.value.code == "admin_platform.LAST_SUPER_ADMIN"
+    assert exc.value.code == "user.LAST_SUPER_ADMIN"
 
 
 @pytest.mark.asyncio
@@ -173,4 +232,4 @@ async def test_disable_last_super_admin_raises_409() -> None:
             1, UserUpdate(status="disabled")
         )
     assert exc.value.status_code == 409
-    assert exc.value.code == "admin_platform.LAST_SUPER_ADMIN"
+    assert exc.value.code == "user.LAST_SUPER_ADMIN"

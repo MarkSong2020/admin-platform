@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.notice.repository import NoticeRepository
 from admin_platform.domains.notice.schemas import (
     NoticeCreate,
@@ -30,13 +31,12 @@ class NoticeService:
             notice_type=notice_type, status=status, page=page, size=size
         )
         total = await self._repo.count(notice_type=notice_type, status=status)
-        total_pages = (total + size - 1) // size if size > 0 else 0
         return NoticePage(
             items=[NoticeRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, item_id: int) -> NoticeRead:

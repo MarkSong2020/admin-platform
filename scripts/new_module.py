@@ -694,6 +694,18 @@ TEMPLATE_TEST_API_INMEM = dedent('''\
         assert body == {{"items": [], "page": 1, "size": 20, "total": 0, "total_pages": 0}}
 
 
+    def test_list_canonical_page_size_returns_200() -> None:
+        # canonical 分页请求 ``?page=1&size=10`` 必须 200（结构性防「列表端点 422」绑定反模式：
+        # query-model 与独立标量 page/size Query 混用时，标量令整个 model 形参无法从 query 填充 →
+        # 422「该模型参数 missing」，与 extra 策略无关）。新模块默认继承这道防线，
+        # 与 tests/api/test_list_endpoint_smoke_contract.py 的全局 auto-smoke 互为锚点。
+        res = _client().get("/api/v1/{plural}?page=1&size=10")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["page"] == 1
+        assert body["size"] == 10
+
+
     def test_list_size_above_max_is_rejected() -> None:
         res = _client().get("/api/v1/{plural}?size=101")
         assert res.status_code == 422
@@ -718,6 +730,8 @@ TEMPLATE_TEST_API_DB = dedent('''\
     from {service}.core.errors import register_exception_handlers
     from {service}.core.middleware import RequestIDMiddleware
     from {service}.domains.{name}.api import router
+    from {service}.domains.{name}.deps import get_{name}_service
+    from {service}.domains.{name}.schemas import {Name}Page
 
 
     def _client() -> TestClient:
@@ -728,6 +742,13 @@ TEMPLATE_TEST_API_DB = dedent('''\
         return TestClient(app)
 
 
+    class _StubListService:
+        """只实现 list_ 的哑 service：回显 page/size，让 canonical 请求 DB-free 跑通（不用 Mock）。"""
+
+        async def list_(self, *, page: int, size: int) -> {Name}Page:
+            return {Name}Page(items=[], page=page, size=size, total=0, total_pages=0)
+
+
     def test_create_returns_422_on_missing_field() -> None:
         res = _client().post("/api/v1/{plural}", json={{}})
         assert res.status_code == 422
@@ -736,6 +757,23 @@ TEMPLATE_TEST_API_DB = dedent('''\
     def test_update_returns_422_on_invalid_payload() -> None:
         res = _client().patch("/api/v1/{plural}/1", json={{"name": 123}})
         assert res.status_code == 422
+
+
+    def test_list_canonical_page_size_returns_200() -> None:
+        # canonical 分页请求 ``?page=1&size=10`` 必须 200（结构性防「列表端点 422」绑定反模式：
+        # query-model 与独立标量 page/size Query 混用时，标量令整个 model 形参无法从 query 填充 →
+        # 422「该模型参数 missing」，与 extra 策略无关）。service override 成空 Page
+        # 哑实现，DB-free。与 tests/api/test_list_endpoint_smoke_contract.py 的全局 auto-smoke 互为锚点。
+        app = FastAPI()
+        app.add_middleware(RequestIDMiddleware)
+        register_exception_handlers(app)
+        app.include_router(router)
+        app.dependency_overrides[get_{name}_service] = _StubListService
+        res = TestClient(app).get("/api/v1/{plural}?page=1&size=10")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["page"] == 1
+        assert body["size"] == 10
 
 
     def test_list_size_above_max_is_rejected() -> None:

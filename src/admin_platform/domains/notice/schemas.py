@@ -21,7 +21,7 @@ class NoticeCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=128, description="公告标题")
     notice_type: NoticeType = Field(description="公告类型（notification / announcement）")
-    content: str = Field(min_length=1, description="公告内容（富文本）")
+    content: str = Field(min_length=1, max_length=65535, description="公告内容（富文本）")
     status: StatusValue = Field(default="active", description="状态（active / disabled）")
     remark: str | None = Field(default=None, max_length=255, description="备注")
 
@@ -32,7 +32,9 @@ class NoticeUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     title: str | None = Field(default=None, min_length=1, max_length=128, description="公告标题")
     notice_type: NoticeType | None = Field(default=None, description="公告类型")
-    content: str | None = Field(default=None, min_length=1, description="公告内容")
+    content: str | None = Field(
+        default=None, min_length=1, max_length=65535, description="公告内容"
+    )
     status: StatusValue | None = Field(default=None, description="状态")
     remark: str | None = Field(default=None, max_length=255, description="备注")
 

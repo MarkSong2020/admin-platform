@@ -1,0 +1,46 @@
+name: frontend
+on:
+  pull_request:
+    # 后端 router/schema 改动也影响 OpenAPI → 必须触发 frontend drift 门（spec §7）
+    paths:
+      - 'frontend/**'
+      - 'src/admin_platform/**'
+      - 'scripts/dump_openapi.py'
+      - 'tests/contracts/seed_page_components.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'src/admin_platform/**'
+      - 'scripts/dump_openapi.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+jobs:
+  frontend-gates:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"   # 与后端 ci.yml 一致，确保 uv sync 有 Python
+      - name: 装后端依赖（供 openapi-drift 重新 dump 后端 schema）
+        working-directory: .
+        run: uv sync --frozen
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec oxlint .          # 检查模式（不 --fix）
+      - run: pnpm exec eslint .
+      - run: pnpm type-check
+      - run: pnpm exec vitest run --coverage   # run 模式 + 覆盖率门（thresholds 见 vitest.config）
+      - run: pnpm build
+      - run: pnpm depcruise
+      - run: pnpm openapi-drift          # 重新 dump 后端 schema → 生成类型 → diff（真门，spec §7）

@@ -1,0 +1,6 @@
+@import './base.css';
+
+/* 后台全屏布局：#app 占满视口，不限宽、不分栏（去除 create-vue demo 的 grid/padding） */
+#app {
+  height: 100%;
+}

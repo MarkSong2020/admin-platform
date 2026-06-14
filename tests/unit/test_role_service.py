@@ -15,10 +15,11 @@ import pytest
 from admin_platform.core.errors import AppError
 from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.repository import RoleRepository
-from admin_platform.domains.role.schemas import RoleCreate, RoleUpdate
+from admin_platform.domains.role.schemas import RoleCreate, RoleListQuery, RoleUpdate
 from admin_platform.domains.role.service import RoleService
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
+_Q = RoleListQuery()  # 默认空过滤 + order=desc + order_by=None（用默认序）
 
 
 def _role(rid: int, *, code: str, name: str = "role", data_scope: str = "self") -> Role:
@@ -49,11 +50,13 @@ class _StubRepo:
         self._rows = {row.id: row for row in (rows or [])}
         self._by_code = by_code or {}
 
-    async def list_paginated(self, page: int, size: int) -> list[Role]:
+    async def list_paginated(
+        self, query: object, page: int, size: int, *, order_by: object
+    ) -> list[Role]:
         start = (page - 1) * size
         return list(self._rows.values())[start : start + size]
 
-    async def count(self) -> int:
+    async def count(self, query: object) -> int:
         return len(self._rows)
 
     async def get(self, role_id: int) -> Role | None:
@@ -94,7 +97,9 @@ async def test_get_missing_raises_404() -> None:
 
 @pytest.mark.asyncio
 async def test_create_ok() -> None:
-    out = await _svc(_StubRepo()).create(RoleCreate(name="管理员", code="admin", data_scope="all"))
+    out = await _svc(_StubRepo()).create(
+        RoleCreate(name="管理员", code="admin", data_scope="all"), is_super_admin=True
+    )
     assert out.id == 1
     assert out.code == "admin"
     assert out.data_scope == "all"
@@ -105,7 +110,7 @@ async def test_create_duplicate_code_raises_409() -> None:
     existing = _role(5, code="admin")
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(by_code={"admin": existing})).create(
-            RoleCreate(name="dup", code="admin")
+            RoleCreate(name="dup", code="admin"), is_super_admin=True
         )
     assert exc.value.code == "role.CODE_DUPLICATE"
     assert exc.value.status_code == 409
@@ -120,7 +125,7 @@ async def test_update_code_duplicate_raises_409() -> None:
     taken = _role(7, code="TAKEN")
     with pytest.raises(AppError) as exc:
         await _svc(_StubRepo(rows=[node], by_code={"TAKEN": taken})).update(
-            3, RoleUpdate(code="TAKEN")
+            3, RoleUpdate(code="TAKEN"), is_super_admin=True
         )
     assert exc.value.code == "role.CODE_DUPLICATE"
 
@@ -130,7 +135,7 @@ async def test_update_same_code_ok() -> None:
     # code 改成自身现值 → 不触发唯一冲突（仅改其它字段）。
     node = _role(3, code="B")
     out = await _svc(_StubRepo(rows=[node], by_code={"B": node})).update(
-        3, RoleUpdate(code="B", name="新名")
+        3, RoleUpdate(code="B", name="新名"), is_super_admin=True
     )
     assert out.name == "新名"
 
@@ -138,14 +143,16 @@ async def test_update_same_code_ok() -> None:
 @pytest.mark.asyncio
 async def test_update_data_scope_ok() -> None:
     node = _role(3, code="B", data_scope="self")
-    out = await _svc(_StubRepo(rows=[node])).update(3, RoleUpdate(data_scope="self_dept_and_below"))
+    out = await _svc(_StubRepo(rows=[node])).update(
+        3, RoleUpdate(data_scope="self_dept_and_below"), is_super_admin=True
+    )
     assert out.data_scope == "self_dept_and_below"
 
 
 @pytest.mark.asyncio
 async def test_update_missing_raises_404() -> None:
     with pytest.raises(AppError) as exc:
-        await _svc(_StubRepo()).update(999, RoleUpdate(name="x"))
+        await _svc(_StubRepo()).update(999, RoleUpdate(name="x"), is_super_admin=True)
     assert exc.value.code == "role.NOT_FOUND"
     assert exc.value.status_code == 404
 
@@ -174,7 +181,7 @@ async def test_delete_missing_raises_404() -> None:
 @pytest.mark.asyncio
 async def test_list_returns_pagination_envelope() -> None:
     rows = [_role(i, code=f"R{i}") for i in range(1, 24)]  # 23 条 → 边界 total_pages=3
-    page = await _svc(_StubRepo(rows=rows)).list_(page=2, size=10)
+    page = await _svc(_StubRepo(rows=rows)).list_(_Q, page=2, size=10)
     assert page.page == 2
     assert page.size == 10
     assert page.total == 23
@@ -184,7 +191,93 @@ async def test_list_returns_pagination_envelope() -> None:
 
 @pytest.mark.asyncio
 async def test_list_empty_returns_zero_total_pages() -> None:
-    page = await _svc(_StubRepo()).list_(page=1, size=20)
+    page = await _svc(_StubRepo()).list_(_Q, page=1, size=20)
     assert page.items == []
     assert page.total == 0
     assert page.total_pages == 0
+
+
+@pytest.mark.asyncio
+async def test_list_invalid_order_by_raises_422() -> None:
+    """防注入守门：order_by 非 allowlist 字段 → 422，绝不进 SQL。"""
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo()).list_(
+            RoleListQuery(order_by="data_scope; DROP TABLE roles"), page=1, size=20
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.code == "framework.SORT_FIELD_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_list_allowed_order_by_ok() -> None:
+    """allowlist 内字段（created_at）+ asc → 正常返回（不抛）。"""
+    rows = [_role(i, code=f"R{i}") for i in range(1, 4)]
+    page = await _svc(_StubRepo(rows=rows)).list_(
+        RoleListQuery(order_by="created_at", order="asc"), page=1, size=20
+    )
+    assert page.total == 3
+
+
+# ---- P0 提权防护：授权根字段（data_scope / status）仅超管可写 -----------------
+
+
+@pytest.mark.asyncio
+async def test_update_data_scope_by_non_super_admin_raises_403() -> None:
+    """核心回归守门：非超管 PATCH role data_scope='all' → 403（堵自我提权漏洞）。"""
+    node = _role(3, code="B", data_scope="self")
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(rows=[node])).update(
+            3, RoleUpdate(data_scope="all"), is_super_admin=False
+        )
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_status_by_non_super_admin_raises_403() -> None:
+    node = _role(3, code="B")
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo(rows=[node])).update(
+            3, RoleUpdate(status="disabled"), is_super_admin=False
+        )
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+
+
+@pytest.mark.asyncio
+async def test_update_display_field_by_non_super_admin_ok() -> None:
+    """非超管只改展示字段（name）放行——收紧仅限授权根字段，不误伤日常编辑。"""
+    node = _role(3, code="B", name="旧名")
+    out = await _svc(_StubRepo(rows=[node])).update(
+        3, RoleUpdate(name="新名"), is_super_admin=False
+    )
+    assert out.name == "新名"
+
+
+@pytest.mark.asyncio
+async def test_update_data_scope_by_super_admin_ok() -> None:
+    node = _role(3, code="B", data_scope="self")
+    out = await _svc(_StubRepo(rows=[node])).update(
+        3, RoleUpdate(data_scope="all"), is_super_admin=True
+    )
+    assert out.data_scope == "all"
+
+
+@pytest.mark.asyncio
+async def test_create_non_default_data_scope_by_non_super_admin_raises_403() -> None:
+    """create 纵深防御：非超管把 data_scope 设成非默认值（all）即 403。"""
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo()).create(
+            RoleCreate(name="x", code="x", data_scope="all"), is_super_admin=False
+        )
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_default_fields_by_non_super_admin_ok() -> None:
+    """非超管 create 默认 data_scope/status → 放行（不阻塞建普通角色）。"""
+    out = await _svc(_StubRepo()).create(
+        RoleCreate(name="普通角色", code="normal"), is_super_admin=False
+    )
+    assert out.code == "normal"
+    assert out.data_scope == "self"

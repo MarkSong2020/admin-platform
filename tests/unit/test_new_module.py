@@ -386,6 +386,34 @@ def test_generated_api_tests_mount_request_id_middleware_db_template(
     assert "app.add_middleware(RequestIDMiddleware)" in db
 
 
+def test_generated_api_tests_include_canonical_list_smoke(fake_repo: Path, new_module) -> None:
+    """守门：生成的 api 测试必须自带 canonical 分页 smoke（``?page=1&size=10`` 必 200）。
+
+    背景（Codex high + harness 门 meta agent 双源印证）：``scripts/new_module.py`` 给每个新域注入
+    ``test_list_canonical_page_size_returns_200``，作为「列表端点 422」反模式的**单域 self-contained
+    锚点**。但全局运行时门 ``test_list_endpoint_smoke_contract`` 是自动发现，删掉模板里这段 smoke
+    **不会**让它报警（漏在「单域锚点」这一层）。本守门用文本断言钉住模板，谁删谁 FAIL。
+    """
+    new_module.main(["--name", "order"])
+    inmem = (fake_repo / "tests" / "api" / "test_order_api.py").read_text()
+    assert "def test_list_canonical_page_size_returns_200" in inmem, (
+        "in-mem 模板掉了 canonical 分页 smoke（结构性防 422 反模式的单域锚点）"
+    )
+    assert "?page=1&size=10" in inmem
+
+
+def test_generated_api_tests_include_canonical_list_smoke_db_template(
+    fake_repo: Path, new_module
+) -> None:
+    """Same guarantee for --with-model template."""
+    new_module.main(["--name", "order", "--with-model"])
+    db = (fake_repo / "tests" / "api" / "test_order_api.py").read_text()
+    assert "def test_list_canonical_page_size_returns_200" in db, (
+        "--with-model 模板掉了 canonical 分页 smoke（结构性防 422 反模式的单域锚点）"
+    )
+    assert "?page=1&size=10" in db
+
+
 def test_post_endpoints_advertise_idempotency_errors_in_openapi(
     fake_repo: Path, new_module
 ) -> None:
