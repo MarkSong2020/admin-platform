@@ -59,8 +59,13 @@ jobs:
       # trailing-whitespace / detect-private-key). Without this, hook config
       # drift goes silent in CI and only surfaces when a new joiner installs
       # the hook locally and gets confused by failed first commits.
+      # v0.4.22: SKIP the frontend hooks here — this backend lane has no
+      # pnpm/node, so `frontend-lint` (cd frontend && pnpm exec eslint) exits
+      # 127 (command not found). The frontend lint/commitlint run in the
+      # dedicated `frontend-gates` lane; running them on --all-files here only
+      # broke the config-drift guard once the P6 frontend tree landed.
       - name: pre-commit hooks (config drift guard)
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+        run: SKIP=frontend-lint,frontend-commitlint uv run pre-commit run --all-files --show-diff-on-failure
 
       # v0.4.12: audit must BLOCK on known CVEs. Pre-v0.4.12 this step used
       # `continue-on-error: true` which silently masked vulnerabilities in
