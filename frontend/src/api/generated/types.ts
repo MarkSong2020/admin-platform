@@ -4875,6 +4875,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                    "application/octet-stream": string;
                 };
             };
             /** @description Unauthorized */
@@ -5313,7 +5314,7 @@ export interface operations {
                 status?: string | null;
                 /** @description 按处理器过滤 */
                 handler_key?: string | null;
-                /** @description 页码（从 1 开始） */
+                /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
                 size?: number;
@@ -5476,7 +5477,7 @@ export interface operations {
                 task_id?: number | null;
                 /** @description 按状态过滤 */
                 status?: string | null;
-                /** @description 页码（从 1 开始） */
+                /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
                 size?: number;
@@ -5784,7 +5785,7 @@ export interface operations {
                 username?: string | null;
                 /** @description 按状态过滤 */
                 status?: string | null;
-                /** @description 页码（从 1 开始，上限 10000） */
+                /** @description 日志页码（从 1 开始，上限 500） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
                 size?: number;
@@ -5894,7 +5895,7 @@ export interface operations {
     monitor_online_list: {
         parameters: {
             query?: {
-                /** @description 页码（从 1 开始，上限 10000） */
+                /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
                 size?: number;
@@ -6008,7 +6009,7 @@ export interface operations {
                 actor_user_id?: number | null;
                 /** @description 按结果过滤(success/failure/denied) */
                 result_status?: string | null;
-                /** @description 页码（从 1 开始，上限 10000） */
+                /** @description 日志页码（从 1 开始，上限 500） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
                 size?: number;
@@ -6457,6 +6458,16 @@ export interface operations {
     posts_list: {
         parameters: {
             query?: {
+                /** @description 岗位编码模糊匹配 */
+                code?: string | null;
+                /** @description 岗位名称模糊匹配 */
+                name?: string | null;
+                /** @description 岗位状态（active / disabled） */
+                status?: ("active" | "disabled") | null;
+                /** @description 排序字段（sort_order / created_at / id） */
+                order_by?: string | null;
+                /** @description 排序方向（asc / desc，默认 desc） */
+                order?: "asc" | "desc";
                 /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
@@ -6495,7 +6506,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6591,6 +6602,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
                 };
             };
             /** @description Unauthorized */
@@ -6870,6 +6882,20 @@ export interface operations {
     roles_list: {
         parameters: {
             query?: {
+                /** @description 角色名称模糊匹配 */
+                name?: string | null;
+                /** @description 角色编码模糊匹配 */
+                code?: string | null;
+                /** @description 角色状态（active / disabled） */
+                status?: ("active" | "disabled") | null;
+                /** @description 创建时间起（含） */
+                created_at_begin?: string | null;
+                /** @description 创建时间止（含） */
+                created_at_end?: string | null;
+                /** @description 排序字段（created_at / sort_order / id） */
+                order_by?: string | null;
+                /** @description 排序方向（asc / desc，默认 desc） */
+                order?: "asc" | "desc";
                 /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
@@ -6908,7 +6934,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7416,6 +7442,20 @@ export interface operations {
     users_list: {
         parameters: {
             query?: {
+                /** @description 用户名模糊匹配 */
+                username?: string | null;
+                /** @description 账号状态（active / disabled） */
+                status?: ("active" | "disabled") | null;
+                /** @description 所属部门ID（精确匹配） */
+                dept_id?: number | null;
+                /** @description 创建时间起（含） */
+                created_at_begin?: string | null;
+                /** @description 创建时间止（含） */
+                created_at_end?: string | null;
+                /** @description 排序字段（id / username / created_at） */
+                order_by?: string | null;
+                /** @description 排序方向（asc / desc，默认 desc） */
+                order?: "asc" | "desc";
                 /** @description 页码（从 1 开始，上限 10000 防深分页 DoS） */
                 page?: number;
                 /** @description 每页条数（上限 100） */
@@ -7454,7 +7494,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
