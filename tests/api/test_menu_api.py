@@ -27,6 +27,7 @@ from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.menu.api import router
 from admin_platform.domains.menu.deps import get_menu_service
 from admin_platform.domains.menu.schemas import MenuCreate, MenuPage, MenuRead, MenuUpdate
+from tests.api._support import override_get_session
 
 
 class _StubProvider(PermissionProvider):
@@ -55,6 +56,9 @@ def _make_app(*, current_user: CurrentUser | None, provider: PermissionProvider 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -175,10 +179,10 @@ class _StubService:
     async def get(self, item_id: int) -> MenuRead:
         return _read(item_id)
 
-    async def create(self, payload: MenuCreate) -> MenuRead:
+    async def create(self, payload: MenuCreate, *, is_super_admin: bool) -> MenuRead:
         return _read(name=payload.name)
 
-    async def update(self, item_id: int, payload: MenuUpdate) -> MenuRead:
+    async def update(self, item_id: int, payload: MenuUpdate, *, is_super_admin: bool) -> MenuRead:
         return _read(item_id)
 
     async def delete(self, item_id: int) -> None:
@@ -202,3 +206,12 @@ def test_happy_paths_through_handlers() -> None:
     assert created.status_code == 201
     assert client.patch("/api/v1/menus/1", json={"name": "x"}).status_code == 200
     assert client.delete("/api/v1/menus/1").status_code == 204
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size= → 200，防混用 422 反模式复发）----
+
+
+def test_list_canonical_page_size_200() -> None:
+    # menu list 无 filter，canonical = page/size。
+    res = _stub_service_client().get("/api/v1/menus?page=1&size=10")
+    assert res.status_code == 200

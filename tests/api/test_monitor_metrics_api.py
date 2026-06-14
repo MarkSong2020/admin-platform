@@ -30,6 +30,7 @@ from admin_platform.domains.monitor.schemas import (
     ServerSwap,
     ServerSys,
 )
+from tests.api._support import override_get_session
 
 SERVER_URL = "/api/v1/monitor/server"
 CACHE_URL = "/api/v1/monitor/cache"
@@ -126,6 +127,9 @@ def _client(*, current_user: CurrentUser | None, provider: PermissionProvider | 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     # 直接传类（FastAPI 作依赖会实例化）；无参 lambda 会触 PLW0108。
     app.dependency_overrides[get_system_monitor_service] = _StubService
     if current_user is not None:

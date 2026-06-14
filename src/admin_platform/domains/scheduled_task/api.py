@@ -15,6 +15,7 @@ from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
+from admin_platform.core.pagination import PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.scheduled_task.deps import get_scheduled_task_service
@@ -32,8 +33,6 @@ from admin_platform.domains.scheduled_task.service import ScheduledTaskService
 router = APIRouter(prefix="/api/v1/monitor/jobs", tags=["scheduled_task"])
 
 ServiceDep = Annotated[ScheduledTaskService, Depends(get_scheduled_task_service)]
-PageQ = Annotated[int, Query(ge=1, le=10000, description="页码（从 1 开始）")]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 JobList = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_JOB_LIST))]
 JobQuery = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_JOB_QUERY))]

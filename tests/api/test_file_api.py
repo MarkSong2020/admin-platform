@@ -23,8 +23,18 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.file.api import _content_disposition, router
+from admin_platform.domains.file.deps import get_file_service
+from admin_platform.domains.file.schemas import FilePage
+from tests.api._support import override_get_session
 
 _PNG = ("a.png", b"\x89PNG\r\n\x1a\nimg", "image/png")
+
+
+class _StubListService:
+    """只实现 list_ 的哑 service：回显 page/size，验证 canonical 请求解析（不连 DB / 不用 Mock）。"""
+
+    async def list_(self, *, page: int, size: int) -> FilePage:
+        return FilePage(items=[], page=page, size=size, total=0, total_pages=0)
 
 
 class _StubProvider(PermissionProvider):
@@ -53,6 +63,9 @@ def _make_app(*, current_user: CurrentUser | None, provider: PermissionProvider 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -125,6 +138,23 @@ def test_upload_missing_file_returns_422() -> None:
 def test_list_size_above_max_is_rejected() -> None:
     res = _superadmin_client().get("/api/v1/files?size=101")
     assert res.status_code == 422
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size= → 200，防混用 422 反模式复发）----
+
+
+def test_list_canonical_page_size_200() -> None:
+    # file list 无 filter，canonical = page/size。stub service 回显 page/size 验证解析正确。
+    app = _make_app(
+        current_user=CurrentUser(user_id="1", sub="1"),
+        provider=_StubProvider(is_super=True),
+    )
+    app.dependency_overrides[get_file_service] = _StubListService
+    res = TestClient(app).get("/api/v1/files?page=1&size=10")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["page"] == 1
+    assert body["size"] == 10
 
 
 # ---- Content-Disposition 注入防御（对抗审查 P1）---------------------------

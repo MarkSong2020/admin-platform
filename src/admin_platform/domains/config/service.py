@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.config.repository import ConfigRepository
 from admin_platform.domains.config.schemas import (
     ConfigCreate,
@@ -35,13 +36,12 @@ class ConfigService:
         """offset 分页（ADR 0001 §7.5 envelope），可选按 key/name 关键词过滤。"""
         rows = await self._repo.list_paginated(keyword=keyword, page=page, size=size)
         total = await self._repo.count(keyword=keyword)
-        total_pages = (total + size - 1) // size if size > 0 else 0
         return ConfigPage(
             items=[ConfigRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, item_id: int) -> ConfigRead:
