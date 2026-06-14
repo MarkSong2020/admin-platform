@@ -9,19 +9,27 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from redis.asyncio import Redis
 
+from admin_platform.core.auth import CurrentUser, require_current_user
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AppError, ProblemDetail
 from admin_platform.domains.auth.schemas import (
     CaptchaResponse,
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     LogoutRequest,
     RefreshRequest,
 )
-from admin_platform.domains.auth.service import issue_captcha, login, logout, refresh
+from admin_platform.domains.auth.service import (
+    change_password,
+    issue_captcha,
+    login,
+    logout,
+    refresh,
+)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -34,6 +42,12 @@ _LOGIN_FAILED_RESPONSE: dict[int | str, dict[str, object]] = {
 }
 _REFRESH_FAILED_RESPONSE: dict[int | str, dict[str, object]] = {401: {"model": ProblemDetail}}
 _CAPTCHA_RESPONSE: dict[int | str, dict[str, object]] = {503: {"model": ProblemDetail}}
+# 改密失败：400 原密码错 / 422 新密码弱 / 401 未鉴权（require_current_user）。
+_CHANGE_PASSWORD_RESPONSE: dict[int | str, dict[str, object]] = {
+    400: {"model": ProblemDetail},
+    401: {"model": ProblemDetail},
+    422: {"model": ProblemDetail},
+}
 
 
 def _login_guard_redis(request: Request) -> Redis | None:
@@ -87,3 +101,19 @@ async def refresh_endpoint(payload: RefreshRequest) -> LoginResponse:
 async def logout_endpoint(payload: LogoutRequest) -> None:
     """登出：撤销 refresh token 所在 family（幂等）。"""
     await logout(payload.refresh_token)
+
+
+@router.post(
+    "/change-password",
+    operation_id="auth_change_password",
+    responses=_CHANGE_PASSWORD_RESPONSE,
+)
+async def change_password_endpoint(
+    payload: ChangePasswordRequest,
+    user: Annotated[CurrentUser, Depends(require_current_user)],
+) -> LoginResponse:
+    """自助改密：验原密 → 改密 → 撤该用户全部旧 refresh 会话 → 返回当前会话的新 access+refresh。
+
+    需登录（``require_current_user``，无需额外权限点——任何已登录用户都能改自己的）。
+    """
+    return await change_password(int(user.user_id), payload.old_password, payload.new_password)
