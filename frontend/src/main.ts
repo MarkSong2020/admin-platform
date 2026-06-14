@@ -1,5 +1,7 @@
 import './assets/main.css'
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
+import './styles/theme.css'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -12,6 +14,7 @@ import { registerSessionExpiryHandler } from '@/stores/session-expiry'
 import { registerLogoutDeps } from '@/stores/logout'
 import { registerPostLoginSetup } from '@/stores/post-login'
 import { hasPermi } from '@/directives/has-permi'
+import { initDarkMode } from '@/composables/useDarkMode'
 
 const app = createApp(App)
 
@@ -34,5 +37,8 @@ registerSessionExpiryHandler(routerDeps)
 // 主动登出（Layout 调 performLogout）与登录后装配（登录页调 runPostLoginSetup）同注入模式
 registerLogoutDeps(routerDeps)
 registerPostLoginSetup(setupAfterLogin)
+
+// 暗色偏好初始化（localStorage > 系统）；须在 mount 前应用 html.dark，避免首屏闪烁
+initDarkMode()
 
 app.mount('#app')

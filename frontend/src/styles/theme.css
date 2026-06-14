@@ -1,0 +1,104 @@
+/* ============================================================================
+ * 设计令牌层：在 Element Plus 之上覆盖 CSS 变量（现代靛蓝/品牌蓝 #4361ee +
+ * 统一圆角/阴影/间距），借鉴 vue-pure-admin 观感。不改组件库，亮/暗双模一致。
+ * 必须在 element-plus/dist/index.css 与 dark/css-vars.css 之后 import（main.ts）。
+ * ========================================================================== */
+
+:root {
+  /* 主色：现代靛蓝（替换 EP 默认偏老的 #409eff）。light-N 为 EP mix(white) 派生。 */
+  --el-color-primary: #4361ee;
+  --el-color-primary-light-3: #7b90f3;
+  --el-color-primary-light-5: #a1b0f6;
+  --el-color-primary-light-7: #c7d0fa;
+  --el-color-primary-light-8: #d9dffc;
+  --el-color-primary-light-9: #eceffd;
+  --el-color-primary-dark-2: #364ebe;
+
+  /* 圆角统一上调（EP 默认 4px 偏方正） */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+
+  /* 应用级令牌：页面画布 / 卡片 / 壳尺寸 */
+  --app-bg-page: #f5f7fa;
+  --app-card-bg: #ffffff;
+  --app-card-radius: 12px;
+  --app-card-shadow: 0 1px 2px rgb(0 0 0 / 3%), 0 4px 16px rgb(0 0 0 / 4%);
+  --app-header-height: 56px;
+  --app-tags-height: 40px;
+  --app-aside-width: 220px;
+  --app-aside-width-collapsed: 64px;
+}
+
+/* 暗色：EP dark/css-vars 提供基底，这里覆盖主色 + 画布/卡片。light-N 改为 mix(#141414)。 */
+html.dark {
+  --el-color-primary: #4361ee;
+  --el-color-primary-light-3: #354aad;
+  --el-color-primary-light-5: #2c3b81;
+  --el-color-primary-light-7: #222b55;
+  --el-color-primary-light-8: #1d2340;
+  --el-color-primary-light-9: #191c2a;
+  --el-color-primary-dark-2: #7b90f3;
+
+  --app-bg-page: #0f1115;
+  --app-card-bg: #1a1c22;
+  --app-card-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+}
+
+/* 页面画布底色（el-main 灰底，衬托白卡） */
+body {
+  background: var(--app-bg-page);
+}
+
+/* 现代细滚动条（webkit 系） */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--el-border-color-darker);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--el-text-color-disabled);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 组件观感微调：卡片圆角、按钮字重 */
+.el-card {
+  border-radius: var(--app-card-radius);
+}
+
+.el-button {
+  font-weight: 500;
+}
+
+/* 页面自动卡片化：每个业务页根节点（el-main 直接子元素）渲染为白卡，衬在灰底画布上。
+   各 view 自身的 padding（如 .xxx-page{padding:16px}）特异性更高会胜出，统一内距；
+   此处只补 bg/圆角/阴影，故无需逐页改动即可全站卡片化。 */
+.layout-main > * {
+  padding: 16px;
+  background: var(--app-card-bg);
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--app-card-shadow);
+}
+
+/* 路由切换过渡（Layout 的 router-view 用 name="fade-transform"） */
+.fade-transform-enter-active,
+.fade-transform-leave-active {
+  transition: all 0.25s ease;
+}
+
+.fade-transform-enter-from {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+.fade-transform-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
