@@ -103,10 +103,10 @@ addopts = [
     "--import-mode=importlib",
     "--strict-markers",
     "--strict-config",
-    # 默认排除 integration——避免裸 `pytest` 在未起 docker compose 时失败。
-    # 跑集成测试用 `make test-integration` 或 `pytest -m integration`（显式覆盖）。
-    "-m",
-    "not integration",
+    # 注意：这里**故意不放** `-m "not integration"`——曾把它收在全局 addopts
+    # 导致「开发者点名跑 `pytest tests/integration/...` 也被静默 deselect（假绿）」。
+    # 集成排除现收口在各 Makefile target（test/check/coverage 显式带 `-m "not integration"`），
+    # 裸 `pytest`（无参）默认含集成测试（需先 `make compose-up` + `make migrate`）。
 ]
 asyncio_mode = "auto"
 markers = [

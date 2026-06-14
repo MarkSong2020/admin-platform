@@ -40,3 +40,7 @@ __screenshots__/
 
 test-results/
 playwright-report/
+
+# 临时调试脚本（_ 前缀约定，如 _loginshot/_uidebug/_uishot.mjs）——常含本地登录凭据，
+# 禁止进版本库（PK 审查 codex#1，2026-06-15）。
+_*.mjs

@@ -51,6 +51,10 @@ def _discover_models() -> None:
         except ModuleNotFoundError:
             # 该 domain 还没长出 models.py（仅 api/service 等）—— 跳过。
             continue
+    # audit_events 在顶层 ``admin_platform.audit``（非 domains/），上面的 domains 自动发现扫不到 →
+    # 显式补 import，否则审计表及其索引永远不进 DATA_MODEL.md（PK 审查发现的 dump_schema 范围缺陷，
+    # 2026-06-15：审计是 append-only 取证轨，schema 文档须覆盖，与其余 domain 表一视同仁）。
+    importlib.import_module("admin_platform.audit.models")
 
 
 def _table_to_class() -> dict[str, type]:

@@ -1,4 +1,5 @@
 """dump_openapi 确定性契约：环境变量污染不得改变导出的 OpenAPI schema。"""
+
 import json
 
 from scripts.dump_openapi import build_contract_openapi

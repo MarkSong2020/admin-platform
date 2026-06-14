@@ -3,6 +3,7 @@
 前端 Vitest 只读该 fixture 断言 ⊆ import.meta.glob keys（spec §5）。
 后端改 seed 不同步 fixture → 本测试红，防跨语言漂移。
 """
+
 import json
 from collections.abc import Iterable
 from pathlib import Path
