@@ -157,6 +157,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑部门' : '新增部门'"
     width="480px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
       <el-form-item label="上级部门" prop="parentId">

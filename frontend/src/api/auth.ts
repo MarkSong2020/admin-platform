@@ -5,7 +5,7 @@
  * 业务错误（验证码错/限流/CAPTCHA_REQUIRED）经 normalizeProblemBody 归一化抛出，供登录页分支处理。
  */
 import { apiClient } from './client'
-import { normalizeProblemBody, type ApiError } from './transport'
+import { unwrap } from './transport'
 import { setTokens, clearTokens, getRefreshToken } from './session'
 import type { components } from './generated/types'
 
@@ -27,19 +27,9 @@ export class MissingRefreshTokenError extends Error {
   }
 }
 
-/**
- * openapi-fetch 错误侧归一：error 是 openapi-fetch 已解析的 ProblemDetail
- * （0.13.8 错误路径消费了 response body，不能再走 normalizeResponseError）。
- */
-function toApiError(error: unknown, response: Response): ApiError {
-  return normalizeProblemBody(error, response.status, response.statusText || '请求失败')
-}
-
 /** 获取算术验证码（登录失败 N 次后强制）。 */
 export async function getCaptcha(): Promise<CaptchaResponse> {
-  const { data, error, response } = await apiClient.GET('/api/v1/auth/captcha')
-  if (error !== undefined) throw toApiError(error, response)
-  return data
+  return unwrap(await apiClient.GET('/api/v1/auth/captcha'))
 }
 
 /**
@@ -47,8 +37,7 @@ export async function getCaptcha(): Promise<CaptchaResponse> {
  * 业务错误（401/422 RFC9457）抛归一化 ApiError，错误码在 code（即 ProblemDetail.type）。
  */
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const { data, error, response } = await apiClient.POST('/api/v1/auth/login', { body: payload })
-  if (error !== undefined) throw toApiError(error, response)
+  const data = unwrap(await apiClient.POST('/api/v1/auth/login', { body: payload }))
   if (!data.refresh_token) throw new MissingRefreshTokenError()
   setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token })
   return data
@@ -73,14 +62,10 @@ export async function logout(): Promise<void> {
 
 /** getInfo：当前用户身份 + 角色 code + 权限码集合。 */
 export async function fetchUserInfo(): Promise<UserInfoResponse> {
-  const { data, error, response } = await apiClient.GET('/api/v1/auth/user-info')
-  if (error !== undefined) throw toApiError(error, response)
-  return data
+  return unwrap(await apiClient.GET('/api/v1/auth/user-info'))
 }
 
 /** getRouters：用户可见菜单树（若依 RouterVO，camelCase）。 */
 export async function fetchRouters(): Promise<RouterVO[]> {
-  const { data, error, response } = await apiClient.GET('/api/v1/menus/routers')
-  if (error !== undefined) throw toApiError(error, response)
-  return data
+  return unwrap(await apiClient.GET('/api/v1/menus/routers'))
 }

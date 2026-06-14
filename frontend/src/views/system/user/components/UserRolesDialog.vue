@@ -61,7 +61,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="分配角色" width="560px" append-to-body>
+  <el-dialog
+    v-model="visible"
+    title="分配角色"
+    width="560px"
+    append-to-body
+    :close-on-click-modal="false"
+  >
     <el-transfer
       v-model="selected"
       v-loading="loading"

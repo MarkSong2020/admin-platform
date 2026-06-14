@@ -64,6 +64,7 @@ function close(): void {
     title="导入岗位"
     width="640px"
     append-to-body
+    :close-on-click-modal="false"
     @closed="summary = null"
   >
     <el-upload
