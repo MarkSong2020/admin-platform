@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import MenuFormDialog from './MenuFormDialog.vue'
-import type { MenuRead } from '@/api/menus'
+import { createMenu, type MenuRead } from '@/api/menus'
 
 vi.mock('@/api/menus', () => ({
   createMenu: vi.fn(),
@@ -41,6 +41,8 @@ function mountDialog(over: Partial<{ editing: MenuRead | null }> = {}): VueWrapp
 }
 
 beforeEach(() => {
+  vi.mocked(createMenu).mockReset()
+  vi.mocked(createMenu).mockResolvedValue(MENUS[0]!)
   document.body.innerHTML = ''
 })
 
@@ -85,5 +87,59 @@ describe('MenuFormDialog 类型联动', () => {
     expect(hasFormItem('组件路径')).toBe(false)
     expect(hasFormItem('菜单图标')).toBe(false)
     expect(hasFormItem('权限标识')).toBe(true)
+  })
+})
+
+describe('MenuFormDialog 提交', () => {
+  it('F 型提交：隐藏字段强制归零（防 C→F 切换后 path/component/icon 残留污染路由树）', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: { menuType: string; name: string; path: string; component: string; icon: string }
+      submit: () => Promise<void>
+    }
+    // 模拟用户先填了 C 的字段、再切回 F：值仍残留在 form，提交时必须按类型裁掉
+    vm.form.menuType = 'F'
+    vm.form.name = '导出按钮'
+    vm.form.path = '/leftover'
+    vm.form.component = 'system/x/index'
+    vm.form.icon = 'leftover-icon'
+    await vm.submit()
+    await flushPromises()
+
+    expect(createMenu).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(createMenu).mock.calls[0]![0]).toMatchObject({
+      menu_type: 'F',
+      name: '导出按钮',
+      path: '',
+      component: null,
+      icon: '',
+      perms: null,
+      visible: true,
+    })
+    expect(wrapper.emitted('saved')).toBeTruthy()
+  })
+
+  it('M 型提交：保留 path/icon，component/perms 归 null', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: { menuType: string; name: string; path: string; icon: string }
+      submit: () => Promise<void>
+    }
+    vm.form.menuType = 'M'
+    vm.form.name = '系统管理'
+    vm.form.path = 'system'
+    vm.form.icon = 'setting'
+    await vm.submit()
+    await flushPromises()
+
+    expect(vi.mocked(createMenu).mock.calls[0]![0]).toMatchObject({
+      menu_type: 'M',
+      path: 'system',
+      icon: 'setting',
+      component: null,
+      perms: null,
+    })
   })
 })

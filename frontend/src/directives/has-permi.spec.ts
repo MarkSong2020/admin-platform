@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { defineComponent, h, withDirectives } from 'vue'
+import { defineComponent, h, withDirectives, type DirectiveBinding, type ObjectDirective } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { hasPermi, type HasPermiValue } from './has-permi'
@@ -46,5 +46,29 @@ describe('v-hasPermi 指令', () => {
   it('数组全不命中 → 移除', () => {
     const wrapper = mountWithPerms(['system:role:list'], ['system:user:add', 'system:user:edit'])
     expect(wrapper.find('button').exists()).toBe(false)
+  })
+})
+
+/** 直接调用 mounted（实现只读 binding.value）以确定性断言 fail-fast 抛错，绕过 Vue 错误边界。 */
+function invokeMounted(perms: string[], value: unknown): void {
+  setActivePinia(createPinia())
+  usePermissionStore().setPermissions(perms)
+  const el = document.createElement('button')
+  const binding = { value } as unknown as DirectiveBinding<HasPermiValue>
+  const dir = hasPermi as ObjectDirective<HTMLElement, HasPermiValue>
+  dir.mounted!(el, binding, {} as never, null as never)
+}
+
+describe('v-hasPermi fail-fast（误配抛错，不静默隐藏）', () => {
+  it('权限码为 null → 抛错', () => {
+    expect(() => invokeMounted(['*:*:*'], null)).toThrow('需要权限码')
+  })
+
+  it('权限码为 undefined → 抛错', () => {
+    expect(() => invokeMounted(['*:*:*'], undefined)).toThrow('需要权限码')
+  })
+
+  it('权限码数组为空 → 抛错', () => {
+    expect(() => invokeMounted(['*:*:*'], [])).toThrow('不能为空')
   })
 })
