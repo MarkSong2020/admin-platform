@@ -81,7 +81,13 @@ jobs:
       - name: Seed RBAC（菜单/权限/角色，幂等）
         run: uv run python -m admin_platform.cli rbac seed
       - name: Create super admin（admin / ADMIN_BOOTSTRAP_PASSWORD）
-        run: uv run python -m admin_platform.cli create-super-admin --username admin
+        # 绕后端 #17（cli.py 未导入全部 FK 引用 model → 干净 metadata 下 flush users 报
+        # NoReferencedTableError）：先 create_app() 预导入全部 domain model 再调 CLI。
+        # 后端 #17 修复后可还原为 `uv run python -m admin_platform.cli create-super-admin --username admin`。
+        run: >-
+          uv run python -c "from admin_platform.main import create_app; create_app();
+          from admin_platform.cli import main;
+          raise SystemExit(main(['create-super-admin', '--username', 'admin']))"
 
       - name: Start backend（uvicorn 后台）+ 等 healthz
         run: |
