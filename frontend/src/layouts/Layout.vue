@@ -4,8 +4,8 @@
  * + TagsView 页签 + 主内容区（路由过渡）。
  * 登出经 stores/logout.ts 的 performLogout（router 职责由 main.ts 注入，layouts 不 import src/router）。
  */
-import { computed } from 'vue'
-import { ArrowDown, Expand, Fold, Moon, Sunny } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { ArrowDown, Expand, FullScreen, Fold, Moon, Sunny } from '@element-plus/icons-vue'
 import { useUserInfoStore } from '@/stores/user-info'
 import { performLogout } from '@/stores/logout'
 import { useAppStore } from '@/stores/app'
@@ -23,6 +23,21 @@ const displayName = computed(
   () => userInfoStore.user?.nickname || userInfoStore.user?.username || '未登录',
 )
 
+/** 头像首字（昵称/用户名首字符，大写）。 */
+const avatarLetter = computed(() => displayName.value.charAt(0).toUpperCase())
+
+/** 全屏切换（纯浏览器 API，无依赖）。 */
+const isFullscreen = ref(false)
+function toggleFullscreen(): void {
+  if (document.fullscreenElement) {
+    void document.exitFullscreen()
+    isFullscreen.value = false
+  } else {
+    void document.documentElement.requestFullscreen()
+    isFullscreen.value = true
+  }
+}
+
 /** 用户下拉命令分发（当前仅登出）。 */
 async function handleUserCommand(command: string | number | object): Promise<void> {
   if (command === 'logout') await performLogout()
@@ -36,28 +51,52 @@ async function handleUserCommand(command: string | number | object): Promise<voi
       class="layout-aside"
     >
       <div class="layout-logo">
-        <span class="logo-mark">AP</span>
-        <span v-show="!appStore.sidebarCollapsed" class="logo-text">admin-platform</span>
+        <span class="logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="19" height="19">
+            <rect x="3" y="3" width="17" height="17" rx="5" fill="#fff" opacity="0.55" />
+            <rect x="12" y="12" width="17" height="17" rx="5" fill="#fff" />
+          </svg>
+        </span>
+        <span v-show="!appStore.sidebarCollapsed" class="logo-text">Admin Platform</span>
       </div>
       <SidebarMenu />
     </el-aside>
     <el-container class="layout-body">
       <el-header class="layout-header">
         <div class="header-left">
-          <el-icon class="collapse-btn" @click="appStore.toggleSidebar">
-            <component :is="appStore.sidebarCollapsed ? Expand : Fold" />
-          </el-icon>
+          <el-button
+            class="collapse-btn"
+            text
+            :icon="appStore.sidebarCollapsed ? Expand : Fold"
+            :aria-label="appStore.sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
+            @click="appStore.toggleSidebar"
+          />
           <Breadcrumb />
         </div>
         <div class="header-right">
-          <el-tooltip :content="isDark ? '切换亮色' : '切换暗色'" placement="bottom">
-            <el-icon class="header-action" @click="toggleDark">
-              <component :is="isDark ? Sunny : Moon" />
-            </el-icon>
+          <el-tooltip content="全屏" placement="bottom">
+            <el-button
+              class="header-action"
+              text
+              :icon="FullScreen"
+              aria-label="全屏切换"
+              @click="toggleFullscreen"
+            />
           </el-tooltip>
+          <el-tooltip :content="isDark ? '切换亮色' : '切换暗色'" placement="bottom">
+            <el-button
+              class="header-action"
+              text
+              :icon="isDark ? Sunny : Moon"
+              :aria-label="isDark ? '切换亮色' : '切换暗色'"
+              @click="toggleDark"
+            />
+          </el-tooltip>
+          <el-divider direction="vertical" />
           <el-dropdown trigger="click" @command="handleUserCommand">
             <span class="layout-user">
-              {{ displayName }}
+              <el-avatar :size="28" class="user-avatar">{{ avatarLetter }}</el-avatar>
+              <span class="user-name">{{ displayName }}</span>
               <el-icon class="layout-user-icon"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -101,6 +140,7 @@ async function handleUserCommand(command: string | number | object): Promise<voi
   gap: 8px;
   height: var(--app-header-height);
   overflow: hidden;
+  background: linear-gradient(180deg, var(--el-color-primary-light-9), transparent);
   border-bottom: 1px solid var(--el-border-color-light);
 }
 
@@ -110,11 +150,9 @@ async function handleUserCommand(command: string | number | object): Promise<voi
   justify-content: center;
   width: 30px;
   height: 30px;
-  font-size: 14px;
-  font-weight: 700;
   color: #fff;
-  background: var(--el-color-primary);
-  border-radius: 8px;
+  background: var(--app-brand-gradient);
+  border-radius: 9px;
   flex-shrink: 0;
 }
 
@@ -147,26 +185,52 @@ async function handleUserCommand(command: string | number | object): Promise<voi
 
 .collapse-btn,
 .header-action {
+  height: 36px;
+  width: 36px;
   font-size: 18px;
-  cursor: pointer;
   color: var(--el-text-color-regular);
 }
 
 .collapse-btn:hover,
 .header-action:hover {
   color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+}
+
+.layout-header :deep(.el-divider--vertical) {
+  height: 20px;
+  margin: 0 4px;
 }
 
 .layout-user {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--el-text-color-primary);
+  transition: background 0.18s ease;
+}
+
+.layout-user:hover {
+  background: var(--el-fill-color-light);
+}
+
+.user-avatar {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--app-brand-gradient);
+}
+
+.user-name {
+  font-size: 14px;
 }
 
 .layout-user-icon {
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .layout-main {

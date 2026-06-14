@@ -92,12 +92,24 @@ watch(ctxVisible, (visible) => {
         :key="tag.path"
         class="tag-item"
         :class="{ active: isActive(tag) }"
+        role="button"
+        tabindex="0"
+        :aria-current="isActive(tag) ? 'page' : undefined"
         @click="goto(tag)"
+        @keyup.enter="goto(tag)"
         @contextmenu.prevent="openContextMenu(tag, $event)"
       >
         <span class="tag-dot" />
         {{ tag.title }}
-        <el-icon v-if="!tag.affix" class="tag-close" @click.stop="closeTag(tag)">
+        <el-icon
+          v-if="!tag.affix"
+          class="tag-close"
+          role="button"
+          tabindex="0"
+          aria-label="关闭标签"
+          @click.stop="closeTag(tag)"
+          @keyup.enter.stop="closeTag(tag)"
+        >
           <Close />
         </el-icon>
       </span>
@@ -146,8 +158,11 @@ watch(ctxVisible, (visible) => {
   color: var(--el-text-color-regular);
   background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: 6px;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .tag-item:hover {
