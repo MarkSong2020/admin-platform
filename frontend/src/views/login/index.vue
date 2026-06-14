@@ -124,6 +124,7 @@ async function handleSubmit(): Promise<void> {
         ref="formRef"
         :model="form"
         :rules="rules"
+        :validate-on-rule-change="false"
         label-position="top"
         @submit.prevent="handleSubmit"
       >
