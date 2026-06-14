@@ -5,6 +5,7 @@
 - 清空 get_settings 的 lru_cache，避免缓存的本地配置污染。
 - 不连 DB / 不起服务：仅调 create_app().openapi()。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,7 +71,9 @@ def main() -> None:
         json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    sys.stdout.write(f"OpenAPI 已导出 → {out}\n")  # 用 stdout.write 而非 print（仓库 ruff 启用 T20）
+    sys.stdout.write(
+        f"OpenAPI 已导出 → {out}\n"
+    )  # 用 stdout.write 而非 print（仓库 ruff 启用 T20）
 
 
 if __name__ == "__main__":
