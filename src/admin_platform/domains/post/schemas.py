@@ -34,6 +34,33 @@ def _reject_control_chars(value: str) -> str:
 
 CleanText = Annotated[str, AfterValidator(_reject_control_chars)]
 
+# 排序方向取值（对标 RuoYi isAsc；与 core.pagination.OrderValue 同源字面量）。
+OrderValue = Literal["asc", "desc"]
+
+
+class PostListQuery(BaseModel):
+    """岗位列表过滤 / 排序参数（对标 RuoYi 岗位管理查询；全可选）。
+
+    纯输入 DTO（不进响应，不改 ``PostPage`` 形状）。``code`` / ``name`` 模糊匹配，``status`` 精确；
+    ``order_by`` 是逻辑字段名，repository 用 allowlist 映射 ORM Column（防注入）。
+    """
+
+    code: str | None = Field(default=None, max_length=64, description="岗位编码模糊匹配")
+    name: str | None = Field(default=None, max_length=64, description="岗位名称模糊匹配")
+    status: StatusValue | None = Field(default=None, description="岗位状态（active / disabled）")
+    order_by: str | None = Field(
+        default=None, max_length=64, description="排序字段（sort_order / created_at / id）"
+    )
+    order: OrderValue = Field(default="desc", description="排序方向（asc / desc，默认 desc）")
+    # 分页参数折进本模型：query-model 与独立标量 Query 参数混用时，FastAPI 不再把本模型展开为
+    # query 参数，而是把整个模型参数当成必填且无法从 query 填充的字段，canonical 请求遂报 422
+    # （错误是「该模型参数 missing」，非「page/size 被当额外参数拒」——query-model 实测并不
+    # forbid 额外参数）。故 page/size 必须内联于此。约束与 core.pagination.PageQ/SizeQ 值同源。
+    page: int = Field(
+        default=1, ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）"
+    )
+    size: int = Field(default=20, ge=1, le=100, description="每页条数（上限 100）")
+
 
 class PostCreate(BaseModel):
     """POST payload。id / 时间戳由 DB 维护，不可由客户端设。"""

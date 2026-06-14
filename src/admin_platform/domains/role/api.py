@@ -27,6 +27,7 @@ from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.role.deps import get_role_service
 from admin_platform.domains.role.schemas import (
     RoleCreate,
+    RoleListQuery,
     RolePage,
     RoleRead,
     RoleUpdate,
@@ -36,10 +37,6 @@ from admin_platform.domains.role.service import RoleService
 router = APIRouter(prefix="/api/v1/roles", tags=["roles"])
 
 ServiceDep = Annotated[RoleService, Depends(get_role_service)]
-PageQ = Annotated[
-    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
-]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:role:{action}：list/query/add/edit/remove。
 ListGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_ROLE_LIST))]
@@ -52,6 +49,11 @@ RemoveGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYST
 AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     401: {"model": ProblemDetail},
     403: {"model": ProblemDetail},
+}
+# 列表端点叠加 422：order_by 非 allowlist 字段 → framework.SORT_FIELD_INVALID（防注入拒绝）。
+LIST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **AUTH_ERROR_RESPONSES,
+    422: {"model": ProblemDetail},
 }
 GET_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **AUTH_ERROR_RESPONSES,
@@ -83,11 +85,16 @@ IDEMPOTENT_POST_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 }
 
 
-@router.get("", operation_id="roles_list", response_model=RolePage, responses=AUTH_ERROR_RESPONSES)
+@router.get("", operation_id="roles_list", response_model=RolePage, responses=LIST_ERROR_RESPONSES)
 async def list_roles(
-    svc: ServiceDep, _user: ListGuard, page: PageQ = 1, size: SizeQ = 20
+    svc: ServiceDep,
+    _user: ListGuard,
+    query: Annotated[RoleListQuery, Query()],
 ) -> RolePage:
-    return await svc.list_(page=page, size=size)
+    # page/size 折进 RoleListQuery（query-model 与独立标量 page/size Query 并存时，标量令整个
+    # model 形参无法从 query 填充，canonical 请求报 422「该模型参数 missing」——与 extra 策略无关，
+    # query-model 实测并不 forbid 额外参数）；折进后仍以 query 参数形式暴露在 OpenAPI。
+    return await svc.list_(query, page=query.page, size=query.size)
 
 
 @router.get(
@@ -116,7 +123,7 @@ async def create_role(payload: RoleCreate, svc: ServiceDep, user: AddGuard) -> R
         user,
         Permissions.SYSTEM_ROLE_ADD,
         "role",
-        coro=svc.create(payload),
+        coro=svc.create(payload, is_super_admin=user.is_super_admin),
         display=lambda r: r.code,
         success_status=201,
     )
@@ -135,7 +142,7 @@ async def update_role(
         user,
         Permissions.SYSTEM_ROLE_EDIT,
         "role",
-        coro=svc.update(item_id, payload),
+        coro=svc.update(item_id, payload, is_super_admin=user.is_super_admin),
         target_id=item_id,
         display=lambda r: r.code,
     )

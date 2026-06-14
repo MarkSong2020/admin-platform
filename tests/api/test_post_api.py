@@ -13,6 +13,9 @@ post router 挂进生产 ``create_app()`` 是人值守红线（``main.py``），
 
 from __future__ import annotations
 
+import zipfile
+from io import BytesIO
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -23,6 +26,9 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.post.api import router
+from admin_platform.domains.post.deps import get_post_service
+from admin_platform.domains.post.schemas import PostListQuery, PostPage
+from tests.api._support import override_get_session
 
 
 class _StubProvider(PermissionProvider):
@@ -46,11 +52,21 @@ class _StubProvider(PermissionProvider):
     def invalidate_all(self) -> None: ...
 
 
+class _StubListService:
+    """只实现 list_ 的哑 service：回显收到的 page/size，验证 query 模型解析（不连 DB / 不用 Mock）。"""
+
+    async def list_(self, query: PostListQuery, *, page: int, size: int) -> PostPage:
+        return PostPage(items=[], page=page, size=size, total=0, total_pages=0)
+
+
 def _make_app(*, current_user: CurrentUser | None, provider: PermissionProvider | None) -> FastAPI:
     app = FastAPI()
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -133,6 +149,23 @@ def test_list_size_above_max_is_rejected() -> None:
     assert res.status_code == 422
 
 
+def test_list_with_page_size_and_filter_returns_200() -> None:
+    # P0 回归：page/size 与过滤参数（status）同传 → 200（修复前混用独立标量 page/size Query 令
+    # query-model 形参无法从 query 填充 → 422「该模型参数 missing」，与 extra 策略无关）。
+    # stub service 回显 page/size 验证解析正确。
+    app = _make_app(
+        current_user=CurrentUser(user_id="1", sub="1"),
+        provider=_StubProvider(is_super=True),
+    )
+    app.dependency_overrides[get_post_service] = _StubListService
+    res = TestClient(app).get("/api/v1/posts?page=1&size=10&status=active")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["page"] == 1
+    assert body["size"] == 10
+    assert body["items"] == []
+
+
 # ---- Excel 导入导出权限矩阵 + 校验（P5）-----------------------------------
 
 _XLSX = (
@@ -155,3 +188,26 @@ def test_import_missing_file_returns_422() -> None:
     # 缺 multipart 文件字段（upload 必填）→ 422，在 service/DB 依赖前短路。
     res = _superadmin_client().post("/api/v1/posts/import")
     assert res.status_code == 422
+
+
+def _zip_bomb_bytes() -> bytes:
+    # 小压缩 / 大解压（全零）→ 压缩比超默认 100x，reader 解压前预检拒绝（触不达 DB）。
+    buffer = BytesIO()
+    payload = b"<sst>" + b"0" * (20 * 1024 * 1024) + b"</sst>"
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/sharedStrings.xml", payload)
+    return buffer.getvalue()
+
+
+def test_import_zip_bomb_returns_413() -> None:
+    # P1：解压前中央目录预检拦截 zip bomb → 413（与上传体积超限同语义），在 openpyxl 解压前短路。
+    files = {
+        "upload": (
+            "bomb.xlsx",
+            _zip_bomb_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    res = _superadmin_client().post("/api/v1/posts/import", files=files)
+    assert res.status_code == 413
+    assert res.json()["type"] == "post.EXCEL_TOO_LARGE"

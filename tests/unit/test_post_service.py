@@ -15,10 +15,11 @@ import pytest
 from admin_platform.core.errors import AppError
 from admin_platform.domains.post.models import Post
 from admin_platform.domains.post.repository import PostRepository
-from admin_platform.domains.post.schemas import PostCreate, PostUpdate
+from admin_platform.domains.post.schemas import PostCreate, PostListQuery, PostUpdate
 from admin_platform.domains.post.service import PostService
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
+_Q = PostListQuery()  # 默认空过滤 + order=desc + order_by=None（用默认序）
 
 
 def _post(pid: int, *, code: str, name: str = "post") -> Post:
@@ -48,11 +49,13 @@ class _StubRepo:
         self._rows = {row.id: row for row in (rows or [])}
         self._by_code = by_code or {}
 
-    async def list_paginated(self, page: int, size: int) -> list[Post]:
+    async def list_paginated(
+        self, query: object, page: int, size: int, *, order_by: object
+    ) -> list[Post]:
         start = (page - 1) * size
         return list(self._rows.values())[start : start + size]
 
-    async def count(self) -> int:
+    async def count(self, query: object) -> int:
         return len(self._rows)
 
     async def get(self, post_id: int) -> Post | None:
@@ -170,7 +173,7 @@ async def test_delete_missing_raises_404() -> None:
 @pytest.mark.asyncio
 async def test_list_returns_pagination_envelope() -> None:
     rows = [_post(i, code=f"P{i}") for i in range(1, 24)]  # 23 条 → 边界 total_pages=3
-    page = await _svc(_StubRepo(rows=rows)).list_(page=2, size=10)
+    page = await _svc(_StubRepo(rows=rows)).list_(_Q, page=2, size=10)
     assert page.page == 2
     assert page.size == 10
     assert page.total == 23
@@ -180,7 +183,28 @@ async def test_list_returns_pagination_envelope() -> None:
 
 @pytest.mark.asyncio
 async def test_list_empty_returns_zero_total_pages() -> None:
-    page = await _svc(_StubRepo()).list_(page=1, size=20)
+    page = await _svc(_StubRepo()).list_(_Q, page=1, size=20)
     assert page.items == []
     assert page.total == 0
     assert page.total_pages == 0
+
+
+@pytest.mark.asyncio
+async def test_list_invalid_order_by_raises_422() -> None:
+    """防注入守门：order_by 非 allowlist 字段 → 422，绝不进 SQL。"""
+    with pytest.raises(AppError) as exc:
+        await _svc(_StubRepo()).list_(
+            PostListQuery(order_by="code'; DROP TABLE posts;--"), page=1, size=20
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.code == "framework.SORT_FIELD_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_list_allowed_order_by_ok() -> None:
+    """allowlist 内字段（sort_order）+ asc → 正常返回（不抛）。"""
+    rows = [_post(i, code=f"P{i}") for i in range(1, 4)]
+    page = await _svc(_StubRepo(rows=rows)).list_(
+        PostListQuery(order_by="sort_order", order="asc"), page=1, size=20
+    )
+    assert page.total == 3

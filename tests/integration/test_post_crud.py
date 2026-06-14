@@ -162,6 +162,53 @@ async def test_get_missing_returns_404(client: AsyncClient) -> None:
     assert res.json()["type"] == "post.NOT_FOUND"
 
 
+# ---- P1 列表过滤 / 排序 / count 一致（真 DB SQL）---------------------------
+
+
+async def test_list_filter_by_code_keyword(client: AsyncClient) -> None:
+    # 三条岗位，code 关键字 "dev" 只命中其中一条（ilike 子串匹配，参数化非拼接）。
+    await _create(client, code="dev-be", name="后端")
+    await _create(client, code="dev-fe", name="前端")
+    await _create(client, code="pm", name="项目经理")
+    res = (await client.get("/api/v1/posts", params={"code": "dev"})).json()
+    assert {p["code"] for p in res["items"]} == {"dev-be", "dev-fe"}
+    # count 与过滤一致：total 反映过滤后数量（非全表 3）。
+    assert res["total"] == 2
+
+
+async def test_list_filter_by_status(client: AsyncClient) -> None:
+    a = await _create(client, code="a", name="A")
+    await _create(client, code="b", name="B")
+    await client.patch(f"/api/v1/posts/{a}", json={"status": "disabled"})
+    res = (await client.get("/api/v1/posts", params={"status": "disabled"})).json()
+    assert {p["code"] for p in res["items"]} == {"a"}
+    assert res["total"] == 1
+
+
+async def test_list_sort_by_sort_order_asc_desc(client: AsyncClient) -> None:
+    await _create(client, code="s1", name="一", sort_order=3)
+    await _create(client, code="s2", name="二", sort_order=1)
+    await _create(client, code="s3", name="三", sort_order=2)
+    asc = (
+        await client.get("/api/v1/posts", params={"order_by": "sort_order", "order": "asc"})
+    ).json()
+    assert [p["code"] for p in asc["items"]] == ["s2", "s3", "s1"]
+    desc = (
+        await client.get("/api/v1/posts", params={"order_by": "sort_order", "order": "desc"})
+    ).json()
+    assert [p["code"] for p in desc["items"]] == ["s1", "s3", "s2"]
+
+
+async def test_list_invalid_order_by_returns_422(client: AsyncClient) -> None:
+    # 防注入守门（端到端）：order_by 非 allowlist（注入串）→ 422，绝不进 SQL。
+    await _create(client, code="x", name="X")
+    res = await client.get("/api/v1/posts", params={"order_by": "code; DROP TABLE posts"})
+    assert res.status_code == 422
+    assert res.json()["type"] == "framework.SORT_FIELD_INVALID"
+    # 表未被破坏：DROP 没执行，岗位仍在。
+    assert (await client.get("/api/v1/posts")).json()["total"] == 1
+
+
 async def test_patch_to_duplicate_code_returns_409(client: AsyncClient) -> None:
     # Codex 深审：PATCH 改 code 撞已存在 code → 409（update 的 code 唯一预检，非仅 create）。
     await _create(client, code="pm", name="项目经理")

@@ -7,11 +7,28 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, text
+from collections.abc import Mapping, Sequence
+from typing import ClassVar
+
+from sqlalchemy import ColumnElement, Select, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.core.pagination import SortColumn, SortExpr, ilike_contains
 from admin_platform.domains.post.models import Post, UserPost
-from admin_platform.domains.post.schemas import PostCreate, PostUpdate
+from admin_platform.domains.post.schemas import PostCreate, PostListQuery, PostUpdate
+
+
+def _post_filters(query: PostListQuery) -> list[ColumnElement[bool]]:
+    """把过滤 DTO 翻成 WHERE 条件列表（参数化，无字符串拼接）。list / count 共用 → WHERE 一致。"""
+    conds: list[ColumnElement[bool]] = []
+    if query.code:
+        conds.append(ilike_contains(Post.code, query.code))
+    if query.name:
+        conds.append(ilike_contains(Post.name, query.name))
+    if query.status is not None:
+        conds.append(Post.status == query.status)
+    return conds
+
 
 # pg_advisory_xact_lock 的稳定 key —— 串行化 user_posts「先删后插」的全量替换（镜像 role 域
 # F3 修复）：并发两请求替换同一目标时，避免最终落成两请求的并集 / 撞 uq_user_posts。事务级锁，
@@ -20,17 +37,35 @@ _USER_POSTS_LOCK_KEY = 478251  # 串行化 user_posts 替换
 
 
 class PostRepository:
+    # 排序 allowlist（防注入红线）：order_by 字符串只用作此字典 key 查 ORM Column，命中才排序。
+    # 不在表内 → service 的 resolve_sort 抛 422，绝不把客户端字符串拼进 SQL。SORT_DEFAULT 沿用
+    # 既有默认序（sort_order, id），保 offset 分页跨页稳定。
+    SORT_ALLOWED: ClassVar[Mapping[str, SortColumn]] = {
+        "id": Post.id,
+        "sort_order": Post.sort_order,
+        "created_at": Post.created_at,
+    }
+    SORT_DEFAULT: ClassVar[Sequence[SortExpr]] = [Post.sort_order, Post.id]
+    # 显式 order_by 命中非唯一列时追加的稳定 tie-breaker（pk，唯一）——保 OFFSET 深分页不跨页跳行。
+    SORT_TIE_BREAK: ClassVar[SortColumn] = Post.id
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_paginated(self, page: int, size: int) -> list[Post]:
+    def _filtered(self, query: PostListQuery) -> Select[tuple[Post]]:
+        return select(Post).where(*_post_filters(query))
+
+    async def list_paginated(
+        self, query: PostListQuery, page: int, size: int, *, order_by: Sequence[SortExpr]
+    ) -> list[Post]:
         offset = (page - 1) * size
-        stmt = select(Post).offset(offset).limit(size).order_by(Post.sort_order, Post.id)
+        stmt = self._filtered(query).order_by(*order_by).offset(offset).limit(size)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count(self) -> int:
-        result = await self._session.execute(select(func.count()).select_from(Post))
+    async def count(self, query: PostListQuery) -> int:
+        inner = self._filtered(query).subquery()
+        result = await self._session.execute(select(func.count()).select_from(inner))
         return int(result.scalar_one())
 
     async def get(self, item_id: int) -> Post | None:

@@ -3,7 +3,7 @@
 业务不变式：
 
   * **username 全局唯一** —— create/update 前用 ``find_by_username`` 预检，违反抛 409
-    ``admin_platform.USERNAME_DUPLICATE``。DB 的 ``uq_users_username`` 是竞态兜底：并发预检
+    ``user.USERNAME_DUPLICATE``。DB 的 ``uq_users_username`` 是竞态兜底：并发预检
     都通过时第二个 INSERT 撞约束 → ``IntegrityError`` handler 按 ``models.py`` 注册的映射
     翻成同一个 409 业务码。
 
@@ -15,14 +15,21 @@ from __future__ import annotations
 from admin_platform.authz.data_scope import is_dept_visible
 from admin_platform.authz.scope import DataScope
 from admin_platform.core.errors import AUTH_FORBIDDEN_BY_SCOPE, AppError
+from admin_platform.core.pagination import compute_total_pages, resolve_sort
 from admin_platform.core.security import ahash_password
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.repository import UserRepository
-from admin_platform.domains.user.schemas import UserCreate, UserPage, UserRead, UserUpdate
+from admin_platform.domains.user.schemas import (
+    UserCreate,
+    UserListQuery,
+    UserPage,
+    UserRead,
+    UserUpdate,
+)
 
-NOT_FOUND_CODE = "admin_platform.USER_NOT_FOUND"
-USERNAME_DUPLICATE_CODE = "admin_platform.USERNAME_DUPLICATE"
-LAST_SUPER_ADMIN_CODE = "admin_platform.LAST_SUPER_ADMIN"
+NOT_FOUND_CODE = "user.NOT_FOUND"
+USERNAME_DUPLICATE_CODE = "user.USERNAME_DUPLICATE"
+LAST_SUPER_ADMIN_CODE = "user.LAST_SUPER_ADMIN"
 
 _ACTIVE = "active"
 
@@ -41,17 +48,34 @@ class UserService:
     def __init__(self, repository: UserRepository) -> None:
         self._repo = repository
 
-    async def list_(self, *, page: int, size: int, scope: DataScope | None = None) -> UserPage:
-        """``scope`` 非空时按数据权限过滤可见用户（非超管必传；超管 api 层传 ALL，不过滤）。"""
-        rows = await self._repo.list_paginated(page, size, scope=scope)
-        total = await self._repo.count(scope=scope)
-        total_pages = (total + size - 1) // size if size > 0 else 0
+    async def list_(
+        self,
+        query: UserListQuery,
+        *,
+        page: int,
+        size: int,
+        scope: DataScope | None = None,
+    ) -> UserPage:
+        """``scope`` 非空时按数据权限过滤可见用户（非超管必传；超管 api 层传 ALL，不过滤）。
+
+        排序在此层解析（resolve_sort 防注入：非法 order_by → 422）；过滤条件 AND 叠加在
+        data_scope 之上（repository 内构造），过滤绕不过数据权限。
+        """
+        order_by = resolve_sort(
+            query.order_by,
+            query.order,
+            allowed=UserRepository.SORT_ALLOWED,
+            default=UserRepository.SORT_DEFAULT,
+            tie_break=UserRepository.SORT_TIE_BREAK,
+        )
+        rows = await self._repo.list_paginated(query, page, size, order_by=order_by, scope=scope)
+        total = await self._repo.count(query, scope=scope)
         return UserPage(
             items=[UserRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, user_id: int, *, scope: DataScope | None = None) -> UserRead:
