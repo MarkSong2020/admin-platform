@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import zipfile
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -159,3 +161,34 @@ async def test_post_create_rejects_noncharacter() -> None:
     for nonchar in (chr(0xFFFE), chr(0xFFFF)):
         with pytest.raises(ValidationError):
             PostCreate(name=nonchar + "x", code="ok")
+
+
+# ---- zip bomb 防护（P1）：service 把 reader 的 ExcelTooLargeError 映成 413 -------
+
+
+def _bomb_xlsx() -> bytes:
+    """小压缩 / 大解压的恶意 xlsx（高度可压缩的全零 sharedStrings）→ 压缩比远超默认 100x。"""
+    buffer = BytesIO()
+    payload = b"<sst>" + b"0" * (20 * 1024 * 1024) + b"</sst>"  # 20MB 全零，DEFLATE 后几 KB
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/sharedStrings.xml", payload)
+    return buffer.getvalue()
+
+
+async def test_import_zip_bomb_raises_413() -> None:
+    # 解压前预检（默认阈值，settings 注入）超限 → AppError 413，未触达 DB（repo 无任何写）
+    repo = _FakeRepo()
+    with pytest.raises(AppError) as exc:
+        await _service(repo).import_posts(_bomb_xlsx())
+    assert exc.value.status_code == 413
+    assert exc.value.code == "post.EXCEL_TOO_LARGE"
+    assert repo.created == []
+
+
+async def test_import_bad_zip_is_invalid_file_not_413() -> None:
+    # 坏 zip（非 xlsx 字节）→ INVALID_FILE 行级业务错误随 200，非 413（zip bomb 守卫放行坏 zip）
+    repo = _FakeRepo()
+    summary = await _service(repo).import_posts(b"not a zip at all")
+    assert summary.imported == 0
+    assert any(e.code == "INVALID_FILE" for e in summary.errors)
+    assert repo.created == []

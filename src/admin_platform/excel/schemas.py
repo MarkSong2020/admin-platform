@@ -44,3 +44,16 @@ class ImportResult[T: BaseModel]:
 
     rows: list[ParsedRow[T]]
     errors: list[RowError]
+
+
+class ExcelTooLargeError(Exception):
+    """解压前中央目录预检超限（zip bomb / inflated XML DoS）。
+
+    excel 是纯叶子（C10：禁 import core/fastapi），不能抛 AppError；抛此叶子自有异常，
+    由 domain 绑定层映射成 413 业务错误。``reason`` 标明触发哪条阈值（供调用方记审计/日志），
+    不向最终用户透露具体声明大小（防探测）。
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason

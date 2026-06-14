@@ -8,13 +8,20 @@
 from __future__ import annotations
 
 from admin_platform.excel.reader import ExcelImporter
-from admin_platform.excel.schemas import ExcelColumn, ImportResult, ParsedRow, RowError
+from admin_platform.excel.schemas import (
+    ExcelColumn,
+    ExcelTooLargeError,
+    ImportResult,
+    ParsedRow,
+    RowError,
+)
 from admin_platform.excel.writer import ExcelExporter
 
 __all__ = [
     "ExcelColumn",
     "ExcelExporter",
     "ExcelImporter",
+    "ExcelTooLargeError",
     "ImportResult",
     "ParsedRow",
     "RowError",
