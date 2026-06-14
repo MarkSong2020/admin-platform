@@ -73,6 +73,14 @@ describe('登录页', () => {
     expect(wrapper.text()).toContain('3 + 5 = ?')
   })
 
+  it('进入页面（验证码加载致 rules 重算）不预先触发必填校验红字', async () => {
+    const { wrapper } = await mountLogin()
+    // captcha 加载后 rules computed 引用变化；validate-on-rule-change=false 应阻止整表自动校验
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('请输入用户名')
+    expect(wrapper.text()).not.toContain('请输入密码')
+  })
+
   it('成功路径：login 带验证码字段 → runPostLoginSetup → replace 到 redirect query', async () => {
     vi.mocked(login).mockResolvedValue({
       access_token: 'at',
