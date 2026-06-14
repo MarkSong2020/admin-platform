@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import {
+  Avatar,
   Bell,
   Collection,
   Connection,
@@ -7,6 +8,7 @@ import {
   DataLine,
   Document,
   Files,
+  Grid,
   Histogram,
   List,
   Menu as MenuIcon,
@@ -14,6 +16,7 @@ import {
   OfficeBuilding,
   Postcard,
   Setting,
+  SetUp,
   Timer,
   Tools,
   Upload,
@@ -30,14 +33,18 @@ const ICON_MAP: Record<string, Component> = {
   system: Setting,
   user: User,
   peoples: UserFilled,
+  role: Avatar, // _resource_menu icon=resource → 角色菜单 icon="role"（补全：原落兜底方格）
+  menu: Grid, // 菜单管理 icon="menu"（补全）
   tree: OfficeBuilding,
   'tree-table': OfficeBuilding,
   dept: OfficeBuilding,
   post: Postcard,
   dict: Collection,
+  config: SetUp, // 参数管理 icon="config"（补全）
   edit: Document,
   form: Document,
   message: Bell,
+  notice: Bell, // 通知公告 icon="notice"（补全）
   monitor: Monitor,
   server: Cpu,
   redis: DataLine,
