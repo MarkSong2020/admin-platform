@@ -127,3 +127,24 @@ export async function uploadMultipart(path: string, form: FormData): Promise<Res
 }
 
 export const _timeouts = { JSON_TIMEOUT_MS, BINARY_TIMEOUT_MS }
+
+/**
+ * openapi-fetch 结果归一收口：error 非空 → 按 RFC9457 归一抛出 ApiError；否则返回 data。
+ * 取代各 api 域里重复的 toApiError + `if (error !== undefined) throw` 范式（单一来源）。
+ * 各 api 域调用点零 `as` 断言；undefined 收口仅此一处（成功分支 data 即响应体；
+ * 204 void 端点 data 为 undefined，但其调用方丢弃返回值，故 NonNullable 收窄安全）。
+ */
+export function unwrap<T>(
+  result:
+    | { data: T; error?: undefined; response: Response }
+    | { data?: undefined; error: unknown; response: Response },
+): NonNullable<T> {
+  if (result.error !== undefined) {
+    throw normalizeProblemBody(
+      result.error,
+      result.response.status,
+      result.response.statusText || '请求失败',
+    )
+  }
+  return result.data as NonNullable<T>
+}

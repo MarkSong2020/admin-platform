@@ -105,6 +105,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑公告' : '新增公告'"
     width="560px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <el-form-item label="公告标题" prop="title">

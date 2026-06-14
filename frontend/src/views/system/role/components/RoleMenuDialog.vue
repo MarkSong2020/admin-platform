@@ -70,7 +70,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="分配菜单" width="480px" append-to-body>
+  <el-dialog
+    v-model="visible"
+    title="分配菜单"
+    width="480px"
+    append-to-body
+    :close-on-click-modal="false"
+  >
     <el-tree
       ref="treeRef"
       v-loading="loading"

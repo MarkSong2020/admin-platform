@@ -4,18 +4,12 @@
  * 错误经 transport.normalizeProblemBody 归一化抛出（参照 users.ts 范式）。
  */
 import { apiClient } from './client'
-import { normalizeProblemBody, type ApiError } from './transport'
+import { unwrap } from './transport'
 import type { components } from './generated/types'
 
 export type CacheMetrics = components['schemas']['CacheMetrics']
 
-function toApiError(error: unknown, response: Response): ApiError {
-  return normalizeProblemBody(error, response.status, response.statusText || '请求失败')
-}
-
 /** 拉取缓存监控指标（只读单视图；available=false 表示 Redis 不可用降级）。 */
 export async function getCacheMetrics(): Promise<CacheMetrics> {
-  const { data, error, response } = await apiClient.GET('/api/v1/monitor/cache')
-  if (error !== undefined) throw toApiError(error, response)
-  return data
+  return unwrap(await apiClient.GET('/api/v1/monitor/cache'))
 }

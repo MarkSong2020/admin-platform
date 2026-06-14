@@ -212,6 +212,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑任务' : '新增任务'"
     width="560px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
       <el-form-item label="任务名称" prop="name">

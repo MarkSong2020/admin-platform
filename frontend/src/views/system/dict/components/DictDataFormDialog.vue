@@ -120,6 +120,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑字典数据' : '新增字典数据'"
     width="480px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <el-form-item label="字典标签" prop="label">

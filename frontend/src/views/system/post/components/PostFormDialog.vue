@@ -97,6 +97,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑岗位' : '新增岗位'"
     width="480px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
       <el-form-item label="岗位编码" prop="code">

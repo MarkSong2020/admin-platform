@@ -157,6 +157,7 @@ async function submit(): Promise<void> {
     :title="isEdit ? '编辑菜单' : '新增菜单'"
     width="520px"
     append-to-body
+    :close-on-click-modal="false"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <el-form-item label="菜单类型" prop="menuType">

@@ -5,24 +5,20 @@
  * 错误经 transport.normalizeProblemBody 归一化抛出（参照 users.ts 范式）。
  */
 import { apiClient } from './client'
-import { normalizeProblemBody, uploadMultipart, downloadBlob, type ApiError } from './transport'
+import { unwrap, uploadMultipart, downloadBlob } from './transport'
 import type { components } from './generated/types'
 import { saveBlob } from './download'
 
 export type FileRead = components['schemas']['FileRead']
 export type FilePage = components['schemas']['FilePage']
 
-function toApiError(error: unknown, response: Response): ApiError {
-  return normalizeProblemBody(error, response.status, response.statusText || '请求失败')
-}
-
 /** 文件分页列表（仅 page/size）。 */
 export async function listFiles(params: { page?: number; size?: number } = {}): Promise<FilePage> {
-  const { data, error, response } = await apiClient.GET('/api/v1/files', {
-    params: { query: { page: params.page, size: params.size } },
-  })
-  if (error !== undefined) throw toApiError(error, response)
-  return data
+  return unwrap(
+    await apiClient.GET('/api/v1/files', {
+      params: { query: { page: params.page, size: params.size } },
+    }),
+  )
 }
 
 /**
@@ -48,8 +44,9 @@ export async function downloadFile(id: number, filename: string): Promise<void> 
 
 /** 软删除文件（204；transport 之外的 JSON 通道，复用 openapi-fetch）。 */
 export async function deleteFile(id: number): Promise<void> {
-  const { error, response } = await apiClient.DELETE('/api/v1/files/{file_id}', {
-    params: { path: { file_id: id } },
-  })
-  if (error !== undefined) throw toApiError(error, response)
+  unwrap(
+    await apiClient.DELETE('/api/v1/files/{file_id}', {
+      params: { path: { file_id: id } },
+    }),
+  )
 }
