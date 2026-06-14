@@ -122,6 +122,9 @@ AUTH_CAPTCHA_REQUIRED = "auth.CAPTCHA_REQUIRED"
 AUTH_CAPTCHA_INVALID = "auth.CAPTCHA_INVALID"
 # IP 维度限流触发（429 + Retry-After）。账号软锁仍走统一 LOGIN_FAILED 防枚举。
 AUTH_LOGIN_RATE_LIMITED = "auth.LOGIN_RATE_LIMITED"
+# 自助改密（change-password）：原密码错（已鉴权，故 400 非 401）+ 新密码不满足强度（422）。
+AUTH_PASSWORD_INCORRECT = "auth.PASSWORD_INCORRECT"  # noqa: S105
+AUTH_PASSWORD_TOO_WEAK = "auth.PASSWORD_TOO_WEAK"  # noqa: S105
 
 
 # ----------------------------- IntegrityError 兜底映射 ----------------------------- #

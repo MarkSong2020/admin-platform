@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -44,3 +44,22 @@ class LogoutRequest(BaseModel):
     """登出请求体。``all_devices`` 预留（P1.4 暂按 family 撤销）。"""
 
     refresh_token: str = Field(max_length=512, description="opaque refresh token")
+
+
+class ChangePasswordRequest(BaseModel):
+    """自助改密请求体（已登录用户改自己的密码，需验原密码）。
+
+    强度分两层：``≥12 字符`` / 不含首尾空白在本 schema 层（Pydantic，422）；不等于用户名 +
+    新≠旧在 service 层（需 user 上下文，抛 ``auth.PASSWORD_TOO_WEAK`` 422）。改密成功撤销该用户
+    **全部**旧 refresh 会话并给当前会话重签新 token（响应复用 ``LoginResponse``，见 service.change_password）。
+    """
+
+    old_password: str = Field(max_length=256, description="当前密码（验证身份）")
+    new_password: str = Field(min_length=12, max_length=256, description="新密码（≥12 字符）")
+
+    @field_validator("new_password")
+    @classmethod
+    def _no_surrounding_whitespace(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("新密码不能含首尾空白")
+        return value
