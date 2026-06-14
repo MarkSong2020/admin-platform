@@ -18,6 +18,7 @@ from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.audit.emit import build_audit_event, emit_audit
 from admin_platform.audit.events import AuditActor, AuditResult
@@ -30,6 +31,7 @@ from admin_platform.core.errors import (
     AUTH_FORBIDDEN_BY_ROLE,
     AppError,
 )
+from admin_platform.db.session import get_session
 
 # 路由实际使用的权限点集（require_permission 调用时登记，spec §13.2 三组集合之②）。
 # 装饰器在各 api 模块 import 时执行 → 导入全部域 api 后本集合即「路由用集」，供契约机检。
@@ -95,6 +97,13 @@ def require_permission(perm: str) -> Callable[..., Awaitable[CurrentUser]]:
     async def _dep(
         base_user: Annotated[CurrentUser, Depends(require_current_user)],
         provider: Annotated[PermissionProvider, Depends(get_permission_provider)],
+        # 顺序保证依赖（P1 架构修复，非装饰用，故意不在函数体直接读 ``_session``）：声明对
+        # ``get_session`` 的依赖，让 FastAPI 在解析本守卫前**先**解析 ``get_session`` —— 由此
+        # ``_request_session_var`` ContextVar 在 provider 读它（``current_request_session()``）之前
+        # 已设；又因 FastAPI 依赖缓存，本依赖拿到的 session 与 handler 业务 session 是**同一个**实例。
+        # 于是授权读复用请求事务 / 连接（单连接 checkout，消连接翻倍；单快照，消跨快照 TOCTOU）——
+        # 不依赖 handler 参数里 svc/session 是否排在守卫之前的偶然顺序，robust 兜底。
+        _session: Annotated[AsyncSession, Depends(get_session)],
     ) -> CurrentUser:
         user_id = int(base_user.user_id)
 

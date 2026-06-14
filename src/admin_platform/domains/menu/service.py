@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from admin_platform.core.errors import AppError
+from admin_platform.core.errors import AUTH_FORBIDDEN_BY_ROLE, AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.menu.schemas import (
     MenuCreate,
@@ -25,6 +26,16 @@ from admin_platform.domains.menu.schemas import (
     MenuRead,
     MenuUpdate,
 )
+
+# 授权根字段（P0 提权防护，用户拍板 2026-06-13）：perms 是权限点字面量——
+# a_get_user_permissions 从 menus.perms 派生，改 perms 即凭空授予/篡改任意权限点（授权不缓存 Q8，
+# 下一请求即生效）；menu_type 决定节点是否承载权限（按钮 F 携 perms）；status 决定菜单是否生效。
+# 收紧为仅超管可写：非超管即使持 system:menu:edit 也不得改这些字段，杜绝改 perms 自我提权。
+# 镜像 rbac_binding._require_super_admin 模式：service 层授权决策、抛 AppError，不 import
+# CurrentUser/fastapi（分层契约）。
+# update 拦 perms/menu_type/status 三者；create 仅拦 perms/status——menu_type 是 create 必填字段，
+# 无 perms 时不授予任何权限，拦它会让非超管完全无法建菜单（故 create 不拦 menu_type）。
+_MENU_UPDATE_SECURITY_FIELDS = ("perms", "menu_type", "status")
 
 NOT_FOUND_CODE = "menu.NOT_FOUND"
 PARENT_NOT_FOUND_CODE = "menu.PARENT_NOT_FOUND"
@@ -42,13 +53,12 @@ class MenuService:
         """offset 分页（ADR 0001 §7.5 envelope）。菜单是全局配置，不受 data_scope 约束。"""
         rows = await self._repo.list_paginated(page, size)
         total = await self._repo.count()
-        total_pages = (total + size - 1) // size if size > 0 else 0
         return MenuPage(
             items=[MenuRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, item_id: int) -> MenuRead:
@@ -57,7 +67,8 @@ class MenuService:
             raise self._not_found(item_id)
         return MenuRead.model_validate(row)
 
-    async def create(self, payload: MenuCreate) -> MenuRead:
+    async def create(self, payload: MenuCreate, *, is_super_admin: bool) -> MenuRead:
+        self._guard_security_fields_create(payload, is_super_admin=is_super_admin)
         if payload.parent_id is not None:
             # 父类型校验在 tree-lock 内（Workflow 深审 TOCTOU）：与 update 把父「改成按钮 F」的
             # count_children 校验互斥串行化——否则「在 X 下建子菜单」与「X 改成 F」并发交错，
@@ -70,7 +81,8 @@ class MenuService:
         row = await self._repo.create(payload)
         return MenuRead.model_validate(row)
 
-    async def update(self, item_id: int, payload: MenuUpdate) -> MenuRead:
+    async def update(self, item_id: int, payload: MenuUpdate, *, is_super_admin: bool) -> MenuRead:
+        self._guard_security_fields_update(payload, is_super_admin=is_super_admin)
         existing = await self._repo.get(item_id)
         if existing is None:
             raise self._not_found(item_id)
@@ -94,6 +106,23 @@ class MenuService:
         if row is None:  # 并发删除兜底：预检后被他人删除
             raise self._not_found(item_id)
         return MenuRead.model_validate(row)
+
+    @staticmethod
+    def _guard_security_fields_update(payload: MenuUpdate, *, is_super_admin: bool) -> None:
+        """UPDATE 关键修复：改 perms/menu_type/status 任一必须超管，否则 403（杜绝改 perms 自我提权）。"""
+        if is_super_admin:
+            return
+        touched = payload.model_fields_set & set(_MENU_UPDATE_SECURITY_FIELDS)
+        if touched:
+            raise _forbidden_security_fields()
+
+    @staticmethod
+    def _guard_security_fields_create(payload: MenuCreate, *, is_super_admin: bool) -> None:
+        """CREATE 纵深防御：非超管设 perms 或非 active status 即 403；menu_type 不拦（必填，无 perms 不授权）。"""
+        if is_super_admin:
+            return
+        if payload.perms is not None or payload.status != "active":
+            raise _forbidden_security_fields()
 
     async def delete(self, item_id: int) -> None:
         row = await self._repo.get(item_id)
@@ -175,3 +204,13 @@ class MenuService:
             detail=f"菜单 id={item_id} 有子菜单，不能改成按钮(F)",
             status_code=409,
         )
+
+
+def _forbidden_security_fields() -> AppError:
+    """授权根字段越权写的统一 403（P0 提权防护）。"""
+    return AppError(
+        code=AUTH_FORBIDDEN_BY_ROLE,
+        title="Forbidden",
+        detail="data_scope/status/perms 等授权根字段仅超级管理员可修改",
+        status_code=403,
+    )

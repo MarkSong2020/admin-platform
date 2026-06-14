@@ -35,7 +35,7 @@ async def test_super_admin_short_circuits() -> None:
     """超管短路：放行，填充 is_super_admin + data_scope=ALL。"""
     dep = require_permission(PERM)
     provider = StubPermissionProvider(super_admins=frozenset({1}))
-    result = await dep(base_user=_user("1"), provider=provider)
+    result = await dep(base_user=_user("1"), provider=provider, _session=None)
     assert result.is_super_admin is True
     assert result.data_scope is not None
     assert result.data_scope.scope_type is ScopeType.ALL
@@ -45,7 +45,7 @@ async def test_super_admin_short_circuits_even_without_permission() -> None:
     """超管短路覆盖 RBAC：即使 permissions 不含该 perm 也放行。"""
     dep = require_permission(PERM)
     provider = StubPermissionProvider(super_admins=frozenset({1}), permissions={1: frozenset()})
-    result = await dep(base_user=_user("1"), provider=provider)
+    result = await dep(base_user=_user("1"), provider=provider, _session=None)
     assert result.is_super_admin is True
 
 
@@ -53,7 +53,7 @@ async def test_with_permission_passes() -> None:
     """有权限：放行，填充 permissions + data_scope。"""
     dep = require_permission(PERM)
     provider = StubPermissionProvider(permissions={2: frozenset({PERM})})
-    result = await dep(base_user=_user("2"), provider=provider)
+    result = await dep(base_user=_user("2"), provider=provider, _session=None)
     assert result.is_super_admin is False
     assert PERM in result.permissions
 
@@ -63,7 +63,7 @@ async def test_without_permission_raises_403() -> None:
     dep = require_permission(PERM)
     provider = StubPermissionProvider(permissions={3: frozenset({"other:perm"})})
     with pytest.raises(AppError) as exc_info:
-        await dep(base_user=_user("3"), provider=provider)
+        await dep(base_user=_user("3"), provider=provider, _session=None)
     assert exc_info.value.code == AUTH_FORBIDDEN_BY_ROLE
     assert exc_info.value.status_code == 403
 
@@ -72,7 +72,7 @@ async def test_empty_permissions_raises_403() -> None:
     """无任何权限的普通用户：403（默认 deny）。"""
     dep = require_permission(PERM)
     with pytest.raises(AppError):
-        await dep(base_user=_user("4"), provider=StubPermissionProvider())
+        await dep(base_user=_user("4"), provider=StubPermissionProvider(), _session=None)
 
 
 async def test_disabled_account_raises_403_even_for_super_admin() -> None:
@@ -81,7 +81,7 @@ async def test_disabled_account_raises_403_even_for_super_admin() -> None:
     dep = require_permission(PERM)
     provider = StubPermissionProvider(super_admins=frozenset({1}), inactive_users=frozenset({1}))
     with pytest.raises(AppError) as exc_info:
-        await dep(base_user=_user("1"), provider=provider)
+        await dep(base_user=_user("1"), provider=provider, _session=None)
     assert exc_info.value.code == AUTH_ACCOUNT_DISABLED
     assert exc_info.value.status_code == 403
 
@@ -93,7 +93,7 @@ async def test_disabled_account_raises_403_with_permission() -> None:
         permissions={2: frozenset({PERM})}, inactive_users=frozenset({2})
     )
     with pytest.raises(AppError) as exc_info:
-        await dep(base_user=_user("2"), provider=provider)
+        await dep(base_user=_user("2"), provider=provider, _session=None)
     assert exc_info.value.code == AUTH_ACCOUNT_DISABLED
 
 
