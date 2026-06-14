@@ -45,6 +45,18 @@ describe('JobFormDialog', () => {
     expect(labels.some((l) => l.includes('对账'))).toBe(true)
   })
 
+  it('handler 字段是受白名单约束的 el-select（非自由文本，杜绝选未注册 handler 防 RCE）', async () => {
+    mountDialog()
+    await flushPromises()
+    // 处理器项渲染为 el-select（约束选择），而非可任意输入的文本框
+    expect(document.body.querySelectorAll('.el-select').length).toBe(1)
+    // 下拉项仅来自 listHandlers 白名单（两项），无任意串入口
+    const options = document.body.querySelectorAll('.el-select-dropdown__item')
+    expect(options.length).toBe(2)
+    const labels = Array.from(options).map((el) => el.textContent ?? '')
+    expect(labels.every((l) => l.includes('cleanup') || l.includes('reconcile'))).toBe(true)
+  })
+
   it('params 非法 JSON → 校验拦截，不调 createJob', async () => {
     const wrapper = mountDialog()
     await flushPromises()
