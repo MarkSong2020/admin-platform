@@ -3,10 +3,11 @@
  * 侧边菜单递归节点（自引用组件）：
  * 有可见子节点 → el-sub-menu（目录）；否则 → el-menu-item（页面）。
  * index 为拼接后的完整路径，供 SidebarMenu 的 @select 做 router.push。
- * meta.icon 是 RuoYi svg 图标名，与 Element Plus 图标体系不对齐，首版不渲染图标。
+ * meta.icon（RuoYi svg 名）经 resolveMenuIcon 映射为 EP 图标；折叠态靠图标显示。
  */
 import { computed } from 'vue'
 import type { RouterVO } from '@/stores/menu'
+import { resolveMenuIcon } from './menu-icon'
 
 const props = defineProps<{
   /** RouterVO 节点（getRouters 树）。 */
@@ -26,11 +27,14 @@ const visibleChildren = computed(() => (props.item.children ?? []).filter((c) =>
 const isDirectory = computed(() => visibleChildren.value.length > 0)
 
 const title = computed(() => props.item.meta.title || props.item.name)
+
+const icon = computed(() => resolveMenuIcon(props.item.meta.icon))
 </script>
 
 <template>
   <el-sub-menu v-if="isDirectory" :index="fullPath">
     <template #title>
+      <el-icon><component :is="icon" /></el-icon>
       <span>{{ title }}</span>
     </template>
     <SidebarMenuItem
@@ -41,6 +45,7 @@ const title = computed(() => props.item.meta.title || props.item.name)
     />
   </el-sub-menu>
   <el-menu-item v-else :index="fullPath">
-    <span>{{ title }}</span>
+    <el-icon><component :is="icon" /></el-icon>
+    <template #title>{{ title }}</template>
   </el-menu-item>
 </template>
