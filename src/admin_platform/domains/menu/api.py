@@ -21,12 +21,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 
 from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
+from admin_platform.core.pagination import PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.menu.deps import get_menu_service
@@ -41,10 +42,6 @@ from admin_platform.domains.menu.service import MenuService
 router = APIRouter(prefix="/api/v1/menus", tags=["menus"])
 
 ServiceDep = Annotated[MenuService, Depends(get_menu_service)]
-PageQ = Annotated[
-    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
-]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:menu:{action}：list/query/add/edit/remove。
 ListGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_MENU_LIST))]
@@ -123,7 +120,7 @@ async def create_menu(payload: MenuCreate, svc: ServiceDep, user: AddGuard) -> M
         user,
         Permissions.SYSTEM_MENU_ADD,
         "menu",
-        coro=svc.create(payload),
+        coro=svc.create(payload, is_super_admin=user.is_super_admin),
         display=lambda m: m.name,
         success_status=201,
     )
@@ -142,7 +139,7 @@ async def update_menu(
         user,
         Permissions.SYSTEM_MENU_EDIT,
         "menu",
-        coro=svc.update(item_id, payload),
+        coro=svc.update(item_id, payload, is_super_admin=user.is_super_admin),
         target_id=item_id,
         display=lambda m: m.name,
     )

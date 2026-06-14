@@ -83,7 +83,7 @@ async def test_get_raises_when_missing() -> None:
 @pytest.mark.asyncio
 async def test_create_returns_read_dto() -> None:
     svc = MenuService(_StubRepo())  # type: ignore[arg-type]
-    out = await svc.create(MenuCreate(name="x", menu_type="C"))
+    out = await svc.create(MenuCreate(name="x", menu_type="C"), is_super_admin=True)
     assert out.id == 1
     assert out.name == "x"
 
@@ -125,7 +125,7 @@ async def test_list_empty_returns_zero_total_pages() -> None:
 async def test_create_parent_not_found_raises() -> None:
     svc = MenuService(_StubRepo())  # type: ignore[arg-type]
     with pytest.raises(AppError) as exc:
-        await svc.create(MenuCreate(name="x", menu_type="C", parent_id=999))
+        await svc.create(MenuCreate(name="x", menu_type="C", parent_id=999), is_super_admin=True)
     assert exc.value.code == "menu.PARENT_NOT_FOUND"
 
 
@@ -133,7 +133,7 @@ async def test_create_parent_not_found_raises() -> None:
 async def test_update_missing_raises() -> None:
     svc = MenuService(_StubRepo())  # type: ignore[arg-type]
     with pytest.raises(AppError) as exc:
-        await svc.update(999, MenuUpdate(name="x"))
+        await svc.update(999, MenuUpdate(name="x"), is_super_admin=True)
     assert exc.value.code == "menu.NOT_FOUND"
 
 
@@ -141,9 +141,9 @@ async def test_update_missing_raises() -> None:
 async def test_update_parent_not_found_raises() -> None:
     repo = _StubRepo()
     svc = MenuService(repo)  # type: ignore[arg-type]
-    a = (await svc.create(MenuCreate(name="A", menu_type="C"))).id
+    a = (await svc.create(MenuCreate(name="A", menu_type="C"), is_super_admin=True)).id
     with pytest.raises(AppError) as exc:
-        await svc.update(a, MenuUpdate(parent_id=999))
+        await svc.update(a, MenuUpdate(parent_id=999), is_super_admin=True)
     assert exc.value.code == "menu.PARENT_NOT_FOUND"
 
 
@@ -151,9 +151,9 @@ async def test_update_parent_not_found_raises() -> None:
 async def test_update_into_self_raises_cycle() -> None:
     repo = _StubRepo()
     svc = MenuService(repo)  # type: ignore[arg-type]
-    a = (await svc.create(MenuCreate(name="A", menu_type="M"))).id
+    a = (await svc.create(MenuCreate(name="A", menu_type="M"), is_super_admin=True)).id
     with pytest.raises(AppError) as exc:
-        await svc.update(a, MenuUpdate(parent_id=a))
+        await svc.update(a, MenuUpdate(parent_id=a), is_super_admin=True)
     assert exc.value.code == "menu.CYCLE"
 
 
@@ -161,11 +161,11 @@ async def test_update_into_self_raises_cycle() -> None:
 async def test_update_into_descendant_raises_cycle() -> None:
     repo = _StubRepo()
     svc = MenuService(repo)  # type: ignore[arg-type]
-    a = (await svc.create(MenuCreate(name="A", menu_type="M"))).id
-    b = (await svc.create(MenuCreate(name="B", menu_type="C", parent_id=a))).id
+    a = (await svc.create(MenuCreate(name="A", menu_type="M"), is_super_admin=True)).id
+    b = (await svc.create(MenuCreate(name="B", menu_type="C", parent_id=a), is_super_admin=True)).id
     # 把 A 移到其子 B 之下 → 成环。
     with pytest.raises(AppError) as exc:
-        await svc.update(a, MenuUpdate(parent_id=b))
+        await svc.update(a, MenuUpdate(parent_id=b), is_super_admin=True)
     assert exc.value.code == "menu.CYCLE"
 
 
@@ -173,8 +173,74 @@ async def test_update_into_descendant_raises_cycle() -> None:
 async def test_delete_with_children_raises() -> None:
     repo = _StubRepo()
     svc = MenuService(repo)  # type: ignore[arg-type]
-    a = (await svc.create(MenuCreate(name="A", menu_type="M"))).id
-    await svc.create(MenuCreate(name="B", menu_type="C", parent_id=a))
+    a = (await svc.create(MenuCreate(name="A", menu_type="M"), is_super_admin=True)).id
+    await svc.create(MenuCreate(name="B", menu_type="C", parent_id=a), is_super_admin=True)
     with pytest.raises(AppError) as exc:
         await svc.delete(a)
     assert exc.value.code == "menu.HAS_CHILDREN"
+
+
+# ---- P0 提权防护：授权根字段（perms / menu_type / status）仅超管可写 ----------
+
+
+@pytest.mark.asyncio
+async def test_update_perms_by_non_super_admin_raises_403() -> None:
+    """核心回归守门：非超管 PATCH menu perms → 403（堵凭空授予权限点的提权漏洞）。"""
+    repo = _StubRepo()
+    svc = MenuService(repo)  # type: ignore[arg-type]
+    m = (await svc.create(MenuCreate(name="m", menu_type="C"), is_super_admin=True)).id
+    with pytest.raises(AppError) as exc:
+        await svc.update(m, MenuUpdate(perms="system:user:edit"), is_super_admin=False)
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_menu_type_by_non_super_admin_raises_403() -> None:
+    repo = _StubRepo()
+    svc = MenuService(repo)  # type: ignore[arg-type]
+    m = (await svc.create(MenuCreate(name="m", menu_type="C"), is_super_admin=True)).id
+    with pytest.raises(AppError) as exc:
+        await svc.update(m, MenuUpdate(menu_type="F"), is_super_admin=False)
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+
+
+@pytest.mark.asyncio
+async def test_update_display_fields_by_non_super_admin_ok() -> None:
+    """非超管只改展示字段（name/icon）放行——不误伤日常菜单编辑。"""
+    repo = _StubRepo()
+    svc = MenuService(repo)  # type: ignore[arg-type]
+    m = (await svc.create(MenuCreate(name="m", menu_type="C"), is_super_admin=True)).id
+    out = await svc.update(m, MenuUpdate(name="新名", icon="ico"), is_super_admin=False)
+    assert out.name == "新名"
+    assert out.icon == "ico"
+
+
+@pytest.mark.asyncio
+async def test_update_perms_by_super_admin_ok() -> None:
+    repo = _StubRepo()
+    svc = MenuService(repo)  # type: ignore[arg-type]
+    m = (await svc.create(MenuCreate(name="m", menu_type="C"), is_super_admin=True)).id
+    out = await svc.update(m, MenuUpdate(perms="system:user:list"), is_super_admin=True)
+    assert out.perms == "system:user:list"
+
+
+@pytest.mark.asyncio
+async def test_create_perms_by_non_super_admin_raises_403() -> None:
+    """create 纵深防御：非超管设 perms（非 None）即 403。"""
+    svc = MenuService(_StubRepo())  # type: ignore[arg-type]
+    with pytest.raises(AppError) as exc:
+        await svc.create(
+            MenuCreate(name="x", menu_type="F", perms="system:user:edit"), is_super_admin=False
+        )
+    assert exc.value.code == "auth.FORBIDDEN_BY_ROLE"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_menu_without_perms_by_non_super_admin_ok() -> None:
+    """非超管 create 菜单（仅 name+menu_type，无 perms）→ 放行；menu_type 在 create 不拦。"""
+    svc = MenuService(_StubRepo())  # type: ignore[arg-type]
+    out = await svc.create(MenuCreate(name="普通菜单", menu_type="C"), is_super_admin=False)
+    assert out.name == "普通菜单"
+    assert out.perms is None

@@ -180,7 +180,7 @@ async def test_bind_nonexistent_ids_returns_422() -> None:
             f"/api/v1/users/{ids['user']}/roles", json={"role_ids": [ids["r1"], 999999]}
         )
         assert res.status_code == 422
-        assert res.json()["type"] == "admin_platform.ROLE_IDS_INVALID"
+        assert res.json()["type"] == "rbac_binding.ROLE_IDS_INVALID"
     await dispose_engine()
 
 
@@ -195,17 +195,17 @@ async def test_bind_nonexistent_ids_returns_422_all_subresources() -> None:
             f"/api/v1/users/{ids['user']}/posts", json={"post_ids": [ids["p1"], 999999]}
         )
         assert posts.status_code == 422
-        assert posts.json()["type"] == "admin_platform.POST_IDS_INVALID"
+        assert posts.json()["type"] == "rbac_binding.POST_IDS_INVALID"
         menus = await c.put(
             f"/api/v1/roles/{ids['r1']}/menus", json={"menu_ids": [ids["m1"], 999999]}
         )
         assert menus.status_code == 422
-        assert menus.json()["type"] == "role.MENU_IDS_INVALID"
+        assert menus.json()["type"] == "rbac_binding.MENU_IDS_INVALID"
         depts = await c.put(
             f"/api/v1/roles/{ids['r1']}/depts", json={"dept_ids": [ids["d1"], 999999]}
         )
         assert depts.status_code == 422
-        assert depts.json()["type"] == "role.DEPT_IDS_INVALID"
+        assert depts.json()["type"] == "rbac_binding.DEPT_IDS_INVALID"
     await dispose_engine()
 
 
@@ -295,5 +295,5 @@ async def test_rbac_write_audit_on_success_and_failure(caplog: pytest.LogCapture
     failure = [e for e in rbac if e["result"]["status"] == "failure"]
     assert success and success[0]["action"] == "system:user:bind_roles"
     assert success[0]["target"]["type"] == "user"
-    assert failure and failure[0]["result"]["error_code"] == "admin_platform.ROLE_IDS_INVALID"
+    assert failure and failure[0]["result"]["error_code"] == "rbac_binding.ROLE_IDS_INVALID"
     await dispose_engine()
