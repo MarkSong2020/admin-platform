@@ -2590,6 +2590,7 @@
         "properties": {
           "content": {
             "description": "公告内容（富文本）",
+            "maxLength": 65535,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -2743,6 +2744,7 @@
           "content": {
             "anyOf": [
               {
+                "maxLength": 65535,
                 "minLength": 1,
                 "type": "string"
               },
@@ -7305,6 +7307,12 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -7920,13 +7928,13 @@
             }
           },
           {
-            "description": "页码（从 1 开始）",
+            "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "页码（从 1 开始）",
+              "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
               "maximum": 10000,
               "minimum": 1,
               "title": "Page",
@@ -8177,13 +8185,13 @@
             }
           },
           {
-            "description": "页码（从 1 开始）",
+            "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "页码（从 1 开始）",
+              "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
               "maximum": 10000,
               "minimum": 1,
               "title": "Page",
@@ -8627,14 +8635,14 @@
             }
           },
           {
-            "description": "页码（从 1 开始，上限 10000）",
+            "description": "日志页码（从 1 开始，上限 500）",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "页码（从 1 开始，上限 10000）",
-              "maximum": 10000,
+              "description": "日志页码（从 1 开始，上限 500）",
+              "maximum": 500,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -8791,13 +8799,13 @@
         "operationId": "monitor_online_list",
         "parameters": [
           {
-            "description": "页码（从 1 开始，上限 10000）",
+            "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "页码（从 1 开始，上限 10000）",
+              "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
               "maximum": 10000,
               "minimum": 1,
               "title": "Page",
@@ -9003,14 +9011,14 @@
             }
           },
           {
-            "description": "页码（从 1 开始，上限 10000）",
+            "description": "日志页码（从 1 开始，上限 500）",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "页码（从 1 开始，上限 10000）",
-              "maximum": 10000,
+              "description": "日志页码（从 1 开始，上限 500）",
+              "maximum": 500,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -9657,6 +9665,101 @@
         "operationId": "posts_list",
         "parameters": [
           {
+            "description": "岗位编码模糊匹配",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "岗位编码模糊匹配",
+              "title": "Code"
+            }
+          },
+          {
+            "description": "岗位名称模糊匹配",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "岗位名称模糊匹配",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "岗位状态（active / disabled）",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "岗位状态（active / disabled）",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "排序字段（sort_order / created_at / id）",
+            "in": "query",
+            "name": "order_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "排序字段（sort_order / created_at / id）",
+              "title": "Order By"
+            }
+          },
+          {
+            "description": "排序方向（asc / desc，默认 desc）",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "排序方向（asc / desc，默认 desc）",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
             "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
@@ -9724,7 +9827,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -9830,6 +9933,12 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -10197,6 +10306,139 @@
         "operationId": "roles_list",
         "parameters": [
           {
+            "description": "角色名称模糊匹配",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "角色名称模糊匹配",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "角色编码模糊匹配",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "角色编码模糊匹配",
+              "title": "Code"
+            }
+          },
+          {
+            "description": "角色状态（active / disabled）",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "角色状态（active / disabled）",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "创建时间起（含）",
+            "in": "query",
+            "name": "created_at_begin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间起（含）",
+              "title": "Created At Begin"
+            }
+          },
+          {
+            "description": "创建时间止（含）",
+            "in": "query",
+            "name": "created_at_end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间止（含）",
+              "title": "Created At End"
+            }
+          },
+          {
+            "description": "排序字段（created_at / sort_order / id）",
+            "in": "query",
+            "name": "order_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "排序字段（created_at / sort_order / id）",
+              "title": "Order By"
+            }
+          },
+          {
+            "description": "排序方向（asc / desc，默认 desc）",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "排序方向（asc / desc，默认 desc）",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
             "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
@@ -10264,7 +10506,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -10931,6 +11173,138 @@
         "operationId": "users_list",
         "parameters": [
           {
+            "description": "用户名模糊匹配",
+            "in": "query",
+            "name": "username",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "用户名模糊匹配",
+              "title": "Username"
+            }
+          },
+          {
+            "description": "账号状态（active / disabled）",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "账号状态（active / disabled）",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "所属部门ID（精确匹配）",
+            "in": "query",
+            "name": "dept_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "所属部门ID（精确匹配）",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "description": "创建时间起（含）",
+            "in": "query",
+            "name": "created_at_begin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间起（含）",
+              "title": "Created At Begin"
+            }
+          },
+          {
+            "description": "创建时间止（含）",
+            "in": "query",
+            "name": "created_at_end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间止（含）",
+              "title": "Created At End"
+            }
+          },
+          {
+            "description": "排序字段（id / username / created_at）",
+            "in": "query",
+            "name": "order_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "排序字段（id / username / created_at）",
+              "title": "Order By"
+            }
+          },
+          {
+            "description": "排序方向（asc / desc，默认 desc）",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "排序方向（asc / desc，默认 desc）",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
             "description": "页码（从 1 开始，上限 10000 防深分页 DoS）",
             "in": "query",
             "name": "page",
@@ -10998,7 +11372,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
