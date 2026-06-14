@@ -67,6 +67,10 @@ let installedRouteNames: string[] = []
 
 /** getRouters 菜单树 → addRoute 装配；记录 name 供 reset。 */
 export function installDynamicRoutes(routers: RouterVO[]): void {
+  // 幂等：先清上一轮装配。覆盖「已 bootstrap 的登录态用户再次访问 /login 并重新提交登录」
+  // 等路径——否则 addRoute 重名覆盖的同时 installedRouteNames 会累积重复项。首次装配时
+  // installedRouteNames 为空，reset 是 no-op，无副作用。
+  resetDynamicRoutes()
   for (const route of toRoutes(routers)) {
     router.addRoute(route)
     if (route.name != null) installedRouteNames.push(String(route.name))

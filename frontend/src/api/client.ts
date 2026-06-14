@@ -11,7 +11,7 @@
  */
 import createClient, { type Middleware } from 'openapi-fetch'
 import type { paths } from './generated/types'
-import { attachAuthHeaders, refreshOnce } from './session'
+import { attachAuthHeaders, clearTokens, emitSessionExpired, refreshOnce } from './session'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 const AUTH_PATHS = [
@@ -42,7 +42,15 @@ const authMiddleware: Middleware = {
       await refreshOnce() // 共享 single-flight；失败抛 SessionExpiredError → 调用方 reject
       const retry = original.clone()
       attachAuthHeaders(retry.headers)
-      return fetch(retry)
+      const retried = await fetch(retry)
+      // 刷新成功但重放仍 401：access token 在「刷新→重放」窗口内被后端吊销。此时不再二次刷新
+      // （避免循环），改走会话失效统一出口（清 token + 广播 → 订阅者跳登录），与 refreshOnce
+      // 失败路径语义一致，避免用户停在报 401 的破页。
+      if (retried.status === 401) {
+        clearTokens()
+        emitSessionExpired()
+      }
+      return retried
     }
     return response
   },

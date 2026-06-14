@@ -203,6 +203,18 @@ describe('动态路由装配/重置', () => {
     expect(router.hasRoute('User')).toBe(true)
   })
 
+  it('install 自带幂等：连续两次 install（模拟已登录用户再次登录、未手动 reset）不累积、路由仍正确解析', () => {
+    installDynamicRoutes(routersFixture)
+    installDynamicRoutes(routersFixture)
+    expect(router.hasRoute('User')).toBe(true)
+    expect(router.resolve('/system/user').name).toBe('User')
+
+    // 单次 reset 即可彻底移除（install 内部已先 reset，installedRouteNames 不会累积重复项）
+    resetDynamicRoutes()
+    expect(router.hasRoute('System')).toBe(false)
+    expect(router.hasRoute('User')).toBe(false)
+  })
+
   it('reset 可重复调用（无已装配路由时为 no-op）', () => {
     expect(() => {
       resetDynamicRoutes()

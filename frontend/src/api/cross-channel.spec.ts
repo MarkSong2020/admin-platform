@@ -49,6 +49,19 @@ describe('跨通道 single-flight / 失效统一出口', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it('刷新成功但重放仍 401（token 在刷新-重放窗口被吊销）→ 走会话失效出口', async () => {
+    setTokens({ accessToken: 'old', refreshToken: 'r0' })
+    // 刷新成功（拿到 new token），但后端无论 old/new 都回 401（access 已被吊销）
+    __setRefreshImplForTest(async () => ({ accessToken: 'new', refreshToken: 'r1' }))
+    const handler = vi.fn()
+    onSessionExpired(handler)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })))
+
+    await apiClient.GET('/api/v1/users' as never, {} as never)
+    // 不再二次刷新（避免循环），改走失效出口 emit 一次
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
   it('POST(带 body)401 重放保留 body（clone 未被消费）', async () => {
     setTokens({ accessToken: 'old', refreshToken: 'r0' })
     __setRefreshImplForTest(async () => ({ accessToken: 'new', refreshToken: 'r1' }))

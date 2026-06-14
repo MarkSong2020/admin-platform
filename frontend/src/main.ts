@@ -4,6 +4,7 @@ import 'element-plus/dist/index.css'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 import App from './App.vue'
 import router, { resetDynamicRoutes, setupAfterLogin } from './router'
@@ -16,7 +17,8 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus)
+// 注入中文 locale，避免 el-pagination / el-table 空态 / 日期选择器等内置文案露英文
+app.use(ElementPlus, { locale: zhCn })
 app.directive('hasPermi', hasPermi)
 
 // router 职责（reset 动态路由 / redirect）经回调注入，stores 不直接依赖 router
