@@ -12,8 +12,6 @@ on:
   workflow_dispatch: {}
   schedule:
     - cron: "0 18 * * *" # 每日 ~02:00 Asia/Shanghai（UTC 18:00）
-  push:
-    branches: [p6-frontend] # 临时：验证 E2E workflow 能在 CI 真跑，验证后移除
 
 concurrency:
   group: e2e-${{ github.ref }}
