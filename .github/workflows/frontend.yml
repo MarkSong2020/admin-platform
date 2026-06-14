@@ -40,7 +40,7 @@ jobs:
       - run: pnpm exec oxlint .          # 检查模式（不 --fix）
       - run: pnpm exec eslint .
       - run: pnpm type-check
-      - run: pnpm exec vitest run        # run 模式，非 watch
+      - run: pnpm exec vitest run --coverage   # run 模式 + 覆盖率门（thresholds 见 vitest.config）
       - run: pnpm build
       - run: pnpm depcruise
       - run: pnpm openapi-drift          # 重新 dump 后端 schema → 生成类型 → diff（真门，spec §7）
