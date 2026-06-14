@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # 防「忘开鉴权 / 漏关 debug / 空 pepper」的脚手架默认值裸奔到生产。
     environment: Environment = "local"
     debug: bool = False
+    # 交互式 API 文档（/docs、/redoc、/openapi.json）是否在生产暴露。默认 False →
+    # environment=production 时这三条路由全部关闭（create_app 据此把 docs_url/redoc_url/
+    # openapi_url 设为 None），防匿名 GET /openapi.json 拿全端点 + 参数 schema + 权限点命名
+    # （OWASP API9 信息泄露）。需要时显式 APP_EXPOSE_DOCS_IN_PRODUCTION=true 打开。
+    # 非 production 环境（local/dev/staging）不受本项影响，docs 常开（本地/CI 调试便利）。
+    expose_docs_in_production: bool = False
     # 用 Literal 约束 —— Pydantic 在 Settings 构造时就拒掉 typo（如
     # APP_LOG_LEVEL=INOF），不会推迟到后面 configure_logging() 才报错。
     log_level: LogLevel = "INFO"
@@ -213,6 +219,15 @@ class Settings(BaseSettings):
     # P5 Excel 导入上传上限（独立于通用文件上传，默认更小）。导入端点流式累计超此即 413，
     # 防超大 xlsx 整体读入内存 OOM（对抗审查 P0）。下限 1KB，上限 100MB。
     excel_max_upload_size_bytes: int = Field(default=10485760, ge=1024, le=104857600)
+    # zip bomb / inflated XML DoS 防护（P1）：xlsx 是 zip，上传上限只限**压缩后**体积，小压缩包
+    # 可膨胀出巨大 XML。reader 在 openpyxl 解压前查中央目录，下列三阈值任一超限 → 413（不解压）。
+    # 总声明解压大小上限：默认 100MB（约上传上限 10x；正常 xlsx 解压几 MB，远不及）。
+    excel_max_uncompressed_bytes: int = Field(default=104857600, ge=1024, le=1073741824)
+    # zip 条目数上限：默认 512（正常 xlsx 条目几十个；防大量条目 bomb）。
+    excel_max_zip_entries: int = Field(default=512, ge=16, le=65535)
+    # 单条目最大压缩比（file_size / compress_size）：默认 100（正常 xlsx < ~20x，bomb 常 > 100x；
+    # catch 压缩极小但解压巨大的 inflated sharedStrings.xml）。
+    excel_max_compression_ratio: int = Field(default=100, ge=10, le=10000)
 
     @field_validator("database_url")
     @classmethod
