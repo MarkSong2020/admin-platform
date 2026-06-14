@@ -47,6 +47,9 @@ class AuditEventLog(Base, IdMixin, TimestampMixin):
         Index("ix_audit_events_type_time", "event_type", "occurred_at"),
         Index("ix_audit_events_actor_time", "actor_user_id", "occurred_at"),
         Index("ix_audit_events_result_status", "result_status"),
+        # 复合索引（status 过滤 + occurred_at 倒序 + id tiebreaker）——支撑 operlog「按结果状态筛 +
+        # 时间倒序」深翻页：PG 反向扫描索引免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
+        Index("ix_audit_events_status_time", "result_status", "occurred_at", "id"),
         Index("ix_audit_events_request_id", "request_id"),
     )
 

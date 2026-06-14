@@ -14,7 +14,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: ${POSTGRES_DB:-app}
     ports:
-      - "5432:5432"
+      # 默认仅绑回环，不暴露到 0.0.0.0（防共享/公网开发机同网段访问 dev 库）。
+      # 需远程访问时设 BIND_ADDR=0.0.0.0（或具体网卡 IP）覆盖。
+      - "${BIND_ADDR:-127.0.0.1}:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +32,8 @@ services:
     image: redis:7-alpine
     profiles: ["cache"]
     ports:
-      - "6379:6379"
+      # 同 db：默认仅绑回环，BIND_ADDR 可覆盖。
+      - "${BIND_ADDR:-127.0.0.1}:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
