@@ -24,6 +24,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Password Endpoint
+         * @description 自助改密：验原密 → 改密 → 撤该用户全部旧 refresh 会话 → 返回当前会话的新 access+refresh。
+         *
+         *     需登录（``require_current_user``，无需额外权限点——任何已登录用户都能改自己的）。
+         */
+        post: operations["auth_change_password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1200,6 +1222,26 @@ export interface components {
              * @description 算术题（如 '3 + 5 = ?'）
              */
             question: string;
+        };
+        /**
+         * ChangePasswordRequest
+         * @description 自助改密请求体（已登录用户改自己的密码，需验原密码）。
+         *
+         *     强度分两层：``≥12 字符`` / 不含首尾空白在本 schema 层（Pydantic，422）；不等于用户名 +
+         *     新≠旧在 service 层（需 user 上下文，抛 ``auth.PASSWORD_TOO_WEAK`` 422）。改密成功撤销该用户
+         *     **全部**旧 refresh 会话并给当前会话重签新 token（响应复用 ``LoginResponse``，见 service.change_password）。
+         */
+        ChangePasswordRequest: {
+            /**
+             * New Password
+             * @description 新密码（≥12 字符）
+             */
+            new_password: string;
+            /**
+             * Old Password
+             * @description 当前密码（验证身份）
+             */
+            old_password: string;
         };
         /**
          * ConfigCreate
@@ -3060,6 +3102,57 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    auth_change_password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

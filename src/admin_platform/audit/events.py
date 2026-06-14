@@ -25,7 +25,12 @@ SCHEMA_VERSION = "audit_event.v1"
 # login_success（P2）：登录成功，让审计 envelope 覆盖完整登录活动（compliance 常要成功登录留痕）。
 # v1 EventType 演进（decision-log 2026-06-09 §3）—— schema_version 不变，枚举扩展向后兼容。
 EventType = Literal[
-    "permission_denied", "login_failed", "rbac_write", "refresh_reused", "login_success"
+    "permission_denied",
+    "login_failed",
+    "rbac_write",
+    "refresh_reused",
+    "login_success",
+    "password_change",
 ]
 RiskLevel = Literal["low", "medium", "high"]
 
