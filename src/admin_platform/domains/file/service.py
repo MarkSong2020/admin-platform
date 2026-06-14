@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.file.repository import FileRepository
 from admin_platform.domains.file.schemas import FilePage, FileRead
 from admin_platform.domains.file.storage import FileSizeExceeded, StorageBackend
@@ -157,13 +158,12 @@ class FileService:
     async def list_(self, *, page: int, size: int) -> FilePage:
         rows = await self._repo.list_active(page=page, size=size)
         total = await self._repo.count_active()
-        total_pages = (total + size - 1) // size if size > 0 else 0
         return FilePage(
             items=[FileRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def prepare_download(self, file_id: int) -> tuple[FileRead, AsyncIterator[bytes]]:

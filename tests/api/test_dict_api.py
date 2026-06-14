@@ -17,9 +17,22 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.dict.api import router
+from admin_platform.domains.dict.deps import get_dict_service
+from admin_platform.domains.dict.schemas import DictDataPage, DictTypePage
+from tests.api._support import override_get_session
 
 _TYPE = {"name": "用户性别", "type": "sys_user_sex"}
 _DATA = {"dict_type_id": 1, "label": "男", "value": "0"}
+
+
+class _StubListService:
+    """只实现两个 list_ 的哑 service：回显 page/size，验证 canonical 请求解析（不连 DB / 不用 Mock）。"""
+
+    async def list_types(self, *, keyword: str | None, page: int, size: int) -> DictTypePage:
+        return DictTypePage(items=[], page=page, size=size, total=0, total_pages=0)
+
+    async def list_data(self, *, dict_type_id: int | None, page: int, size: int) -> DictDataPage:
+        return DictDataPage(items=[], page=page, size=size, total=0, total_pages=0)
 
 
 class _StubProvider(PermissionProvider):
@@ -46,6 +59,9 @@ def _client(*, current_user: CurrentUser | None, provider: PermissionProvider | 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -125,3 +141,29 @@ def test_data_create_returns_422_on_missing_field() -> None:
 
 def test_types_list_size_above_max_is_rejected() -> None:
     assert _superadmin_client().get("/api/v1/dict/types?size=101").status_code == 422
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size=&<filter> → 200，防混用 422 反模式复发）----
+
+
+def _stub_list_client() -> TestClient:
+    """超管 + 注入 list 哑 service 的 client（让 canonical 请求走到 handler 而非真 DB）。"""
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+    app.include_router(router)
+    override_get_session(app.dependency_overrides)
+    app.dependency_overrides[require_current_user] = lambda: CurrentUser(user_id="1", sub="1")
+    app.dependency_overrides[get_permission_provider] = lambda: _StubProvider(is_super=True)
+    app.dependency_overrides[get_dict_service] = _StubListService
+    return TestClient(app)
+
+
+def test_types_list_canonical_page_size_filter_200() -> None:
+    res = _stub_list_client().get("/api/v1/dict/types?page=1&size=10&keyword=sex")
+    assert res.status_code == 200
+
+
+def test_data_list_canonical_page_size_filter_200() -> None:
+    res = _stub_list_client().get("/api/v1/dict/data?page=1&size=10&dict_type_id=1")
+    assert res.status_code == 200

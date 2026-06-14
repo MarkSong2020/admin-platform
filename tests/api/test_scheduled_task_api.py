@@ -28,6 +28,7 @@ from admin_platform.domains.scheduled_task.schemas import (
     ScheduledTaskPage,
     ScheduledTaskRead,
 )
+from tests.api._support import override_get_session
 
 BASE = "/api/v1/monitor/jobs"
 _VALID = {"name": "j1", "handler_key": "noop", "cron_expression": "0 2 * * *"}
@@ -127,6 +128,9 @@ def _client(*, current_user: CurrentUser | None, provider: PermissionProvider | 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     app.dependency_overrides[get_scheduled_task_service] = _StubService
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
@@ -252,3 +256,17 @@ def test_create_negative_misfire_422() -> None:
 
 def test_list_size_above_max_422() -> None:
     assert _super().get(f"{BASE}?size=101").status_code == 422
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size=&<filter> → 200，防混用 422 反模式复发）----
+
+
+def test_list_tasks_canonical_page_size_filter_200() -> None:
+    # page/size + 合法 filter（status / handler_key）同传 → 200。
+    res = _super().get(f"{BASE}?page=1&size=10&status=active&handler_key=noop")
+    assert res.status_code == 200
+
+
+def test_list_logs_canonical_page_size_filter_200() -> None:
+    res = _super().get(f"{BASE}/logs?page=1&size=10&task_id=1&status=success")
+    assert res.status_code == 200

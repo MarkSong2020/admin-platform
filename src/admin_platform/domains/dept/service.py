@@ -20,6 +20,7 @@ from __future__ import annotations
 from admin_platform.authz.data_scope import is_dept_visible
 from admin_platform.authz.scope import DataScope
 from admin_platform.core.errors import AUTH_FORBIDDEN_BY_SCOPE, AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.dept.schemas import (
     DeptCreate,
@@ -47,13 +48,12 @@ class DeptService:
         """
         rows = await self._repo.list_paginated(page, size, scope=scope)
         total = await self._repo.count(scope=scope)
-        total_pages = (total + size - 1) // size if size > 0 else 0
         return DeptPage(
             items=[DeptRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, item_id: int, *, scope: DataScope | None = None) -> DeptRead:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0017"
 down_revision: str | Sequence[str] | None = "0016"
@@ -31,18 +31,28 @@ def upgrade() -> None:
             comment="family绝对过期上限(UTC,首登锚定,轮换透传不随清理漂移)",
         ),
     )
-    # 回填：按 family 取首签 issued_at + 30d（与原 absolute 语义一致；30d = absolute_ttl 默认）。
+    # 回填 family_absolute_at = 首签 issued_at + absolute_ttl（PK 项2 收敛：保守不延长 / 不读运行时
+    # config——迁移须自包含、且当前运行时 TTL 不等于历史 TTL）。absolute_ttl 默认 30 天（= 配置
+    # auth_refresh_absolute_ttl_seconds 默认 2592000）。**若部署曾把该配置改成非 30 天**，生产首跑前
+    # 必须显式传历史值精确回填，否则旧 family 上限被错填：
+    #   alembic -x refresh_absolute_ttl_seconds=<历史秒数> upgrade 0017
+    # 刻意不用现有 expires_at 兜底——它是 idle 滑动过期值（≈最近轮换+7d）、非 absolute 上限，cap 到它
+    # 会把活跃 family 的绝对窗口误砍到下个 idle 周期、造成大面积非预期重登。
+    x_args = context.get_x_argument(as_dictionary=True)
+    ttl_seconds = int(x_args.get("refresh_absolute_ttl_seconds", "2592000"))
     op.execute(
-        """
-        UPDATE auth_refresh_tokens AS t
-        SET family_absolute_at = origin.min_issued + interval '30 days'
-        FROM (
-            SELECT family_id, min(issued_at) AS min_issued
-            FROM auth_refresh_tokens
-            GROUP BY family_id
-        ) AS origin
-        WHERE t.family_id = origin.family_id
-        """
+        sa.text(
+            """
+            UPDATE auth_refresh_tokens AS t
+            SET family_absolute_at = origin.min_issued + make_interval(secs => :ttl)
+            FROM (
+                SELECT family_id, min(issued_at) AS min_issued
+                FROM auth_refresh_tokens
+                GROUP BY family_id
+            ) AS origin
+            WHERE t.family_id = origin.family_id
+            """
+        ).bindparams(ttl=ttl_seconds)
     )
     op.alter_column("auth_refresh_tokens", "family_absolute_at", nullable=False)
     # M：family_id 前导索引——revoke_family / get_online_session / 在线用户 family_id IN(子查询)

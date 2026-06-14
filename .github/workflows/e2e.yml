@@ -1,0 +1,131 @@
+# ============================================================================
+# E2E（登录闭环，真后端 + 真浏览器）。独立 workflow：nightly + 手动触发，
+# **不挂在 PR 门上**（E2E 依赖整套后端栈、相对慢且易 flaky；按 codex PK 建议放
+# 单独 job，避免阻塞主 PR 反馈）。frontend.yml 的 6 门仍是 PR 必过门。
+# ⚠️ 首次真跑前未在 CI 验证过：后端 env（auth/CORS/pepper）若有缺项，首次 nightly
+#    会暴露并据日志微调；因非 PR 门，不影响任何人的 PR 合入。
+# ============================================================================
+
+name: e2e (nightly)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 18 * * *" # 每日 ~02:00 Asia/Shanghai（UTC 18:00）
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.9.30"
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  e2e:
+    name: login flow (real backend + chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+      APP_REDIS_URL: redis://localhost:6379/0
+      # 登录闭环必需：auth 开 + jwt secret（非空且足够长）+ refresh pepper（空则签发 refresh 失败）
+      APP_AUTH_ENABLED: "true"
+      APP_AUTH_JWT_SECRET: "ci-e2e-only-not-a-real-secret-0123456789abcdef0123456789abcdef"
+      APP_AUTH_REFRESH_TOKEN_PEPPER: "ci-e2e-only-refresh-pepper-not-a-real-secret"
+      # 开登录防护让验证码出现（与本地一致，smoke 断言验证码必现）
+      APP_AUTH_LOGIN_GUARD_ENABLED: "true"
+      # 前端 preview 跑在 4173，跨源调后端 8000 → CORS 放行该源
+      APP_CORS_ALLOW_ORIGINS: '["http://localhost:4173"]'
+      ADMIN_BOOTSTRAP_PASSWORD: "Admin@123456"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync backend deps
+        run: uv sync --all-extras --dev --frozen
+
+      - name: Apply migrations
+        run: make migrate
+      - name: Seed RBAC（菜单/权限/角色，幂等）
+        run: uv run python -m admin_platform.cli rbac seed
+      - name: Create super admin（admin / ADMIN_BOOTSTRAP_PASSWORD）
+        # 绕后端 #17（cli.py 未导入全部 FK 引用 model → 干净 metadata 下 flush users 报
+        # NoReferencedTableError）：先 create_app() 预导入全部 domain model 再调 CLI。
+        # 后端 #17 修复后可还原为 `uv run python -m admin_platform.cli create-super-admin --username admin`。
+        run: >-
+          uv run python -c "from admin_platform.main import create_app; create_app();
+          from admin_platform.cli import main;
+          raise SystemExit(main(['create-super-admin', '--username', 'admin']))"
+
+      - name: Start backend（uvicorn 后台）+ 等 healthz
+        run: |
+          nohup uv run uvicorn admin_platform.main:app \
+            --host 127.0.0.1 --port 8000 --no-access-log > /tmp/backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/healthz && exit 0
+            sleep 1
+          done
+          echo "backend 未就绪，日志：" && cat /tmp/backend.log && exit 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend（指向本机后端）
+        working-directory: frontend
+        env:
+          VITE_API_BASE: http://localhost:8000
+        run: pnpm build
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run E2E（playwright 自启 preview :4173）
+        working-directory: frontend
+        env:
+          CI: "true"
+        run: pnpm exec playwright test --project=chromium
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

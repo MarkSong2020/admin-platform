@@ -1,3 +1,7 @@
+# 集成测试排除约定（2026-06-14 收口）：`-m "not integration"` 不再放在 pyproject 全局
+# addopts（曾导致点名跑集成测试被静默 deselect、假绿）。排除现显式收口在下列 target：
+# test / coverage / check。裸 `pytest`（无参）默认**含**集成测试，跑前需 `make compose-up`
+# + `make migrate`；只想跑集成用 `make test-integration`（`-m integration`）。
 .PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-openapi-contract check-layer-boundaries check-db schema-doc compose-up compose-up-cache compose-down docker-build
 
 help:  ## Show available targets

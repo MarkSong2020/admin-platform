@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
+import admin_platform.domains.dict.models  # noqa: F401  —— import 时注册 dict 单默认值约束映射
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import register_unique_constraint
 from admin_platform.main import create_app
@@ -145,6 +146,30 @@ def test_integrity_registered_constraint_returns_typed_409(app: FastAPI) -> None
     assert body["request_id"]
 
 
+def test_integrity_dict_default_constraint_returns_typed_409(app: FastAPI) -> None:
+    """真实 dict 单默认值 partial unique index 竞态兜底：撞 ``uq_dict_data_one_default_per_type``
+    → 409 ``dict.DEFAULT_DUPLICATE``（service clear-siblings 之外的 DB 层并发双默认拦截）。
+    映射在 ``domains/dict/models.py`` import 时注册（见文件顶部 import），不靠 app 装配顺序。
+    """
+
+    @app.post("/__integrity-dict-default")
+    async def handler() -> None:
+        raise IntegrityError(
+            "INSERT INTO dict_data ...",
+            {"params": None},
+            orig=_MockOrigWithConstraintName("uq_dict_data_one_default_per_type"),
+        )
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__integrity-dict-default")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["type"] == "dict.DEFAULT_DUPLICATE"
+    # DB 约束名不外泄（只进 log extra）。
+    assert "uq_dict_data_one_default_per_type" not in str(body)
+
+
 def test_integrity_unmapped_constraint_returns_framework_409(app: FastAPI) -> None:
     """未注册的约束 → 409 + framework.CONFLICT，detail 为 None。"""
 
@@ -205,3 +230,16 @@ def test_integrity_without_constraint_returns_framework_409(app: FastAPI) -> Non
     body = resp.json()
     assert body["type"] == "framework.CONFLICT"
     assert body["detail"] is None
+
+
+def test_register_unique_constraint_idempotent_same_value() -> None:
+    # 同名同值重复注册幂等放行（容忍 models 模块在测试收集等场景被多次 import）。
+    register_unique_constraint("uq_failfast_probe", "test.FAILFAST", "x")
+    register_unique_constraint("uq_failfast_probe", "test.FAILFAST", "x")  # 不抛
+
+
+def test_register_unique_constraint_conflict_fails_fast() -> None:
+    # 同名注册不同值 → RuntimeError（防 IntegrityError→409 业务码随 import 顺序漂移）。
+    register_unique_constraint("uq_failfast_probe2", "test.A_DUP", "a")
+    with pytest.raises(RuntimeError, match="漂移"):
+        register_unique_constraint("uq_failfast_probe2", "test.B_DUP", "b")

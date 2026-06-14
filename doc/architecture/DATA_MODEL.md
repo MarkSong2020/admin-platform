@@ -10,6 +10,7 @@
 
 ## 表清单
 
+- [`audit_events`](#audit_events)（29 列）
 - [`configs`](#configs)（8 列）
 - [`depts`](#depts)（11 列）
 - [`dict_types`](#dict_types)（8 列）
@@ -30,6 +31,52 @@
 - [`user_roles`](#user_roles)（5 列）
 
 ## 表结构
+
+### `audit_events`
+
+> 来源 model：`admin_platform.audit.models.AuditEventLog`
+
+| 列 | 类型 | 空 | 默认 | 描述 | 备注 |
+|---|---|---|---|---|---|
+| `event_id` | VARCHAR(64) | NOT NULL | — | 事件UUID(幂等键) |  |
+| `schema_version` | VARCHAR(32) | NOT NULL | — | envelope schema版本 |  |
+| `event_type` | VARCHAR(32) | NOT NULL | — | 事件类型(枚举) |  |
+| `action` | VARCHAR(128) | NOT NULL | — | 权限点/操作标识 |  |
+| `title` | VARCHAR(256) | NOT NULL | — | 人读操作标题 |  |
+| `occurred_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | — | 事件发生时刻(UTC,来自envelope) |  |
+| `actor_user_id` | BIGINT | NULL | — | 操作者用户ID(快照,无FK) |  |
+| `actor_username` | VARCHAR(64) | NULL | — | 操作者用户名(快照) |  |
+| `actor_is_super_admin` | BOOLEAN | NOT NULL | — | 操作者是否超管 |  |
+| `target_type` | VARCHAR(64) | NULL | — | 作用对象类型 |  |
+| `target_id` | VARCHAR(128) | NULL | — | 作用对象ID |  |
+| `target_display` | VARCHAR(255) | NULL | — | 作用对象显示名 |  |
+| `request_id` | VARCHAR(64) | NULL | — | 请求ID(关联键) |  |
+| `trace_id` | VARCHAR(64) | NULL | — | trace ID |  |
+| `method` | VARCHAR(16) | NULL | — | HTTP方法 |  |
+| `path` | VARCHAR(512) | NULL | — | 请求路径 |  |
+| `ip` | VARCHAR(64) | NULL | — | 客户端IP |  |
+| `user_agent` | VARCHAR(512) | NULL | — | User-Agent |  |
+| `result_status` | VARCHAR(16) | NOT NULL | — | 结果(success/failure/denied) |  |
+| `result_http_status` | INTEGER | NULL | — | HTTP状态码 |  |
+| `result_error_code` | VARCHAR(128) | NULL | — | 错误码 |  |
+| `duration_ms` | INTEGER | NULL | — | 耗时(毫秒) |  |
+| `risk_level` | VARCHAR(16) | NOT NULL | — | 风险等级(low/medium/high) |  |
+| `metadata` | JSONB | NOT NULL | — | 脱敏后业务负载(JSONB) |  |
+| `redaction_applied` | BOOLEAN | NOT NULL | — | 是否发生过脱敏 |  |
+| `payload` | JSONB | NOT NULL | — | 完整envelope(无损取证) |  |
+| `id` | BIGINT | NOT NULL | — | 主键 | PK |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 创建时间(UTC) |  |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL | `now()` (DB) | 更新时间(UTC, ORM flush 触发) |  |
+
+约束 / 索引：
+
+- UNIQUE （列级 `unique=True`，DDL 由 PG 自动命名）：(event_id)
+- INDEX `ix_audit_events_actor_time`：(actor_user_id, occurred_at)
+- INDEX `ix_audit_events_occurred_at`：(occurred_at)
+- INDEX `ix_audit_events_request_id`：(request_id)
+- INDEX `ix_audit_events_result_status`：(result_status)
+- INDEX `ix_audit_events_status_time`：(result_status, occurred_at, id)
+- INDEX `ix_audit_events_type_time`：(event_type, occurred_at)
 
 ### `configs`
 
@@ -115,6 +162,7 @@
 
 - INDEX `ix_login_logs_login_at`：(login_at_utc)
 - INDEX `ix_login_logs_status`：(status)
+- INDEX `ix_login_logs_status_time`：(status, login_at_utc, id)
 - INDEX `ix_login_logs_user_time`：(user_id, login_at_utc)
 - INDEX `ix_login_logs_username_time`：(username, login_at_utc)
 

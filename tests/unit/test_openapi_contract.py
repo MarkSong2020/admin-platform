@@ -200,3 +200,27 @@ def test_probe_missing_error_schema_is_caught() -> None:
     assert _rule_error_problem_detail_ref("get", "/__synthetic", op), (
         "problem_detail_ref 规则没抓到缺 schema 的 5xx —— 规则失效"
     )
+
+
+# ---- 二进制端点 200 content（StreamingResponse / Response 无 response_model）---
+# 文件下载 / 岗位导出无 response_model，FastAPI 默认不给 200 声明 content；api 层在 responses=
+# 手动补 binary content（项 5）。本测试守门 _custom_openapi 不会吞掉这两个 200 binary content。
+@pytest.mark.parametrize(
+    ("path", "method", "media_type"),
+    [
+        ("/api/v1/files/{file_id}/download", "get", "application/octet-stream"),
+        (
+            "/api/v1/posts/export",
+            "get",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+    ],
+)
+def test_binary_endpoint_declares_200_binary_content(
+    path: str, method: str, media_type: str
+) -> None:
+    spec = _spec()
+    op = spec["paths"][path][method]
+    content = op["responses"]["200"]["content"]
+    assert media_type in content, f"{method.upper()} {path}: 200 缺 {media_type} content"
+    assert content[media_type]["schema"] == {"type": "string", "format": "binary"}

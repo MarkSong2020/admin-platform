@@ -18,12 +18,13 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
+from admin_platform.core.pagination import PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.file.deps import get_file_service
@@ -33,10 +34,6 @@ from admin_platform.domains.file.service import FileService
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 ServiceDep = Annotated[FileService, Depends(get_file_service)]
-PageQ = Annotated[
-    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
-]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:file:{action}：list/query/upload/download/remove。
 ListGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_FILE_LIST))]
@@ -58,6 +55,14 @@ GET_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 DELETE_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **AUTH_ERROR_RESPONSES,
     404: {"model": ProblemDetail},
+}
+# 下载端点：复用 GET 的 401/403/404，再补 200 二进制流 content —— StreamingResponse 不带
+# response_model，FastAPI 默认不会给 200 声明 content，SDK（openapi-fetch）拿不到 blob 返回类型。
+DOWNLOAD_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **GET_ERROR_RESPONSES,
+    200: {
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}
+    },
 }
 # 上传错误路径：413 超大 / 415 扩展名或魔数 / 422 空文件或缺 multipart 字段。
 # 上传不挂 @idempotent（multipart body 哈希对大文件昂贵且为流，RuoYi 上传亦不幂等）。
@@ -138,7 +143,7 @@ async def upload_file(
 @router.get(
     "/{file_id}/download",
     operation_id="files_download",
-    responses=GET_ERROR_RESPONSES,
+    responses=DOWNLOAD_ERROR_RESPONSES,
 )
 async def download_file(file_id: int, svc: ServiceDep, _user: DownloadGuard) -> StreamingResponse:
     meta, chunks = await svc.prepare_download(file_id)

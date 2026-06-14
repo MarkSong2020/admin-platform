@@ -173,9 +173,17 @@ def create_app() -> FastAPI:
     # 注意：不要传 debug=settings.debug —— Starlette 的 debug middleware 会
     # 把我们注册的通用 Exception handler 换成 HTML traceback 页。
     # settings.debug 用于控制 handler 内的错误细节暴露程度。
+    # OWASP API9 防护：生产默认关闭交互式文档（/docs、/redoc、/openapi.json），
+    # 否则匿名请求可经永久免鉴权的 auth_public_paths 拿到全端点 + 参数 schema + 权限点
+    # 命名。需要时显式 APP_EXPOSE_DOCS_IN_PRODUCTION=true opt-in；非生产环境 docs 常开。
+    # 关闭后这三条公开前缀的请求落 404（路由不存在），无泄漏。
+    docs_exposed = settings.environment != "production" or settings.expose_docs_in_production
     app = FastAPI(
         title=settings.app_name,
         lifespan=lifespan,
+        docs_url="/docs" if docs_exposed else None,
+        redoc_url="/redoc" if docs_exposed else None,
+        openapi_url="/openapi.json" if docs_exposed else None,
     )
     # 中间件注册顺序（Starlette add_middleware 后 add 的包住先 add 的）：
     #   客户 → RequestID（最外层）
@@ -220,6 +228,9 @@ def create_app() -> FastAPI:
     app.include_router(user_router)
     app.include_router(dept_router)
     app.include_router(role_router)
+    # rbac_router 的 GET /api/v1/menus/routers 必须先于 menu_router 的 GET /api/v1/menus/{item_id}
+    # 注册，否则 Starlette 按序把 /menus/routers 匹配进 /{item_id} → 422（int 解析 "routers" 失败）。
+    app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
     app.include_router(menu_router)
     app.include_router(post_router)
     app.include_router(file_router)  # P5 系统工具：文件管理（上传/下载/列表/删除）
@@ -228,7 +239,6 @@ def create_app() -> FastAPI:
     app.include_router(notice_router)  # P3 运营配置：通知公告
     app.include_router(monitor_router)  # P2 系统监控：操作日志 / 登录日志只读查询
     app.include_router(scheduled_task_router)  # P4c 定时任务：CRUD + 手动触发 + 执行日志
-    app.include_router(rbac_router)  # getInfo / getRouters（§6 打通）
     app.include_router(
         rbac_binding_router
     )  # RBAC 绑定子资源 PUT/GET（P1.5，user-role/role-menu/…）

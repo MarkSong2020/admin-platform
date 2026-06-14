@@ -20,7 +20,13 @@ from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.monitor.api import router
 from admin_platform.domains.monitor.deps import get_monitor_service
-from admin_platform.domains.monitor.schemas import OnlineSession, OnlineSessionPage
+from admin_platform.domains.monitor.schemas import (
+    AuditEventPage,
+    LoginLogPage,
+    OnlineSession,
+    OnlineSessionPage,
+)
+from tests.api._support import override_get_session
 
 LIST_URL = "/api/v1/monitor/online"
 _SESSION_UUID = "11111111-1111-1111-1111-111111111111"
@@ -54,6 +60,13 @@ class _StubService:
     async def force_logout(self, session_id: object) -> str:
         return "alice"
 
+    # operlog / logininfor 也走 get_monitor_service —— 哑实现回空页，供 canonical 请求形状回归用。
+    async def list_audit_events(self, **kw: object) -> AuditEventPage:
+        return AuditEventPage(items=[], page=1, size=10, total=0, total_pages=0)
+
+    async def list_login_logs(self, **kw: object) -> LoginLogPage:
+        return LoginLogPage(items=[], page=1, size=10, total=0, total_pages=0)
+
 
 class _StubProvider(PermissionProvider):
     def __init__(self, *, is_super: bool = False, perms: frozenset[str] = frozenset()) -> None:
@@ -79,6 +92,9 @@ def _client(*, current_user: CurrentUser | None, provider: PermissionProvider | 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     app.dependency_overrides[get_monitor_service] = _StubService
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
@@ -157,3 +173,27 @@ def test_kick_malformed_session_id_returns_422() -> None:
 
 def test_list_size_above_max_is_rejected() -> None:
     assert _super_client().get(f"{LIST_URL}?size=101").status_code == 422
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size=&<filter> → 200，防混用 422 反模式复发）----
+# monitor 三个分页 list 端点（online / operlog / logininfor）都走 get_monitor_service，本文件
+# 已 override 成 stub，故可在同一 app 上发 canonical 请求。online 无 filter，只 page/size。
+
+
+def test_online_canonical_page_size_200() -> None:
+    assert _super_client().get(f"{LIST_URL}?page=1&size=10").status_code == 200
+
+
+def test_operlog_canonical_page_size_filter_200() -> None:
+    res = _super_client().get(
+        "/api/v1/monitor/operlog?page=1&size=10"
+        "&event_type=login&actor_user_id=1&result_status=success"
+    )
+    assert res.status_code == 200
+
+
+def test_logininfor_canonical_page_size_filter_200() -> None:
+    res = _super_client().get(
+        "/api/v1/monitor/logininfor?page=1&size=10&username=admin&status=success"
+    )
+    assert res.status_code == 200

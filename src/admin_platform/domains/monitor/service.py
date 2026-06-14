@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import uuid
 from datetime import UTC, datetime
 
@@ -14,6 +13,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.monitor.collector import SystemMetricsCollector
 from admin_platform.domains.monitor.repository import MonitorRepository
 from admin_platform.domains.monitor.schemas import (
@@ -35,10 +35,6 @@ _ONLINE_NOT_FOUND = "monitor.ONLINE_SESSION_NOT_FOUND"
 _FORCED_LOGOUT_REASON = "forced_logout"
 # 缓存采集超时：监控不该因 Redis 慢/挂而拖垮请求，超时即降级为 available=False。
 _CACHE_TIMEOUT_S = 2.0
-
-
-def _total_pages(total: int, size: int) -> int:
-    return math.ceil(total / size) if total else 0
 
 
 class MonitorService:
@@ -69,7 +65,7 @@ class MonitorService:
             page=page,
             size=size,
             total=total,
-            total_pages=_total_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get_audit_event(self, event_pk: int) -> AuditEventDetail:
@@ -90,7 +86,7 @@ class MonitorService:
             page=page,
             size=size,
             total=total,
-            total_pages=_total_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get_login_log(self, log_pk: int) -> LoginLogRead:
@@ -120,7 +116,7 @@ class MonitorService:
             page=page,
             size=size,
             total=total,
-            total_pages=_total_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def force_logout(self, session_id: uuid.UUID) -> str:

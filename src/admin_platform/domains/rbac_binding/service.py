@@ -26,12 +26,12 @@ from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.repository import UserRepository
 
-USER_NOT_FOUND = "admin_platform.USER_NOT_FOUND"
+USER_NOT_FOUND = "user.NOT_FOUND"
 ROLE_NOT_FOUND = "role.NOT_FOUND"
-ROLE_IDS_INVALID = "admin_platform.ROLE_IDS_INVALID"
-POST_IDS_INVALID = "admin_platform.POST_IDS_INVALID"
-MENU_IDS_INVALID = "role.MENU_IDS_INVALID"
-DEPT_IDS_INVALID = "role.DEPT_IDS_INVALID"
+ROLE_IDS_INVALID = "rbac_binding.ROLE_IDS_INVALID"
+POST_IDS_INVALID = "rbac_binding.POST_IDS_INVALID"
+MENU_IDS_INVALID = "rbac_binding.MENU_IDS_INVALID"
+DEPT_IDS_INVALID = "rbac_binding.DEPT_IDS_INVALID"
 
 
 def _user_visible(user: User, scope: DataScope) -> bool:

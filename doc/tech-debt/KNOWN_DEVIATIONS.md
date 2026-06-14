@@ -117,7 +117,7 @@
 
 ## #11 — `IdempotencyMiddleware._route_is_idempotent` O(N) 路由遍历（P2）
 
-**证据**：`src/service_name/core/idempotency.py:286` `for route in request.app.routes: route.matches(...)`。
+**证据**：`src/admin_platform/core/idempotency.py:369` `for route in request.app.routes: route.matches(...)`。
 
 每个进入的 idempotent POST 都会再做一次 starlette routing match（O(N) 比对 path pattern）。FastAPI 内部已经做过一次同样的 match，相当于在 middleware 层重复了一次。100+ 路由的 service 在每请求两次正则比对，理论成本 < 10μs/req，**实测不是热点**——但属于"做得不漂亮"。
 
@@ -148,7 +148,7 @@ def idempotent(func):
 
 ## #12 — Idempotency cache write 早于 transaction commit（P2，需 DB-level idempotency table 兜底）
 
-**证据**：v0.4.11 后 `get_session` 在 dep teardown 才 commit；`IdempotencyMiddleware._cache_and_return`（`idempotency.py:175`）在 handler return 后立刻 SETEX 写 "completed" → **commit 失败的话 cache 已经标完成**。
+**证据**：v0.4.11 后 `get_session` 在 dep teardown 才 commit；`IdempotencyMiddleware._cache_and_return`（`src/admin_platform/core/idempotency.py:302` 的 `setex`）在 handler return 后立刻 SETEX 写 "completed" → **commit 失败的话 cache 已经标完成**。
 
 **影响**：超罕见 race window（handler 返 200 + IdempotencyMiddleware 写 cache + commit 时 DB 短暂挂掉），但确实存在。同 key 重试会拿到 cached 200 但实际数据没存。
 
@@ -197,9 +197,9 @@ Redis cache 只做性能加速，**不参与正确性保证**。这是 Stripe / 
 ## #13 — IdempotencyMiddleware / RequestIDMiddleware / AuthMiddleware 用 BaseHTTPMiddleware（P1 长期债，触发条件待）
 
 **证据**：
-- `src/service_name/core/idempotency.py:79` `class IdempotencyMiddleware(BaseHTTPMiddleware)`
-- `src/service_name/core/middleware.py:65` `class RequestIDMiddleware(BaseHTTPMiddleware)`
-- `src/service_name/core/auth.py:144` `class AuthMiddleware(BaseHTTPMiddleware)`（v0.5.3）
+- `src/admin_platform/core/idempotency.py:157` `class IdempotencyMiddleware(BaseHTTPMiddleware)`
+- `src/admin_platform/core/middleware.py:136` `class RequestIDMiddleware(BaseHTTPMiddleware)`
+- `src/admin_platform/core/auth.py:149` `class AuthMiddleware(BaseHTTPMiddleware)`（v0.5.3）
 
 **问题**：Starlette 官方文档明确推荐新代码避免 `BaseHTTPMiddleware`，已知 limitations：
 
@@ -237,11 +237,11 @@ Redis cache 只做性能加速，**不参与正确性保证**。这是 Stripe / 
 
 ## #14 — Idempotency replay `_serialisable_headers` collapse 多值响应头（P2）
 
-**证据**：`src/service_name/core/idempotency.py:362-364`
+**证据**：`src/admin_platform/core/idempotency.py:386`
 
 ```python
 def _serialisable_headers(headers: Any) -> dict[str, str]:
-    """Filter to plain ``str: str`` mapping. Multi-value headers collapse to last."""
+    """过滤成纯 ``str: str`` 映射。多值 header 折叠成最后一个。"""
     return {k: v for k, v in headers.items() if isinstance(k, str) and isinstance(v, str)}
 ```
 

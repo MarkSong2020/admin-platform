@@ -20,11 +20,15 @@ FastAPI 把同步依赖跑在 threadpool worker 线程，故同步方法用 ``an
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from anyio.from_thread import run as run_in_host_loop
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.authz.providers import AuthzContext, PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
-from admin_platform.db.session import db_session
+from admin_platform.db.session import current_request_session, db_session
 from admin_platform.domains.dept.repository import DeptRepository
 from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.role.repository import RoleRepository
@@ -58,6 +62,11 @@ async def compute_effective_data_scope(
     roles = await role_repo.list_roles_for_user(user_id)
     visible_dept_ids: set[int] = set()
     include_self = False
+    # ``SELF_DEPT_AND_BELOW`` 的后代部门集只依赖 loop-invariant 的 ``user_dept_id``：把递归 CTE
+    # （``list_descendant_dept_ids``）从循环里 hoist 出来，首次需要时算一次后 memo，多个该类型角色
+    # 不再重复查（结果集不变——同一 ``user_dept_id`` 必返回同一后代集）。``None`` 哨兵区分「未算」
+    # 与「已算得空集」，避免 user_dept_id is None 时反复进 else 分支。
+    descendant_dept_ids: frozenset[int] | None = None
     for role in roles:
         scope_type = ScopeType(role.data_scope)
         if scope_type is ScopeType.ALL:
@@ -69,7 +78,11 @@ async def compute_effective_data_scope(
                 visible_dept_ids.add(user_dept_id)
         elif scope_type is ScopeType.SELF_DEPT_AND_BELOW:
             if user_dept_id is not None:
-                visible_dept_ids |= await dept_repo.list_descendant_dept_ids(user_dept_id)
+                if descendant_dept_ids is None:
+                    descendant_dept_ids = frozenset(
+                        await dept_repo.list_descendant_dept_ids(user_dept_id)
+                    )
+                visible_dept_ids |= descendant_dept_ids
         elif scope_type is ScopeType.CUSTOM_DEPT:
             visible_dept_ids |= await role_repo.list_custom_dept_ids_for_role(role.id)
 
@@ -88,6 +101,26 @@ class DbPermissionProvider(PermissionProvider):
     同步接口经 ``anyio.from_thread.run`` 桥到异步内核；只能在 FastAPI 同步依赖
     （threadpool worker 线程）上下文调用（见模块 docstring）。单测请直接 ``await`` ``a_*`` 内核。
     """
+
+    @asynccontextmanager
+    async def _acquire_session(self) -> AsyncIterator[AsyncSession]:
+        """获取授权读用的 session：HTTP 请求上下文复用请求业务 session，非 HTTP 回退自开一事务。
+
+        复用请求 session（P1 架构修复）的收益：授权读与业务写落到**同一连接 / 同一事务 /
+        同一快照**——消除「授权读独立 db_session」造成的每请求连接翻倍（高并发放大连接池压力），
+        以及 READ COMMITTED 下授权快照（is_active/permissions/data_scope）在事务 A 读、业务写在
+        事务 B 的跨快照 TOCTOU（停用 / 改权在事务边界有缝）。
+
+        复用时**只读、不 commit / rollback**——请求 session 的事务生命周期由 ``get_session`` 依赖
+        teardown 拥有（正常 COMMIT / 抛错 ROLLBACK）；这里借用读不得干预。非 HTTP（CLI / 后台任务 /
+        单测直接 await）``current_request_session()`` 返回 None，回退 ``db_session()`` 自开独立事务。
+        """
+        existing = current_request_session()
+        if existing is not None:
+            yield existing
+        else:
+            async with db_session() as session:
+                yield session
 
     # ---- 同步接口（require_permission 依赖在 threadpool worker 线程调用）----
 
@@ -110,7 +143,7 @@ class DbPermissionProvider(PermissionProvider):
 
     async def a_get_is_active(self, user_id: int) -> bool:
         """查 ``users.status == "active"``（请求期账号状态校验）；用户不存在视作停用（安全 deny）。"""
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             user = await UserRepository(session).get(user_id)
             return bool(user is not None and user.status == "active")
 
@@ -121,13 +154,13 @@ class DbPermissionProvider(PermissionProvider):
         （``status != "active"``）即使 ``is_super_admin=True`` 也**不**短路 —— 否则被停用的超管
         在 token 过期前仍能凭旧 token 走短路通过所有权限校验。
         """
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             user = await UserRepository(session).get(user_id)
             return bool(user is not None and user.is_super_admin and user.status == "active")
 
     async def a_get_effective_data_scope(self, user_id: int) -> DataScope:
         """开 session 装配三个 repository，调 ``compute_effective_data_scope`` 做 O2 归一。"""
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             return await compute_effective_data_scope(
                 user_id,
                 user_repo=UserRepository(session),
@@ -142,12 +175,12 @@ class DbPermissionProvider(PermissionProvider):
         本方法只回答「该用户经角色被授予了哪些权限标识」。停用角色 / 停用菜单不贡献
         （``MenuRepository.list_perms_for_user`` 内 JOIN 已滤 ``status=active``）。
         """
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             return await MenuRepository(session).list_perms_for_user(user_id)
 
     async def a_get_user_role_codes(self, user_id: int) -> frozenset[str]:
         """用户生效角色的 code 集（getInfo 展示，§6.1）；停用角色不计（list_roles_for_user 已滤）。"""
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             roles = await RoleRepository(session).list_roles_for_user(user_id)
             return frozenset(r.code for r in roles)
 
@@ -162,7 +195,7 @@ class DbPermissionProvider(PermissionProvider):
         SELECT —— repository 用 ``select().where()`` 不走 ``session.get()`` 的 identity-map 短路；但
         同连接同事务、对象实例复用无 stale，真正零往返需 repo 切 ``session.get()``（排期，非安全项）。
         """
-        async with db_session() as session:
+        async with self._acquire_session() as session:
             user = await UserRepository(session).get(user_id)
             if user is None or user.status != "active":
                 return AuthzContext(

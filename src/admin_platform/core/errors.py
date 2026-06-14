@@ -152,10 +152,20 @@ def register_unique_constraint(constraint_name: str, code: str, title: str) -> N
 
         register_unique_constraint(
             "uq_users_username",
-            "admin_platform.USERNAME_DUPLICATE",
+            "user.USERNAME_DUPLICATE",
             "Username already exists",
         )
+
+    fail-fast（防注册表静默漂移）：同名重复注册**相同** ``(code, title)`` 幂等放行（容忍 models
+    模块被多次 import）；同名注册**不同**值直接 ``RuntimeError``——否则 ``IntegrityError``→409 的业务码
+    会随 import 顺序漂移，客户端可能收到错误业务码（拷贝建模块时漏改约束名的典型征兆）。
     """
+    existing = _UNIQUE_CONSTRAINT_CODES.get(constraint_name)
+    if existing is not None and existing != (code, title):
+        raise RuntimeError(
+            f"约束名 {constraint_name!r} 已注册为 {existing!r}，拒绝用 {(code, title)!r} 覆盖"
+            "——同名不同码会让 IntegrityError→409 业务码随 import 顺序漂移；检查是否拷贝建模块时漏改约束名。"
+        )
     _UNIQUE_CONSTRAINT_CODES[constraint_name] = (code, title)
 
 
@@ -307,7 +317,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         # typed 409；未注册的走 framework.CONFLICT。
         #
         # 约束名只进 log extra，不暴露在响应 body —— DB 内部 schema 名
-        # （如 uq_todos_title）不是对外契约。
+        # （如 uq_users_username）不是对外契约。
         constraint = _extract_constraint_name(exc)
         if constraint is not None and constraint in _UNIQUE_CONSTRAINT_CODES:
             code, title = _UNIQUE_CONSTRAINT_CODES[constraint]
