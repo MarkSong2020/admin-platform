@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.core.pagination import ilike_contains
 from admin_platform.domains.config.models import Config
 from admin_platform.domains.config.schemas import ConfigCreate, ConfigUpdate
 
@@ -16,8 +17,9 @@ from admin_platform.domains.config.schemas import ConfigCreate, ConfigUpdate
 def _filters(keyword: str | None) -> list[ColumnElement[bool]]:
     conds: list[ColumnElement[bool]] = []
     if keyword:
-        like = f"%{keyword}%"
-        conds.append(Config.config_key.ilike(like) | Config.name.ilike(like))
+        conds.append(
+            ilike_contains(Config.config_key, keyword) | ilike_contains(Config.name, keyword)
+        )
     return conds
 
 

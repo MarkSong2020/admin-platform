@@ -23,6 +23,9 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.role.api import router
+from admin_platform.domains.role.deps import get_role_service
+from admin_platform.domains.role.schemas import RoleListQuery, RolePage
+from tests.api._support import override_get_session
 
 
 class _StubProvider(PermissionProvider):
@@ -46,11 +49,21 @@ class _StubProvider(PermissionProvider):
     def invalidate_all(self) -> None: ...
 
 
+class _StubListService:
+    """只实现 list_ 的哑 service：回显收到的 page/size，验证 query 模型解析（不连 DB / 不用 Mock）。"""
+
+    async def list_(self, query: RoleListQuery, *, page: int, size: int) -> RolePage:
+        return RolePage(items=[], page=page, size=size, total=0, total_pages=0)
+
+
 def _make_app(*, current_user: CurrentUser | None, provider: PermissionProvider | None) -> FastAPI:
     app = FastAPI()
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -139,3 +152,20 @@ def test_update_invalid_status_rejected_422() -> None:
 def test_list_size_above_max_is_rejected() -> None:
     res = _superadmin_client().get("/api/v1/roles?size=101")
     assert res.status_code == 422
+
+
+def test_list_with_page_size_and_filter_returns_200() -> None:
+    # P0 回归：page/size 与过滤参数（status）同传 → 200（修复前混用独立标量 page/size Query 令
+    # query-model 形参无法从 query 填充 → 422「该模型参数 missing」，与 extra 策略无关）。
+    # stub service 回显 page/size 验证解析正确。
+    app = _make_app(
+        current_user=CurrentUser(user_id="1", sub="1"),
+        provider=_StubProvider(is_super=True),
+    )
+    app.dependency_overrides[get_role_service] = _StubListService
+    res = TestClient(app).get("/api/v1/roles?page=1&size=10&status=active")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["page"] == 1
+    assert body["size"] == 10
+    assert body["items"] == []

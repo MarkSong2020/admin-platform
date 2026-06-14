@@ -116,7 +116,7 @@ async def test_username_duplicate_409(client: AsyncClient) -> None:
         "/api/v1/users", headers=_auth(ta), json={"username": "alice", "password": "pw"}
     )
     assert resp.status_code == 409
-    assert resp.json()["type"] == "admin_platform.USERNAME_DUPLICATE"
+    assert resp.json()["type"] == "user.USERNAME_DUPLICATE"
 
 
 async def test_update_and_delete_user(client: AsyncClient) -> None:
@@ -246,4 +246,31 @@ async def test_user_data_scope_read_and_write() -> None:
         # update / delete 不可见用户 u_b → 404
         assert (await c.patch(f"/api/v1/users/{u_b}", json={"nickname": "x"})).status_code == 404
         assert (await c.delete(f"/api/v1/users/{u_b}")).status_code == 404
+    await dispose_engine()
+
+
+async def test_user_list_filter_cannot_bypass_data_scope() -> None:
+    """P1 关键安全回归：列表过滤是 AND 叠加在 data_scope 之上，绝不绕过数据权限。
+
+    非超管仅可见部门 A：即使显式按 username 过滤命中部门 B 的用户、或按 dept_id=B 过滤，
+    结果仍被 data_scope 收窄到部门 A（看不见 B），count 也一致（total 不含 B）。
+    """
+    dept_a = await _make_dept("FA")
+    dept_b = await _make_dept("FB")
+    await _make_user("alpha-a", dept_a)  # 部门 A：可见
+    await _make_user("alpha-b", dept_b)  # 部门 B：不可见（同前缀，验证过滤不放大范围）
+    async with _scoped_client(_ScopedProvider(visible=frozenset({dept_a}))) as c:
+        # 关键字 "alpha" 在全库命中 2 条，但 data_scope 只放行 A → 仅 alpha-a。
+        kw = (await c.get("/api/v1/users", params={"username": "alpha"})).json()
+        assert {u["username"] for u in kw["items"]} == {"alpha-a"}
+        assert kw["total"] == 1  # count 与过滤+scope 一致（不含 B）
+        # 显式按不可见部门 B 过滤 → 空集（过滤 AND data_scope 后无交集），不泄露 B。
+        scoped_out = (await c.get("/api/v1/users", params={"dept_id": dept_b})).json()
+        assert scoped_out["items"] == []
+        assert scoped_out["total"] == 0
+        # 排序在 data_scope 范围内生效（仅 1 条，验证不报错且仍受限）。
+        sorted_res = (
+            await c.get("/api/v1/users", params={"order_by": "username", "order": "asc"})
+        ).json()
+        assert {u["username"] for u in sorted_res["items"]} == {"alpha-a"}
     await dispose_engine()

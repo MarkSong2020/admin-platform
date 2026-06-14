@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.core.pagination import ilike_contains
 from admin_platform.domains.dict.models import DictData, DictType
 from admin_platform.domains.dict.schemas import (
     DictDataCreate,
@@ -21,8 +22,9 @@ from admin_platform.domains.dict.schemas import (
 def _type_filters(keyword: str | None) -> list[ColumnElement[bool]]:
     conds: list[ColumnElement[bool]] = []
     if keyword:
-        like = f"%{keyword}%"
-        conds.append(DictType.name.ilike(like) | DictType.type.ilike(like))
+        conds.append(
+            ilike_contains(DictType.name, keyword) | ilike_contains(DictType.type, keyword)
+        )
     return conds
 
 

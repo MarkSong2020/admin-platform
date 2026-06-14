@@ -17,6 +17,34 @@ from pydantic import BaseModel, ConfigDict, Field
 # 且 Literal 需静态字面量），以测试守同源；列在此处便于 RoleCreate/Update 复用。
 DataScopeValue = Literal["all", "custom_dept", "self_dept", "self_dept_and_below", "self"]
 StatusValue = Literal["active", "disabled"]
+# 排序方向取值（对标 RuoYi isAsc；与 core.pagination.OrderValue 同源字面量）。
+OrderValue = Literal["asc", "desc"]
+
+
+class RoleListQuery(BaseModel):
+    """角色列表过滤 / 排序参数（对标 RuoYi 角色管理查询；全可选）。
+
+    纯输入 DTO（不进响应，不改 ``RolePage`` 形状）。``name`` / ``code`` 模糊匹配，``status`` 精确，
+    ``created_at`` 闭区间；``order_by`` 是逻辑字段名，repository 用 allowlist 映射 ORM Column。
+    """
+
+    name: str | None = Field(default=None, max_length=64, description="角色名称模糊匹配")
+    code: str | None = Field(default=None, max_length=64, description="角色编码模糊匹配")
+    status: StatusValue | None = Field(default=None, description="角色状态（active / disabled）")
+    created_at_begin: datetime | None = Field(default=None, description="创建时间起（含）")
+    created_at_end: datetime | None = Field(default=None, description="创建时间止（含）")
+    order_by: str | None = Field(
+        default=None, max_length=64, description="排序字段（created_at / sort_order / id）"
+    )
+    order: OrderValue = Field(default="desc", description="排序方向（asc / desc，默认 desc）")
+    # 分页参数折进本模型：query-model 与独立标量 Query 参数混用时，FastAPI 不再把本模型展开为
+    # query 参数，而是把整个模型参数当成必填且无法从 query 填充的字段，canonical 请求遂报 422
+    # （错误是「该模型参数 missing」，非「page/size 被当额外参数拒」——query-model 实测并不
+    # forbid 额外参数）。故 page/size 必须内联于此。约束与 core.pagination.PageQ/SizeQ 值同源。
+    page: int = Field(
+        default=1, ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）"
+    )
+    size: int = Field(default=20, ge=1, le=100, description="每页条数（上限 100）")
 
 
 class RoleCreate(BaseModel):

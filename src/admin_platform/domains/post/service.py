@@ -13,22 +13,26 @@
 
 from __future__ import annotations
 
+from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages, resolve_sort
 from admin_platform.domains.post.excel import POST_EXCEL_COLUMNS
 from admin_platform.domains.post.repository import PostRepository
 from admin_platform.domains.post.schemas import (
     PostCreate,
     PostImportRowError,
     PostImportSummary,
+    PostListQuery,
     PostPage,
     PostRead,
     PostUpdate,
 )
-from admin_platform.excel import ExcelExporter, ExcelImporter
+from admin_platform.excel import ExcelExporter, ExcelImporter, ExcelTooLargeError
 
 NOT_FOUND_CODE = "post.NOT_FOUND"
 CODE_DUPLICATE_CODE = "post.CODE_DUPLICATE"
 EXPORT_TOO_LARGE_CODE = "post.EXPORT_TOO_LARGE"
+IMPORT_TOO_LARGE_CODE = "post.EXCEL_TOO_LARGE"
 # Excel 导入/导出行数上限（配置化排期，spec §1 非目标）。
 _EXCEL_MAX_ROWS = 10000
 
@@ -37,17 +41,26 @@ class PostService:
     def __init__(self, repository: PostRepository) -> None:
         self._repo = repository
 
-    async def list_(self, *, page: int, size: int) -> PostPage:
-        """offset 分页（ADR 0001 §7.5 envelope）。岗位是全局配置，不受 data_scope 约束。"""
-        rows = await self._repo.list_paginated(page, size)
-        total = await self._repo.count()
-        total_pages = (total + size - 1) // size if size > 0 else 0
+    async def list_(self, query: PostListQuery, *, page: int, size: int) -> PostPage:
+        """offset 分页（ADR 0001 §7.5 envelope）。岗位是全局配置，不受 data_scope 约束。
+
+        排序在此层解析（resolve_sort 防注入：非法 order_by → 422）；过滤条件由 repository 构造。
+        """
+        order_by = resolve_sort(
+            query.order_by,
+            query.order,
+            allowed=PostRepository.SORT_ALLOWED,
+            default=PostRepository.SORT_DEFAULT,
+            tie_break=PostRepository.SORT_TIE_BREAK,
+        )
+        rows = await self._repo.list_paginated(query, page, size, order_by=order_by)
+        total = await self._repo.count(query)
         return PostPage(
             items=[PostRead.model_validate(row) for row in rows],
             page=page,
             size=size,
             total=total,
-            total_pages=total_pages,
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get(self, item_id: int) -> PostRead:
@@ -81,9 +94,29 @@ class PostService:
 
     async def import_posts(self, content: bytes) -> PostImportSummary:
         """全量校验（Pydantic 逐行 + 文件内/库内 code 重复）：errors 非空 → imported=0 不写；
-        全通过 → 单事务批量写入。导入错误随 200 返回（业务结果，errors 始终可见，非系统错误）。"""
-        importer = ExcelImporter(PostCreate, POST_EXCEL_COLUMNS, max_rows=_EXCEL_MAX_ROWS)
-        result = importer.parse(content)
+        全通过 → 单事务批量写入。导入错误随 200 返回（业务结果，errors 始终可见，非系统错误）。
+
+        解压前 zip bomb 预检（reader 内）超限 → ``ExcelTooLargeError`` → 413（payload too large，
+        与上传体积超限 ``post.EXCEL_TOO_LARGE`` 同语义，系统级拒绝，非行级业务结果）。
+        """
+        settings = get_settings()
+        importer = ExcelImporter(
+            PostCreate,
+            POST_EXCEL_COLUMNS,
+            max_rows=_EXCEL_MAX_ROWS,
+            max_uncompressed_bytes=settings.excel_max_uncompressed_bytes,
+            max_zip_entries=settings.excel_max_zip_entries,
+            max_compression_ratio=settings.excel_max_compression_ratio,
+        )
+        try:
+            result = importer.parse(content)
+        except ExcelTooLargeError as exc:
+            raise AppError(
+                code=IMPORT_TOO_LARGE_CODE,
+                title="Excel 文件过大",
+                detail="解压后体积/条目超限，疑似 zip bomb，已拒绝",
+                status_code=413,
+            ) from exc
         errors = [
             PostImportRowError(row=e.row, column=e.column, code=e.code, message=e.message)
             for e in result.errors
