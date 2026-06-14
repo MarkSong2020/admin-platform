@@ -18,12 +18,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 
 from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
 from admin_platform.core.idempotency import idempotent
+from admin_platform.core.pagination import PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.dept.deps import get_dept_service
@@ -38,10 +39,6 @@ from admin_platform.domains.dept.service import DeptService
 router = APIRouter(prefix="/api/v1/depts", tags=["depts"])
 
 ServiceDep = Annotated[DeptService, Depends(get_dept_service)]
-PageQ = Annotated[
-    int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000 防深分页 DoS）")
-]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。对标若依 system:dept:{action}：list/query/add/edit/remove。
 ListGuard = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_DEPT_LIST))]

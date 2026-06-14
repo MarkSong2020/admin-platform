@@ -9,11 +9,11 @@ handler schema，否则 422——任务永远绑到代码侧预注册 handler，
 
 from __future__ import annotations
 
-import math
 from datetime import UTC, datetime
 from typing import Any
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.scheduled_task.cron import (
     CronValidationError,
     next_run_after,
@@ -44,10 +44,6 @@ _LOG_NOT_FOUND = "scheduled_task.LOG_NOT_FOUND"
 # get 的 404 NOT_FOUND，避免同一 type 映射两种 HTTP 状态破坏 SDK 类型化错误契约。
 _HANDLER_OFFLINE = "scheduled_task.HANDLER_OFFLINE"  # handler 运行期下线（409，非 422 未注册）
 _RUN_CONFLICT = "scheduled_task.RUN_CONFLICT"  # 执行期 task 被删/claim 抢占（409，非 404 不存在）
-
-
-def _total_pages(total: int, size: int) -> int:
-    return math.ceil(total / size) if total else 0
 
 
 class ScheduledTaskService:
@@ -122,7 +118,7 @@ class ScheduledTaskService:
             page=page,
             size=size,
             total=total,
-            total_pages=_total_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get_task(self, task_id: int) -> ScheduledTaskRead:
@@ -190,9 +186,13 @@ class ScheduledTaskService:
             task.allow_concurrent = payload.allow_concurrent
         if payload.misfire_grace_seconds is not None:
             task.misfire_grace_seconds = payload.misfire_grace_seconds
-        if payload.timeout_seconds is not None:
+        # timeout_seconds / remark 是 nullable 列（None = 不限时 / 无备注）：用 model_fields_set 区分
+        # 「显式传 null（清空）」与「未传（不动）」——PATCH 语义，传了就改。其余字段（name/handler/cron/
+        # status/allow_concurrent/misfire/params）对应 NOT NULL 列，沿用 is not None 忽略显式 null
+        # （不可清空成 NULL）。
+        if "timeout_seconds" in payload.model_fields_set:
             task.timeout_seconds = payload.timeout_seconds
-        if payload.remark is not None:
+        if "remark" in payload.model_fields_set:
             task.remark = payload.remark
 
         await self._repo.create(task)  # flush
@@ -219,7 +219,7 @@ class ScheduledTaskService:
             page=page,
             size=size,
             total=total,
-            total_pages=_total_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     # ---- 手动触发 ----

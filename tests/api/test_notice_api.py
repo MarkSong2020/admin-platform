@@ -17,8 +17,20 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.domains.notice.api import router
+from admin_platform.domains.notice.deps import get_notice_service
+from admin_platform.domains.notice.schemas import NoticePage
+from tests.api._support import override_get_session
 
 _VALID = {"title": "停机通知", "notice_type": "notification", "content": "今晚维护"}
+
+
+class _StubListService:
+    """只实现 list_ 的哑 service：回显 page/size，验证 canonical 请求解析（不连 DB / 不用 Mock）。"""
+
+    async def list_(
+        self, *, notice_type: str | None, status: str | None, page: int, size: int
+    ) -> NoticePage:
+        return NoticePage(items=[], page=page, size=size, total=0, total_pages=0)
 
 
 class _StubProvider(PermissionProvider):
@@ -45,6 +57,9 @@ def _client(*, current_user: CurrentUser | None, provider: PermissionProvider | 
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    # require_permission 守卫的「顺序保证」依赖了 get_session（P1 架构修复）；DB-free 测试把它
+    # override 成不连库的占位，否则守卫解析时会去连真 DB。
+    override_get_session(app.dependency_overrides)
     if current_user is not None:
         app.dependency_overrides[require_current_user] = lambda: current_user
     if provider is not None:
@@ -110,6 +125,13 @@ def test_create_rejects_invalid_notice_type_422() -> None:
     assert res.status_code == 422
 
 
+def test_create_rejects_oversized_content_422() -> None:
+    # content 上限 65535（L1 入口校验）：防持 system:notice:add 的管理员存超大 content →
+    # 存储滥用 + list/get 响应体放大的 DoS 倾向。
+    res = _superadmin_client().post("/api/v1/notices", json={**_VALID, "content": "a" * 65536})
+    assert res.status_code == 422
+
+
 def test_update_invalid_status_rejected_422() -> None:
     res = _superadmin_client().patch("/api/v1/notices/1", json={"status": "bogus"})
     assert res.status_code == 422
@@ -117,3 +139,21 @@ def test_update_invalid_status_rejected_422() -> None:
 
 def test_list_size_above_max_is_rejected() -> None:
     assert _superadmin_client().get("/api/v1/notices?size=101").status_code == 422
+
+
+# ---- canonical 分页请求形状回归（锁住 ?page=&size=&<filter> → 200，防混用 422 反模式复发）----
+
+
+def test_list_canonical_page_size_filter_200() -> None:
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+    app.include_router(router)
+    override_get_session(app.dependency_overrides)
+    app.dependency_overrides[require_current_user] = lambda: CurrentUser(user_id="1", sub="1")
+    app.dependency_overrides[get_permission_provider] = lambda: _StubProvider(is_super=True)
+    app.dependency_overrides[get_notice_service] = _StubListService
+    res = TestClient(app).get(
+        "/api/v1/notices?page=1&size=10&notice_type=notification&status=active"
+    )
+    assert res.status_code == 200

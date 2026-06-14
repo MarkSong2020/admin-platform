@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from admin_platform.core.errors import AppError
+from admin_platform.core.pagination import compute_total_pages
 from admin_platform.domains.dict.repository import DictRepository
 from admin_platform.domains.dict.schemas import (
     DictDataCreate,
@@ -38,10 +39,6 @@ DATA_DUPLICATE_CODE = "dict.DATA_DUPLICATE"
 DEFAULT_DUPLICATE_CODE = "dict.DEFAULT_DUPLICATE"
 
 
-def _pages(total: int, size: int) -> int:
-    return (total + size - 1) // size if size > 0 else 0
-
-
 class DictService:
     def __init__(self, repository: DictRepository) -> None:
         self._repo = repository
@@ -56,7 +53,7 @@ class DictService:
             page=page,
             size=size,
             total=total,
-            total_pages=_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get_type(self, type_id: int) -> DictTypeRead:
@@ -112,7 +109,7 @@ class DictService:
             page=page,
             size=size,
             total=total,
-            total_pages=_pages(total, size),
+            total_pages=compute_total_pages(total, size),
         )
 
     async def get_data(self, data_id: int) -> DictDataRead:
