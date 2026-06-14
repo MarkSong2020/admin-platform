@@ -57,12 +57,14 @@ USER app
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# uvicorn production flags (v0.4.14):
-# --proxy-headers + --forwarded-allow-ips=*
-#   K8s typically routes client → ingress → service. Without these, uvicorn
-#   ignores X-Forwarded-{For,Proto} and request.client.host shows the ingress
-#   IP / scheme defaults to http even when the public edge is https. The
-#   wildcard is safe inside a pod because only ingress can reach this port.
+# uvicorn proxy headers —— 默认不信任 X-Forwarded-*（PK 项1 安全收敛 2026-06-14）：
+#   原 `--proxy-headers --forwarded-allow-ips=*` 让 uvicorn 无条件信任所有 peer 的 XFF、在请求到
+#   应用前把 request.client.host 改写成客户端可控的 XFF 最左值，与应用层「直连 peer 不可伪造」的
+#   审计 / 登录限流口径自相矛盾（可伪造 XFF 绕过 IP 维度撞库限流 / 污染审计 IP）。移除后
+#   request.client.host = 真实直连 peer。
+#   ⚠️ 上线前（client→ingress→service 拓扑）按实际可信代理重配，**绝不能用 wildcard**：
+#     env FORWARDED_ALLOW_IPS=<ingress/proxy CIDR> + --proxy-headers，并接应用层统一 client-IP
+#     resolver（trusted_proxy_cidrs，从右向左跳可信代理链）令审计 / login_guard 同口径。详见 NIGHT_LOG XFF 段。
 # --no-access-log
 #   We emit our own structured JSON access log via RequestIDMiddleware
 #   (one record per request, with request_id / status / duration_ms). Leaving
@@ -71,6 +73,4 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "admin_platform.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*", \
      "--no-access-log"]

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Query
 from admin_platform.authz.permissions import Permissions
 from admin_platform.core.auth import CurrentUser
 from admin_platform.core.errors import ProblemDetail
+from admin_platform.core.pagination import LogPageQ, PageQ, SizeQ
 from admin_platform.core.permissions import require_permission
 from admin_platform.core.rbac_audit import audited_write
 from admin_platform.domains.monitor.deps import get_monitor_service, get_system_monitor_service
@@ -34,9 +35,6 @@ router = APIRouter(prefix="/api/v1/monitor", tags=["monitor"])
 
 ServiceDep = Annotated[MonitorService, Depends(get_monitor_service)]
 SysMonServiceDep = Annotated[SystemMonitorService, Depends(get_system_monitor_service)]
-# page 上限防深分页 DoS（review O1：审计表 append-only 持续增长，大 offset 扫描+count 成本随表涨）。
-PageQ = Annotated[int, Query(ge=1, le=10000, description="页码（从 1 开始，上限 10000）")]
-SizeQ = Annotated[int, Query(ge=1, le=100, description="每页条数（上限 100）")]
 
 # 权限守卫（默认 deny + 超管短路）。只读日志：list + query（detail）。
 OperLogList = Annotated[CurrentUser, Depends(require_permission(Permissions.SYSTEM_OPERLOG_LIST))]
@@ -78,7 +76,7 @@ async def list_operlog(  # noqa: PLR0913 —— FastAPI 注入的查询过滤参
     result_status: Annotated[
         str | None, Query(description="按结果过滤(success/failure/denied)")
     ] = None,
-    page: PageQ = 1,
+    page: LogPageQ = 1,
     size: SizeQ = 20,
 ) -> AuditEventPage:
     return await svc.list_audit_events(
@@ -111,7 +109,7 @@ async def list_logininfor(
     _user: LoginInfoList,
     username: Annotated[str | None, Query(description="按用户名过滤")] = None,
     status: Annotated[str | None, Query(description="按状态过滤")] = None,
-    page: PageQ = 1,
+    page: LogPageQ = 1,
     size: SizeQ = 20,
 ) -> LoginLogPage:
     return await svc.list_login_logs(username=username, status=status, page=page, size=size)

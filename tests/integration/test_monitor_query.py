@@ -136,6 +136,15 @@ async def test_operlog_list_paginated_and_filtered() -> None:
         assert denied.json()["total"] == 2
 
 
+async def test_log_endpoints_page_capped_at_500() -> None:
+    # 日志端点用 LogPageQ（le=500，比业务表 PageQ le=10000 更严）——OFFSET 深翻页在高增长 append-only
+    # 日志表上代价高（PK 项3）。page=501 → 422（FastAPI 解析层拒）；page=500 仍在范围内 → 200。
+    async with _client(_SuperProvider) as c:
+        assert (await c.get("/api/v1/monitor/operlog?page=501")).status_code == 422
+        assert (await c.get("/api/v1/monitor/logininfor?page=501")).status_code == 422
+        assert (await c.get("/api/v1/monitor/operlog?page=500")).status_code == 200
+
+
 async def test_operlog_detail_returns_full_payload() -> None:
     await _seed_audit(1)
     async with _client(_SuperProvider) as c:
