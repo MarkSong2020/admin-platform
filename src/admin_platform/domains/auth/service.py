@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from http import HTTPStatus
 
 from redis.asyncio import Redis
@@ -20,18 +21,26 @@ from admin_platform.core.errors import (
     AUTH_CAPTCHA_REQUIRED,
     AUTH_LOGIN_FAILED,
     AUTH_LOGIN_RATE_LIMITED,
+    AUTH_PASSWORD_INCORRECT,
+    AUTH_PASSWORD_TOO_WEAK,
     AppError,
 )
-from admin_platform.core.security import averify_password, issue_access_token
+from admin_platform.core.security import (
+    ahash_password,
+    averify_password,
+    issue_access_token,
+)
 from admin_platform.db.session import db_session
 from admin_platform.domains.auth import login_guard
 from admin_platform.domains.auth.captcha import generate_captcha, verify_captcha
 from admin_platform.domains.auth.login_log import record_login_attempt
 from admin_platform.domains.auth.refresh_service import (
     issue_login_refresh,
+    issue_refresh_token,
     revoke_refresh_token,
     rotate_refresh_token,
 )
+from admin_platform.domains.auth.repository import RefreshTokenRepository
 from admin_platform.domains.auth.schemas import CaptchaResponse, LoginResponse
 from admin_platform.domains.user.models import User
 from admin_platform.domains.user.repository import UserRepository
@@ -269,3 +278,108 @@ async def issue_captcha(redis: Redis) -> CaptchaResponse:
         question=question,
         expires_in=get_settings().auth_captcha_ttl_seconds,
     )
+
+
+def _emit_password_change(user_id: int, username: str, *, ok: bool) -> None:
+    """改密审计（high-risk，成功/失败都记）。密码明文绝不进 metadata（deny-list 也会兜底脱敏）。"""
+    result = (
+        AuditResult(status="success", http_status=200)
+        if ok
+        else AuditResult(status="failure", http_status=400, error_code=AUTH_PASSWORD_INCORRECT)
+    )
+    emit_audit(
+        build_audit_event(
+            event_type="password_change",
+            action="auth.change_password",
+            title="修改密码" if ok else "修改密码失败（原密码错）",
+            actor=AuditActor(user_id=user_id, username=username),
+            target=AuditTarget(type="user", id=str(user_id), display=username),
+            result=result,
+            risk_level="high",
+        )
+    )
+
+
+def _validate_new_password(new_password: str, *, username: str, old_password: str) -> None:
+    """新密码强度（service 层：需 user 上下文）。长度≥12 / 不含首尾空白已在 schema 校验。
+
+    复用 CLI 既有标准（不等于用户名）+ 要求新密码 ≠ 原密码（用户拍板 2026-06-15）。
+    """
+    if new_password == username:
+        raise AppError(
+            code=AUTH_PASSWORD_TOO_WEAK,
+            title="Weak password",
+            detail="新密码不能与用户名相同",
+            status_code=int(HTTPStatus.UNPROCESSABLE_ENTITY),
+        )
+    if new_password == old_password:
+        raise AppError(
+            code=AUTH_PASSWORD_TOO_WEAK,
+            title="Weak password",
+            detail="新密码不能与原密码相同",
+            status_code=int(HTTPStatus.UNPROCESSABLE_ENTITY),
+        )
+
+
+async def change_password(user_id: int, old_password: str, new_password: str) -> LoginResponse:
+    """自助改密（已登录用户改自己）：验原密 → 校验新密强度 → 哈希更新 → 撤全部旧 refresh 会话 →
+    给当前会话重签新 token（方案 A，用户拍板 2026-06-15）。
+
+    安全：改密成功撤销该用户**所有**旧 refresh family（含可能被盗的），响应返回一对新 access+refresh，
+    当前会话换新 token 无缝继续、其他设备旧 refresh 全失效需重登。事务边界同 ``refresh()``：撤销 +
+    改密 + 重签是一个事务的原子副作用；失败（原密码错/弱密码）在事务内 catch、正常退出上下文
+    （COMMIT 空事务无害）后再 re-raise——若让异常直接穿出会 ROLLBACK，但失败路径本就无业务写，
+    审计已 emit 进缓冲（不随 rollback 丢）。原密码错返 400（``auth.PASSWORD_INCORRECT``，已鉴权故非
+    401）；不额外限流（用户拍板：JWT 已确立身份）。
+    """
+    deferred: AppError | None = None
+    response: LoginResponse | None = None
+    actor_username = ""
+    async with db_session() as session:
+        try:
+            user = await UserRepository(session).get(user_id)
+            # 已过 require_current_user，user 理论必存在且 active；防御兜底（token 未过期但账号已删/停用）。
+            if user is None or user.status != _ACTIVE:
+                raise _login_failed()
+            actor_username = user.username
+            # 验原密码（线程池 argon2，同 login 路径）。
+            if not await averify_password(old_password, user.password_hash):
+                _emit_password_change(user_id, user.username, ok=False)
+                raise AppError(
+                    code=AUTH_PASSWORD_INCORRECT,
+                    title="Current password incorrect",
+                    detail="当前密码不正确",
+                    status_code=400,
+                )
+            _validate_new_password(new_password, username=user.username, old_password=old_password)
+            # 哈希新密码 + 写入（线程池）。
+            user.password_hash = await ahash_password(new_password)
+            await session.flush()
+            # access token 始终重签（无状态 JWT）。refresh 的「撤全部旧 family + 重签新」绑定在 pepper
+            # 门控内（review P1-2）：要么都做（pepper 配了），要么都不做（pepper 未配则本就无 refresh
+            # flow）——避免 pepper 未配时「撤全部旧 family 却不发新 refresh」造成隐性强制登出。
+            access = issue_access_token(user_id=user.id, username=user.username)
+            issued = None
+            if get_settings().auth_refresh_token_pepper:
+                # 锁序 H1：先 user 锁再撤，与轮换/logout 同顺序防竞态。
+                refresh_repo = RefreshTokenRepository(session)
+                await refresh_repo.acquire_user_lock(user_id)
+                now = datetime.now(UTC)
+                for family_id in await refresh_repo.list_active_families(user_id, now=now):
+                    await refresh_repo.revoke_family(family_id, reason="password_changed", now=now)
+                issued = await issue_refresh_token(session, user_id=user_id)
+            response = LoginResponse(
+                access_token=access,
+                expires_in=get_settings().auth_access_token_ttl_seconds,
+                refresh_token=issued.token if issued is not None else None,
+                refresh_expires_in=issued.expires_in if issued is not None else None,
+            )
+        except AppError as exc:
+            deferred = exc
+    if deferred is not None:
+        raise deferred
+    if response is None:  # 不变式：无 deferred ⇒ response 已构造；防御兜底（理论不可达）。
+        raise _login_failed()
+    # 成功审计（事务提交后 emit，同 login 成功路径时点正确）。
+    _emit_password_change(user_id, actor_username, ok=True)
+    return response
