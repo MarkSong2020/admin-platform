@@ -5,7 +5,7 @@
 > **不重复**的内容请回到源头：
 > - 全局分层规则总论 → 开发规范文档 「Web 服务（FastAPI 主栈）」
 > - 跨语言协同约定 → 内部 ADR 仓（不公开）
-> - 项目阶段 / 工作流约束 → 本仓 `CLAUDE.md` 与 `AGENTS.md`
+> - 项目阶段 / 工作流约束 → 本仓 `AGENTS.md`（`CLAUDE.md` 通过 `@AGENTS.md` 导入它）
 > - 生成器 CLI 与模板细节 → [CODE_GENERATOR.md](./CODE_GENERATOR.md)
 >
 > 本文只讲：**做业务功能时按什么流程走、改哪些文件、不能改哪些文件、提交前怎么自检**。
