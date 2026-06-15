@@ -16,7 +16,7 @@
 
 ## 后续（P1 RBAC 数据建模）
 
-角色 / 菜单 / 部门 / 岗位 + 数据权限的表设计见 [RuoYi 对标路线图](../../docs/specs/2026-06-04-ruoyi-parity-roadmap.md) §5；具体表结构 P1 实现时拉 Codex PK 设计，仍走本基线（IdMixin / 命名规范 / comment 门禁）。
+角色 / 菜单 / 部门 / 岗位 + 数据权限的表设计见 [RuoYi 对标路线图](../specs/2026-06-04-ruoyi-parity-roadmap.md) §5；具体表结构 P1 实现时拉 Codex PK 设计，仍走本基线（IdMixin / 命名规范 / comment 门禁）。
 
 ## 引用
 

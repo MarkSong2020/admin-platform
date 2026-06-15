@@ -40,7 +40,7 @@ claude -p "$(cat tasks/next.md)" \
   --allowedTools "\
 Bash(make check),Bash(make coverage),Bash(uv run pytest:*),\
 Bash(uv run ruff:*),Bash(uv run pyright),Bash(uv run lint-imports),\
-Edit(src/**),Edit(tests/**),Edit(doc/**),\
+Edit(src/**),Edit(tests/**),Edit(docs/**),\
 Bash(git switch -c:*),Bash(git add src/*),Bash(git add tests/*),Bash(git commit:*)" \
   --output-format json
 ```

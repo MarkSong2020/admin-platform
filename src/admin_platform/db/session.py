@@ -19,7 +19,7 @@
     commit **之前** —— commit 失败会在 Redis 里留下一条幻影
     「completed」记录。金额扣减类需要严格 at-most-once 的场景必须在
     同事务内加 DB-level idempotency 表 —— 详见
-    ``doc/architecture/REQUEST_LIFECYCLE.md``。
+    ``docs/architecture/REQUEST_LIFECYCLE.md``。
 """
 
 from __future__ import annotations

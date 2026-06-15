@@ -1,7 +1,7 @@
 # Changelog
 
 > 每个 milestone 版本一行小结。完整 commit 历史看 `git log`；架构演进背景看
-> [`doc/archive/EVOLUTION.md`](./doc/archive/EVOLUTION.md)。
+> [`docs/archive/EVOLUTION.md`](./docs/archive/EVOLUTION.md)。
 >
 > 本仓不强制 SemVer——v0.x 阶段所有变更都被视为 breaking 可能。第一个
 > stable 版本（v1.0）后改走严格 SemVer。
@@ -125,7 +125,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ### 无人值守执行地基（2026-06-09）
 
-`f6bc3ce` · [doc](./doc/operations/UNATTENDED_EXECUTION.md)
+`f6bc3ce` · [doc](./docs/operations/UNATTENDED_EXECUTION.md)
 
 - **CI coverage gate**：`ci.yml` 新增 `make coverage` 阻塞 step（`fail_under=85`
   在 CI 通电，避免新代码 0 覆盖却 fast lane 全绿；实测 86.49%）
@@ -219,10 +219,10 @@ v0.5.0 把 `todo` 作为单 domain 蓝本落地后，业务团队第一个真实
   migration），扩展 generator 默认骨架，加入业务字段（`title`
   `UniqueConstraint` + `status: StrEnum` + `due_at: Optional`）和业务规则
   （title 唯一性 → 409 `service_name.TODO_TITLE_DUPLICATE`）
-- **新增 `doc/architecture/EXAMPLE_DOMAIN.md`**：解释 `todo` 每一行选择的
+- **新增 `docs/architecture/EXAMPLE_DOMAIN.md`**：解释 `todo` 每一行选择的
   理由（为什么 `UniqueConstraint` 是 backstop / 为什么 service 做预检 /
   为什么 `@idempotent` 必须在最内层）
-- **`doc/INDEX.md` 加「🚀 5 分钟新手路径」**：从 `git clone` 到调通
+- **`docs/INDEX.md` 加「🚀 5 分钟新手路径」**：从 `git clone` 到调通
   `POST /api/v1/todos` 的最短路径
 - **`main.py` 挂载 `todo_router`**：模板开箱即用 `/api/v1/todos`，业务
   团队真接入时按 `main.py` 注释删掉即可
@@ -321,7 +321,7 @@ P2（4 项）：
   lifespan eager_probe 多 worker 各自跑导致部分失败 K8s 仍 ready）
 - generator name 报错友好化：`name=OrderItem` 自动建议 `order_item`，
   reserved name 报错列出所有保留名清单；2 个新单测守门
-- 新增 `doc/operations/DEPENDENCY_UPGRADE.md`：核心依赖（FastAPI /
+- 新增 `docs/operations/DEPENDENCY_UPGRADE.md`：核心依赖（FastAPI /
   Starlette / Pydantic / SQLAlchemy / Alembic / asyncpg / redis-py /
   uvicorn / ruff / pyright / Python / uv）逐项升级 caveat + 升级 SOP
   + CVE 紧急通道 + 跨服务协同建议；INDEX.md 同步链接

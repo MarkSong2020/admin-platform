@@ -73,7 +73,7 @@
 - ⏳ D Migration 端到端 — 等 Docker
 
 **落地**：
-- `f73d803` v0.3.3：B-1 ProblemDetail 注入 + 3 测试守门；B-2 §8 基础设施 endpoint 豁免；C `.github/workflows/ci.yml` 标 dead code + 新建 `doc/operations/CI_MIGRATION.md`
+- `f73d803` v0.3.3：B-1 ProblemDetail 注入 + 3 测试守门；B-2 §8 基础设施 endpoint 豁免；C `.github/workflows/ci.yml` 标 dead code + 新建 `docs/operations/CI_MIGRATION.md`
 - `20a5658` v0.4.2：D Migration 端到端发现 **真 bug** — `migrations/script.py.mako` 缺 `import sa / op`，阻塞 `alembic upgrade head`
 
 ## 第 6 轮 — 2026-05-15 — 2 个并行 agent，完整深度

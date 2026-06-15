@@ -10,11 +10,11 @@
 #   ${REPLICAS}        — start with 2 (HPA will scale); never set lower
 #                        than 2 for production (rolling update needs spare).
 #
-# Topology assumptions (must match doc/operations/DEPLOYMENT.md):
+# Topology assumptions (must match docs/operations/DEPLOYMENT.md):
 #   - uvicorn single-worker per pod (NOT --workers N). Scale = pod count.
 #   - PostgreSQL + Redis are managed services with secrets injected.
 #   - Idempotency requires Redis single-node OR primary-replica with sync
-#     replication; see doc/tech-debt/KNOWN_DEVIATIONS.md #12 for the
+#     replication; see docs/tech-debt/KNOWN_DEVIATIONS.md #12 for the
 #     Cluster failover caveat.
 #
 # Three probes — three different jobs (see ADR §6 / api/v1/health.py):

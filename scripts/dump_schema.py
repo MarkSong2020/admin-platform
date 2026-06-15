@@ -1,4 +1,4 @@
-"""从 ORM models 自省生成「数据模型速览」（doc/architecture/DATA_MODEL.md）。
+"""从 ORM models 自省生成「数据模型速览」（docs/architecture/DATA_MODEL.md）。
 
 真相源是 ``src/admin_platform/domains/*/models.py`` + ``db/base.py``（公共列/mixin）；
 本脚本只把 ``Base.metadata`` 渲染成人读 markdown，**不是**另一个要手维护的副本。
@@ -6,7 +6,7 @@
 
 用法::
 
-    uv run python scripts/dump_schema.py            # 写 doc/architecture/DATA_MODEL.md
+    uv run python scripts/dump_schema.py            # 写 docs/architecture/DATA_MODEL.md
     uv run python scripts/dump_schema.py --stdout    # 只打印，不落盘
     uv run python scripts/dump_schema.py --check      # 校验committed 文件是否最新（CI 友好，差异 → exit 1）
 
@@ -33,7 +33,7 @@ import admin_platform.domains as _domains_pkg
 from admin_platform.db.base import Base
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_DOC_PATH = _REPO_ROOT / "doc" / "architecture" / "DATA_MODEL.md"
+_DOC_PATH = _REPO_ROOT / "docs" / "architecture" / "DATA_MODEL.md"
 _PG = postgresql.dialect()
 
 

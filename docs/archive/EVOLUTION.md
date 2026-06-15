@@ -66,7 +66,7 @@ ADR 治理：
 - ProblemDetail Pydantic model + `_custom_openapi` 全局注入（B-1）
 - ADR §8 基础设施 endpoint 豁免（B-2）
 - CI 平台澄清：阿里云效 + Jenkins；`.github/workflows/ci.yml` 标 reference-only
-- 新建 `doc/operations/CI_MIGRATION.md`
+- 新建 `docs/operations/CI_MIGRATION.md`
 - 依赖审计 56 包 0 CVE
 
 ### `5e7175a` — ADR Python follow-up #5 drop（文档漂移修正）
@@ -145,8 +145,8 @@ ADR 治理：
 
 - 新增 example domain `todo`：5 domain 文件 + 13 测试 + Alembic migration 0002
 - generator 默认骨架字段扩展（`title` UniqueConstraint + `status: StrEnum` + `due_at: Optional`）+ title 唯一性业务规则（409 `service_name.TODO_TITLE_DUPLICATE`）
-- 新增 `doc/architecture/EXAMPLE_DOMAIN.md` 解释每一行选择的理由
-- `doc/INDEX.md` 加「🚀 5 分钟新手路径」
+- 新增 `docs/architecture/EXAMPLE_DOMAIN.md` 解释每一行选择的理由
+- `docs/INDEX.md` 加「🚀 5 分钟新手路径」
 - `main.py` 挂载 `todo_router` 开箱即用
 - CHANGELOG 头部加「版本号语义」段：**v0.5.0 起停止"自审 close"式 bump**，模板里程碑（`vX.Y.Z`）与自审 build（`vX.Y.Z-audit.N` git tag）分离
 - v0.5.0 release 后跑 `make smoke-generator` 抓到 3 个真 bug（multi-patch alembic env.py I001 / env.py 需要 `isort: skip_file` / `Enum.create(checkfirst=True)` 在 async DDL 失效）—— 全部已修
