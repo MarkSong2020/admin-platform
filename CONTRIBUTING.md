@@ -91,9 +91,9 @@ ci: fast lane 跳过前端 lint/commitlint hook（无 pnpm 致 exit 127）
 
 ## 6. 约定
 
-- **CLAUDE.md ↔ AGENTS.md 必须同步**：两份是给 AI agent（Claude / Codex 等）的同源工作约定，改一份就同步另一份，避免给不同 agent 发出冲突指令。
+- **AI 指引唯一正本是 `AGENTS.md`**：`CLAUDE.md` 通过 `@AGENTS.md` 导入其全文，改工作约定只改 `AGENTS.md` 一处（Codex / Cursor / Claude Code 等读到同一份，无需手工同步两份）。
 - **文档 drift 视为 bug**：代码改动必须同步改对应 `docs/`，不一致即未完成。同步对照表见 [docs/standards/AI_CODING_RULES.md](docs/standards/AI_CODING_RULES.md) §8。
-- **版本号守门**：改 `pyproject.toml [project].version` 要同步 `README.md` / `AGENTS.md` / `CLAUDE.md` / `docs/PROJECT_OVERVIEW.md`，否则 `tests/unit/test_version_consistency.py` 会红。
+- **版本号守门**：改 `pyproject.toml [project].version` 要同步 `README.md` / `AGENTS.md` / `docs/PROJECT_OVERVIEW.md`，否则 `tests/unit/test_version_consistency.py` 会红。
 
 ---
 

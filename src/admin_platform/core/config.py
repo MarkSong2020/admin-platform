@@ -66,8 +66,7 @@ class Settings(BaseSettings):
     app_name: str = "admin-platform"
     # ADR §3 / §5 / §8 / §10 服务前缀 —— 必须与部署单元名、OpenAPI tag root、
     # Prometheus / Datadog `service` label、JWT `aud` claim 一致。详见
-    # team-engineering-adr/service-prefix-registry.md 的
-    # 权威注册表与命名规则。
+    # 服务前缀的权威注册表与命名规则（避免跨服务错误码 / 监控 label 冲突）。
     # README 的 sed-rename 流程克隆模板时会和包名一起替换这个值。
     service_id: str = "admin_platform"
     # 部署环境标识。默认 "local"（保持现有零强制行为，不破坏本地/CI）。设为 "production"

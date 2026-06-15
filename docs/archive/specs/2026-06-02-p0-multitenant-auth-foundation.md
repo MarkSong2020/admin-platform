@@ -158,12 +158,12 @@ tests/
 
 - [ ] **Step 1** 干净导出底座 tracked 文件到新仓位置(无 .git/.venv):
 ```bash
-mkdir -p ~/PythonProjects/admin-platform
-git -C ~/PythonProjects/python-web-service-template archive HEAD | tar -x -C ~/PythonProjects/admin-platform
+mkdir -p <repo-root>
+git -C <template-repo> archive HEAD | tar -x -C <repo-root>
 ```
 - [ ] **Step 2** 按底座 README 的 sed-rename 流程,包名 `service_name` → `admin_platform`、`[tool.hatch.build] packages`、`[tool.fastapi] entrypoint`、`service_id` 默认值 → `admin-platform`(以 README 命令为准)。
 - [ ] **Step 3** 合并本计划目录 `docs/specs/` 到新仓。`git init` + 首个 commit(**需操作者显式授权**)。
-- [ ] **Step 4 验收** `cd ~/PythonProjects/admin-platform && make check` → 底座原有测试在改名后全绿。
+- [ ] **Step 4 验收** `cd <repo-root> && make check` → 底座原有测试在改名后全绿。
 - [ ] **Checkpoint** 审 diff(确认无残留 `service_name`)→ Commit `chore: scaffold admin-platform via git archive`
 
 ### Task 2:依赖 intake(argon2-cffi)+ config 扩展

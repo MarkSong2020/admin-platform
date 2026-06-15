@@ -4,7 +4,7 @@
 
 ## 正本位置
 
-→ **`team-engineering-adr/0001-cross-language-conventions.md`**
+→ **内部 ADR 仓（不公开）**
 
 当前状态：本地草稿仓（未上独立 git 远端）；团队后续会推到阿里云效 / GitLab。
 
@@ -47,7 +47,7 @@
 | 仓库 | 状态 |
 |---|---|
 | `python-web-service-template` (本仓) | ✅ Implemented (v0.4.4) |
-| `spring-boot-scaffold` | ✅ Implemented (main + archetype 2026-05-15)；剩余 §5 JWT Bearer 等 SSO 接入场景下游补 |
+| `某 Java 后端仓` | ✅ Implemented (main + archetype 2026-05-15)；剩余 §5 JWT Bearer 等 SSO 接入场景下游补 |
 
 ## 跨语言 follow-up（Java 侧）
 
