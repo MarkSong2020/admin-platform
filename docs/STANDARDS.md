@@ -68,12 +68,12 @@ AI agent（Claude / Codex / Cursor 等）在本仓做业务开发的工作流约
 - **输入校验**：所有外部输入走 Pydantic schema 统一校验，禁 handler 内手写松散解析。
 - **参数化查询**：数据访问走 SQLAlchemy ORM / 参数化，禁字符串拼接 SQL。
 - **错误脱敏**：生产不返回 stack trace；`ProblemDetail.detail` / `errors` 受 debug 开关脱敏。见 [`architecture/ERROR_RESPONSE.md`](./architecture/ERROR_RESPONSE.md)。
-- **认证加固**：Argon2 密码 + JWT；refresh token 轮换 + reuse detection（RFC 9700）；失败 N 次触算术文本验证码 + 账号软锁 + IP 限流。见 [`specs/2026-06-09-p1.4-login-enhancement.md`](./specs/2026-06-09-p1.4-login-enhancement.md)。
-- **文件上传**：扩展名白名单 + 魔数头弱类型校验；`object_key` = uuid4（不含原文件名，防穿越/覆盖）；存储路径 `resolve()` 守卫防 `../` 穿越；边写边累计 size/sha256（不信 Content-Length），超限抛错并清理半成品。见 [`specs/2026-06-11-p5-file-management.md`](./specs/2026-06-11-p5-file-management.md)。
-- **文件下载**：`Content-Disposition` 注入防御（RFC 5987，剥 CRLF/引号）+ `X-Content-Type-Options: nosniff`（兜 XSS）。见 [`specs/2026-06-11-p5-file-management.md`](./specs/2026-06-11-p5-file-management.md)。
-- **Excel formula injection 防御**：导出 cell 以 `=` `+` `-` `@` 开头 → writer 前缀单引号文本化；导入流式累计 size 超限 413（防 OOM）。见 [`specs/2026-06-11-p5-excel-import-export.md`](./specs/2026-06-11-p5-excel-import-export.md)。
-- **定时任务防 RCE**：`JobHandlerRegistry` 白名单——DB 只存 `handler_key` + `params_json`，schema 无任意调用字段，反 RuoYi 任意调用串。见 [`specs/2026-06-10-p4-monitoring-tasks.md`](./specs/2026-06-10-p4-monitoring-tasks.md)。
-- **监控字段白名单**：缓存监控只取 Redis INFO 的具名字段，不回整个 INFO dict（不泄露 config_file / 复制密钥线索）。见 [`specs/2026-06-10-p4-monitoring-tasks.md`](./specs/2026-06-10-p4-monitoring-tasks.md)。
+- **认证加固**：Argon2 密码 + JWT；refresh token 轮换 + reuse detection（RFC 9700）；失败 N 次触算术文本验证码 + 账号软锁 + IP 限流。见 [`specs/2026-06-09-p1.4-login-enhancement.md`](./archive/specs/2026-06-09-p1.4-login-enhancement.md)。
+- **文件上传**：扩展名白名单 + 魔数头弱类型校验；`object_key` = uuid4（不含原文件名，防穿越/覆盖）；存储路径 `resolve()` 守卫防 `../` 穿越；边写边累计 size/sha256（不信 Content-Length），超限抛错并清理半成品。见 [`specs/2026-06-11-p5-file-management.md`](./archive/specs/2026-06-11-p5-file-management.md)。
+- **文件下载**：`Content-Disposition` 注入防御（RFC 5987，剥 CRLF/引号）+ `X-Content-Type-Options: nosniff`（兜 XSS）。见 [`specs/2026-06-11-p5-file-management.md`](./archive/specs/2026-06-11-p5-file-management.md)。
+- **Excel formula injection 防御**：导出 cell 以 `=` `+` `-` `@` 开头 → writer 前缀单引号文本化；导入流式累计 size 超限 413（防 OOM）。见 [`specs/2026-06-11-p5-excel-import-export.md`](./archive/specs/2026-06-11-p5-excel-import-export.md)。
+- **定时任务防 RCE**：`JobHandlerRegistry` 白名单——DB 只存 `handler_key` + `params_json`，schema 无任意调用字段，反 RuoYi 任意调用串。见 [`specs/2026-06-10-p4-monitoring-tasks.md`](./archive/specs/2026-06-10-p4-monitoring-tasks.md)。
+- **监控字段白名单**：缓存监控只取 Redis INFO 的具名字段，不回整个 INFO dict（不泄露 config_file / 复制密钥线索）。见 [`specs/2026-06-10-p4-monitoring-tasks.md`](./archive/specs/2026-06-10-p4-monitoring-tasks.md)。
 - **生产门禁**：CORS 默认拒绝、生产强制校验必填密钥、迁移 gated 需单独授权。见 [`tech-debt/KNOWN_DEVIATIONS.md`](./tech-debt/KNOWN_DEVIATIONS.md)。
 
 > 漏洞报告流程见根目录 [`SECURITY.md`](../SECURITY.md)。
@@ -83,6 +83,6 @@ AI agent（Claude / Codex / Cursor 等）在本仓做业务开发的工作流约
 ## 相关入口
 
 - 文档总导航 → [`INDEX.md`](./INDEX.md)
-- 各阶段设计决策（spec 导航）→ [`specs/INDEX.md`](./specs/INDEX.md)
+- 各阶段设计决策（spec 导航）→ [`specs/INDEX.md`](./archive/specs/INDEX.md)
 - 贡献流程 → [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
 - 全局 Python Web 服务规则 → `~/.claude/rules/python.md`

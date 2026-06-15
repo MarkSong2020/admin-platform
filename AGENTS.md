@@ -5,7 +5,7 @@
 ## 仓库角色
 
 单租户后台管理脚手架**应用**（不是模板），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
-已落地 JWT 认证 + RBAC + 审计 + 运营配置（字典/参数/通知）+ 监控/定时任务 + 文件管理/Excel 导入导出（P0–P5）；下一步 P6 Vue 前端。
+已落地 JWT 认证 + RBAC + 审计 + 运营配置（字典/参数/通知）+ 监控/定时任务 + 文件管理/Excel + Vue 前端（P0–P6 全落地）。
 
 ## 完整文档
 
@@ -14,11 +14,11 @@
 → [`docs/STANDARDS.md`](./docs/STANDARDS.md)（标准与原则总览：分层/命名/错误码/数据建模/安全）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P0–P5 全落地，下一步 P6 Vue 前端）
+## 当前阶段（v0.0.1 — P0–P6 全落地）
 
 `make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%（fast-lane 单测 + API，DB-free；refresh 轮换 / 定时任务调度 / RBAC 绑定 / repository 等 DB·Redis-bound 路径覆盖在 `make test-integration`，不在 fast-lane 门槛内）。
 
-**进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
+**进度**（对标路线图 → [`docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 - P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 ✓
 - P0.9 单租户回归：拆多租户（tenant_filter/TenantMixin/tenants 表/上下文/隔离）→ 对标 RuoYi 本体 ✓
 - P1 RBAC：部门/角色/菜单/岗位 + RuoYi 数据权限 + getInfo/getRouters + audit_event.v1 ✓
@@ -28,7 +28,7 @@
 - P3 运营配置：字典（类型+数据 / FK RESTRICT / 单默认）+ 参数（热更新读穿）+ 通知公告 ✓
 - P4 监控/任务：服务监控（psutil）+ 缓存监控（Redis INFO 降级）+ 在线用户 + 定时任务（APScheduler + PG leader election + DB claim + handler registry 白名单）✓
 - P5 文件管理（对标 RuoYi sys_oss：StorageBackend + LocalFileStorage / 扩展名白名单 + 魔数 + 流式 + 软删）+ Excel 导入导出（excel 叶子机制 + post 绑定 + formula injection 防御）✓
-- 下一步 P6 Vue 前端
+- P6 Vue 前端：登录闭环 + RBAC 五页 + 运营/监控 9 页 + 文件/Excel + P6.5 UI 升级 ✓
 
 > **2026-06-05 重大方向**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi。背景见 [`docs/architecture/MULTI_TENANCY.md`](./docs/architecture/MULTI_TENANCY.md) 废弃说明 + roadmap §3。
 
