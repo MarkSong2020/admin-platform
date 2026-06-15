@@ -27,13 +27,12 @@
 
 应用版本以 `pyproject.toml [project].version` 为 single source of truth（本仓当前 `0.0.1`）。
 
-**改 version 时必须同步这 4 处文档**，否则 [`tests/unit/test_version_consistency.py`](../../tests/unit/test_version_consistency.py) 会红：
+**改 version 时必须同步这 3 处文档**，否则 [`tests/unit/test_version_consistency.py`](../../tests/unit/test_version_consistency.py) 会红：
 
 | 守门文件 | 出处 |
 |---|---|
 | `README.md` | 仓库根 |
 | `AGENTS.md` | 仓库根 |
-| `CLAUDE.md` | 仓库根 |
 | `docs/PROJECT_OVERVIEW.md` | 一页概览 |
 
 该测试逐个断言「当前 version 字符串出现在文件中」，并校验 version 是合法 `X.Y.Z`。发版即同步，别留 drift。

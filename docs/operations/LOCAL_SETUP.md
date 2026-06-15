@@ -11,31 +11,13 @@
 | Docker | 任意现代版本 | **推荐 OrbStack**（Mac 上 Docker Desktop 替代，更快）：`brew install --cask orbstack` |
 | Make | macOS/Linux 自带 | — |
 
-## 克隆 + 改名
+## 克隆
 
 ```bash
-git clone <this-template> myservice && cd myservice
-
-# 1. 改包目录
-mv src/service_name src/myservice
-
-# 2. 替换全仓占位（service_name → myservice）
-SED_INPLACE="sed -i ''"   # Linux: sed -i
-grep -rl "service_name" \
-  --include="*.py" --include="*.toml" --include="*.yaml" --include="*.yml" \
-  --include="*.ini" --include="*.md" --include="Dockerfile" \
-  --exclude-dir=.venv --exclude-dir=.idea --exclude-dir=.claude . \
-  | xargs $SED_INPLACE 's/service_name/myservice/g'
-
-# 3. 手动调整（sed 改不到位的）：
-#    - pyproject.toml [project].name / description
-#    - README.md 标题 / 角色定位
-#    - compose.yaml name
-#    - .env.example APP_APP_NAME
-#    - Dockerfile image tag
+git clone https://github.com/MarkSong2020/admin-platform.git && cd admin-platform
 ```
 
-> **`Settings.service_id`**（ADR §3 / §5 / §8 / §10 服务前缀，用于错误码 / OpenAPI tag / JWT aud / Datadog service tag 同源）的默认值是 `"service_name"`——上面的 sed 命令会自动替换为 `"myservice"`。新服务建仓前需先在 内部 ADR 仓（不公开） 注册前缀，否则错误码 / 监控 label 会冲突（详见 [../standards/NAMING_CONVENTIONS.md](../standards/NAMING_CONVENTIONS.md)）。
+> 想 **fork 当脚手架、改造成自己的后台**（换包名 / 品牌、长自己的业务域）？看 [../guide/USE_AS_SCAFFOLD.md](../guide/USE_AS_SCAFFOLD.md)。本仓是开箱即用的派生**应用**——源码包已经是 `src/admin_platform`，直接跑下面四步即可，无需任何模板占位符替换。
 
 ## 四步验证
 
@@ -54,7 +36,7 @@ make dev                        # http://127.0.0.1:8000/healthz 返回 {"status"
 make compose-up        # docker compose up -d --wait db (postgres:16-alpine, 端口 5432)
 make migrate           # alembic upgrade head (应用 baseline)
 make check-db          # alembic check (0 drift)
-make test-integration  # pytest -m integration（v0.5.3 当前 collect 29 项）
+make test-integration  # pytest -m integration（数量以 pytest -m integration --collect-only 为准）
 make compose-down      # 停 Docker
 ```
 

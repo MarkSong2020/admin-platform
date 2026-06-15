@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "团队级权限基线（进版本库）。设计见 docs/operations/UNATTENDED_EXECUTION.md。allow = 自动放行的安全操作（减少日常弹框，无人值守可复用）；deny = 绝对红线（交互开发也不该做）。注意：普通 git push 故意不 deny（交互开发要用）；无人值守不 push 靠 supervisor 的严格 allowlist（默认拒绝）+ feature 分支物理隔离，不靠这里的 deny。deny 黑名单可被 shell 变量/别名/脚本间接调用绕过，不是唯一防线。",
+  "_comment": "团队级权限基线（进版本库）。allow = 自动放行的只读 / 本地质量门安全操作（lint / 类型 / 测试 / 分层契约 / schema 漂移 / 起停本地容器 / 生成业务域），减少日常弹框。git 写操作（commit / switch / add）与迁移生成（make migration）故意不放行——遵循 AGENTS.md「不主动 commit/push」，须由人显式授权。deny = 绝对红线（交互开发也不该做）；普通 git push 故意不 deny（交互开发要用）。deny 黑名单可被 shell 变量/别名/脚本间接调用绕过，不是唯一防线。",
   "permissions": {
     "allow": [
       "Bash(make check)",
@@ -15,7 +15,6 @@
       "Bash(make compose-up-cache)",
       "Bash(make compose-down)",
       "Bash(make new-module:*)",
-      "Bash(make migration:*)",
       "Bash(uv run pytest:*)",
       "Bash(uv run ruff:*)",
       "Bash(uv run pyright)",
@@ -26,12 +25,7 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git switch -c:*)",
-      "Bash(git commit:*)",
-      "Bash(git add src/*)",
-      "Bash(git add tests/*)",
-      "Bash(git add docs/*)"
+      "Bash(git show:*)"
     ],
     "deny": [
       "Bash(git push --force:*)",

@@ -11,7 +11,7 @@
 | 1 | 全局规范更新（开发规范文档 + `rules/python.md`） | ✅ Step 1 完成 |
 | 2 | 生成器 + AI 协作层 | ✅ 完成（`scripts/new_module.py` + 30 单测） |
 | 3 | 脚手架骨架 MVP（Phase A/B/C/D） | ✅ 完成 |
-| 4 | 跨语言协同 ADR | ✅ 完成（独立仓 内部 ADR 仓（不公开）） |
+| 4 | 跨语言协同 ADR | ✅ 完成（独立仓 跨语言协同 ADR） |
 
 ## 版本演进
 
@@ -75,7 +75,7 @@ ADR 治理：
 
 ### `6d5c7e1` — ADR 迁出本仓
 
-- `docs/adr/0001-*.md` 迁到 内部 ADR 仓（不公开）
+- `docs/adr/0001-*.md` 迁到 跨语言协同 ADR
 - 本仓 `docs/adr/README.md` 留 stub
 - 5 处引用全部更新到新路径
 
@@ -231,4 +231,4 @@ v0.5.2 清掉这部分基础设施债 —— 翻译 ~2100 行 docstring：
 ## 引用
 
 - 详细每轮 finding → [REVIEW_HISTORY.md](./REVIEW_HISTORY.md)
-- ADR Revision history → 内部 ADR 仓（不公开）
+- ADR Revision history → 跨语言协同 ADR
