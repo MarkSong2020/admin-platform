@@ -1,0 +1,3 @@
+# 身份映射：早期 commit 用的本地 git 身份 → 统一为 GitHub noreply。
+# git log / GitHub 据此显示统一中性身份，不改写历史对象（不需 force push）。
+MarkSong2020 <MarkSong2020@users.noreply.github.com> songss <songss@shopsell.cn>
