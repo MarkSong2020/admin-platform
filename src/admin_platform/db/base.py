@@ -26,7 +26,7 @@ Eager loading 在 query 层用 ``selectinload`` / ``joinedload`` opt-in。
 -------------
 ``IdMixin`` / ``TimestampMixin`` 提供数据建模标准的基线同心圈（身份 + 生命周期，
 与模板 ``python-web-service-template`` 同款）。完整规约见
-``doc/standards/DATA_MODELING.md``。
+``docs/standards/DATA_MODELING.md``。
 """
 
 from datetime import datetime

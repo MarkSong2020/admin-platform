@@ -1,6 +1,6 @@
 """在 ``src/<service>/domains/<name>/`` 下生成一个业务 domain 模块。
 
-设计源：``doc/standards/CODE_GENERATOR.md``。CLI 是 argparse + 纯 flag；
+设计源：``docs/standards/CODE_GENERATOR.md``。CLI 是 argparse + 纯 flag；
 模板作为模块级常量嵌入，用 ``str.format`` 渲染。
 
 用法::

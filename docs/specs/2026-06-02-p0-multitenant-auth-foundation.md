@@ -168,7 +168,7 @@ git -C ~/PythonProjects/python-web-service-template archive HEAD | tar -x -C ~/P
 
 ### Task 2:依赖 intake(argon2-cffi)+ config 扩展
 
-- [ ] **Step 1 依赖 intake**:核验 PyPI 来源/维护状态——**原 `passlib[bcrypt]` 被否决,改 `argon2-cffi`(Argon2id),见 ADR-F**;记录到 `doc/operations/DEPENDENCY_UPGRADE.md` 的 intake 段;`uv add "argon2-cffi>=25,<26"`(**需操作者确认装依赖**)。
+- [ ] **Step 1 依赖 intake**:核验 PyPI 来源/维护状态——**原 `passlib[bcrypt]` 被否决,改 `argon2-cffi`(Argon2id),见 ADR-F**;记录到 `docs/operations/DEPENDENCY_UPGRADE.md` 的 intake 段;`uv add "argon2-cffi>=25,<26"`(**需操作者确认装依赖**)。
 - [ ] **Step 2** `config.py` 在 `auth_*` 段后加(**不加验证码字段**):
 ```python
     # Token 签发(P0:仅 access token;refresh 在 P1)。校验复用底座 auth_jwt_* 字段。
@@ -411,7 +411,7 @@ async def test_cross_tenant_get_404(client, seed):
 
 - [ ] **Step 1** `make coverage` ≥ 85%。
 - [ ] **Step 2** 新建 `docs/architecture/MULTI_TENANCY.md`:记录 ADR-A/B/C/E + 隔离机制 + **「raw SQL 不被保护」红线** + system_session 用法。
-- [ ] **Step 3** 更新 `CLAUDE.md`/`doc/` 多租户约定(改代码同步改 doc,底座纪律)。
+- [ ] **Step 3** 更新 `CLAUDE.md`/`docs/` 多租户约定(改代码同步改 doc,底座纪律)。
 - [ ] **Checkpoint** → Commit `docs: multi-tenancy ADR + coverage gate`
 
 ### Task 12(P0.5 spike):RLS 加固
@@ -468,8 +468,8 @@ async def test_cross_tenant_get_404(client, seed):
 4. **测试含变异验证**:临时禁用 `install_tenant_filter` → 3 个 guard 立即转红,证明事件真触发、不误绿。
 
 **Task 4 实施(2026-06-03,模型 + 迁移落地):**
-1. **`user` 表名 deviation → `users`** ★:§2 原写 `__tablename__ = "user"`,实施期改为 `users`。理由:① `user` 是 SQL 保留字(PostgreSQL `SELECT user` 返回当前角色),用作表名后所有 raw SQL(含 Task 12 RLS policy / `SET LOCAL`、§6 风险段已点名"必查 `text(`")永久需 `"user"` quoting;② `users` 符合本仓 `doc/standards/NAMING_CONVENTIONS.md`「表名 = URL 复数」约定,与示例表 `todos`/`tags` 一致。表名是 incidental 细节(冻结的是数据模型本身:单 user 表 + tenant_id + PLATFORM 哨兵 + is_platform_admin),为合规本仓标准 + 规避保留字坑而偏离,记此一条。约束/索引同步:`uq_users_tenant_username` / `fk_users_tenant_id` / `ix_users_tenant_id`。`tenant` 表名亦同步改 `tenants`(2026-06-03 规范审查后):同「表名 = URL 复数」规则,与 `users`/`todos`/`tags` 一致,§2 原写单数 `tenant` 一并纠正(非保留字故非紧迫,但留单数会破坏全仓表名一致性)。FK 目标随改 `tenants.id`;约束/索引名(`fk_users_tenant_id`/`uq_users_tenant_username`/`ix_users_tenant_id`)不含表名,不变。
+1. **`user` 表名 deviation → `users`** ★:§2 原写 `__tablename__ = "user"`,实施期改为 `users`。理由:① `user` 是 SQL 保留字(PostgreSQL `SELECT user` 返回当前角色),用作表名后所有 raw SQL(含 Task 12 RLS policy / `SET LOCAL`、§6 风险段已点名"必查 `text(`")永久需 `"user"` quoting;② `users` 符合本仓 `docs/standards/NAMING_CONVENTIONS.md`「表名 = URL 复数」约定,与示例表 `todos`/`tags` 一致。表名是 incidental 细节(冻结的是数据模型本身:单 user 表 + tenant_id + PLATFORM 哨兵 + is_platform_admin),为合规本仓标准 + 规避保留字坑而偏离,记此一条。约束/索引同步:`uq_users_tenant_username` / `fk_users_tenant_id` / `ix_users_tenant_id`。`tenant` 表名亦同步改 `tenants`(2026-06-03 规范审查后):同「表名 = URL 复数」规则,与 `users`/`todos`/`tags` 一致,§2 原写单数 `tenant` 一并纠正(非保留字故非紧迫,但留单数会破坏全仓表名一致性)。FK 目标随改 `tenants.id`;约束/索引名(`fk_users_tenant_id`/`uq_users_tenant_username`/`ix_users_tenant_id`)不含表名,不变。
 2. **FK 放 `User.__table_args__` 而非 `TenantMixin`**:用 `ForeignKeyConstraint(tenant_id → tenants.id)`。mixin 是所有业务表共享的通用契约(只保证 `tenant_id` 列 + 索引),「硬 FK 到 tenants 表」是 User 自己的约束,不由 mixin 替所有未来业务表代决定。
 3. **迁移 id 规整为顺序 `0002`**:`make migration` autogenerate 默认产随机 hex revision id,按底座 `000N` 约定(对齐已删的 todo/tag 0002/0003)规整为 `revision="0002"` / `down_revision="0001"`,链 `0001 → 0002`。
 4. **不在 lifespan auto-seed**:哨兵租户 + 初始超管由 Task 9 CLI 创建(§修订记录 v2 第 5 条)。
-5. **未走 `make new-module` generator(deviation,2026-06-03 补记)**:`domains/tenant`、`domains/user` 手写 `models.py` + `__init__.py`,未走 `doc/standards/AI_CODING_RULES.md` §2 强制的 generator 流程。理由:本 Task 冻结范围是鉴权地基 **models-only**(单 user 表 + tenants 表),generator(`with-model=1`)会全量生成 api/schemas/service/repository/tests 三层——本阶段不需要,且会触发 `.importlinter` C1 layers 契约(故 C1 当前注释,见 `.importlinter:14-19`)。generator 无 models-only 模式属工具缺口,回灌研究稿:阶段 3 可补 models-only flag,或把「domains 下必须有 generator 指纹」机检化。后续这两个域长出三层时,仍按 §3「扩展已有 domain」走,不重跑 generator。
+5. **未走 `make new-module` generator(deviation,2026-06-03 补记)**:`domains/tenant`、`domains/user` 手写 `models.py` + `__init__.py`,未走 `docs/standards/AI_CODING_RULES.md` §2 强制的 generator 流程。理由:本 Task 冻结范围是鉴权地基 **models-only**(单 user 表 + tenants 表),generator(`with-model=1`)会全量生成 api/schemas/service/repository/tests 三层——本阶段不需要,且会触发 `.importlinter` C1 layers 契约(故 C1 当前注释,见 `.importlinter:14-19`)。generator 无 models-only 模式属工具缺口,回灌研究稿:阶段 3 可补 models-only flag,或把「domains 下必须有 generator 指纹」机检化。后续这两个域长出三层时,仍按 §3「扩展已有 domain」走,不重跑 generator。

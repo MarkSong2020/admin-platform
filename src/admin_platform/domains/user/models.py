@@ -1,6 +1,6 @@
 """User ORM 映射 — 表 ``users``。
 
-表名用复数 ``users``（不是 ``user``）：①符合本仓 ``doc/standards/NAMING_CONVENTIONS.md``
+表名用复数 ``users``（不是 ``user``）：①符合本仓 ``docs/standards/NAMING_CONVENTIONS.md``
 的「表名 = URL 复数」约定（与 ``depts`` / ``roles`` 等域一致）；②``user`` 是 SQL 保留字
 （PostgreSQL ``SELECT user`` 返回当前角色），用作表名后所有 raw SQL 都得永久 quoting，
 ``users`` 规避此坑。

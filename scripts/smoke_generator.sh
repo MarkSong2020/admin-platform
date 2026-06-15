@@ -32,7 +32,7 @@ PROBE_DOMAIN="src/admin_platform/domains/${MODULE}"
 PROBE_TEST_UNIT="tests/unit/test_${MODULE}_service.py"
 PROBE_TEST_API="tests/api/test_${MODULE}_api.py"
 ENV_PY="migrations/env.py"
-SCHEMA_DOC="doc/architecture/DATA_MODEL.md"
+SCHEMA_DOC="docs/architecture/DATA_MODEL.md"
 
 # Generator 在首次跑时会顺手创建 domains/__init__.py（详见 new_module.py
 # _target_paths 注释）。记录进入前是否存在，cleanup 时按原状态还原，避免

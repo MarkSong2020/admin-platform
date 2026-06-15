@@ -2,7 +2,7 @@
 # 本文件是 GitHub Actions **参考资产**（可直接 fork 跑），不代表团队 CI 平台已定。
 # 模板不指定真实 CI 平台 —— 业务团队按 ADR 决议自选（阿里云效 / Jenkins / GitLab CI 等）。
 # Makefile 的 make check / audit / migrate / test-integration / check-db 在不同平台间完全 portable。
-# 详见 doc/operations/CI_MIGRATION.md。
+# 详见 docs/operations/CI_MIGRATION.md。
 # ============================================================================
 
 name: CI (reference only)

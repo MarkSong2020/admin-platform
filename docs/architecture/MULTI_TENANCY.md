@@ -4,7 +4,7 @@
 > 全部多租户机制（`tenant_filter` / `TenantMixin` / `tenants` 表 / `session.info` 租户上下文 /
 > fail-closed 隔离 / `system_session` bypass）。本文仅作历史决策留痕，**不再反映现行机制**。
 > 单租户下数据权限改走 RuoYi 风格 dept 部门（见 P1 RBAC）。
-> 决策与拆除背景见 [`../../docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](../../docs/specs/2026-06-04-ruoyi-parity-roadmap.md) §3「单租户回归重构」。
+> 决策与拆除背景见 [`../specs/2026-06-04-ruoyi-parity-roadmap.md`](../specs/2026-06-04-ruoyi-parity-roadmap.md) §3「单租户回归重构」。
 >
 > ---
 > *（以下为原 P0 多租户设计，保留作历史，已不反映现状）*
