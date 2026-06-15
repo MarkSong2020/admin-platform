@@ -26,11 +26,11 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 > **应用轨**（`v0.0.1`，P1 RBAC 阶段）——本仓自 `python-web-service-template`
 > 派生后的独立演进；下方 `vX.Y.Z` 是模板 lineage，**非本应用发版记录**。
 > 完整 commit 见 git log，路线图见
-> [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)。
+> [`docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
 ### P5 Excel 导入导出：通用 excel 机制 + post 绑定 + formula injection 防御（2026-06-11）
 
-[spec](./docs/specs/2026-06-11-p5-excel-import-export.md) · 对标 RuoYi 导入导出 · Codex PK + Explore agent 两来源印证（一处 push back）+ 对抗审查（Codex 二审 + adversarial agent 两独立来源）
+[spec](./docs/archive/specs/2026-06-11-p5-excel-import-export.md) · 对标 RuoYi 导入导出 · Codex PK + Explore agent 两来源印证（一处 push back）+ 对抗审查（Codex 二审 + adversarial agent 两独立来源）
 
 - **通用机制** `admin_platform/excel/`（顶层叶子模块，零 domain 知识）：reader（openpyxl read-only 流式 + schema 驱动逐行 Pydantic 校验 + 坏行不阻断全量错误）/ writer（write-only 流式 + formula injection 防御）/ schemas（ExcelColumn/RowError/ParsedRow/ImportResult）。新增 **import-linter C10 契约**（excel 禁 import fastapi/sqlalchemy/domains/core，纯叶子，类比 authz C8）
 - **第一版绑定 post 岗位**（最小复杂度示范，避开 user 密码/scope、dict FK/单默认）：`domains/post/excel.py` 列适配（复用 PostCreate 作导入行 schema）+ service `import_posts`/`export_posts` + repository `list_existing_codes`/`bulk_create`/`list_for_export`
@@ -41,7 +41,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ### P5 文件管理：对标 RuoYi sys_oss + P5 范围重圈（codegen 砍除）（2026-06-11）
 
-[spec](./docs/specs/2026-06-11-p5-file-management.md) · 用户拍板 + Codex PK 收敛 + 对抗审查（Codex 二审 + adversarial agent 两独立来源）
+[spec](./docs/archive/specs/2026-06-11-p5-file-management.md) · 用户拍板 + Codex PK 收敛 + 对抗审查（Codex 二审 + adversarial agent 两独立来源）
 
 - **P5 范围重新圈定**：**砍** RuoYi 在线 codegen（后台选表生成代码）+ introspection 逆向——AI 时代过时（coding agent 直接读表生成五层 CRUD + 测试 + 迁移 + doc 比 velocity 模板灵活；绿地项目无遗留表逆向场景）；**保留** `make new-module` CLI——它不是 codegen，是 agent 生成时的「确定性护栏」（五层结构/import-linter/schema-doc/column-comment 自动注册），「新模块必走 make new-module」规则不变。P5 剩 **Excel 导入导出**（待用户单独授权新依赖 openpyxl/xlsxwriter，codex-pk 红线）
 - **域** `domains/file/`（迁移 0019：`files` 表 object_key/storage_backend/original_filename/content_type/size_bytes/sha256/uploader_id FK→users.id RESTRICT/status/deleted_at 软删）：五层 + `storage.py`（StorageBackend 抽象 + LocalFileStorage）。**零新依赖**（python-multipart 随 fastapi[standard] 已装）
@@ -53,7 +53,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ### P4c 定时任务：APScheduler + 多 worker 安全 + handler registry（2026-06-10）
 
-[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) §4 · Codex PK medium 收敛 + 人值守拍板 + 4 视角对抗审查 2 轮
+[spec](./docs/archive/specs/2026-06-10-p4-monitoring-tasks.md) §4 · Codex PK medium 收敛 + 人值守拍板 + 4 视角对抗审查 2 轮
 
 - **域** `domains/scheduled_task/`（迁移 0016：`scheduled_tasks` + `scheduled_task_logs`）：五层 + registry/executor/cron/scheduler 4 装备模块。新依赖 `apscheduler<4`
 - **任务安全（防 RCE）**：管理员只能选代码侧预注册的 `handler_key`（registry 白名单），DB 只存 key + params_json，schema 无 `call_target/command/shell` 任意调用字段；service create/update/run 三处强制 registry 命中 + params 过 handler Pydantic schema——反 RuoYi 任意调用串
@@ -67,7 +67,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ### P4a/P4b 监控：服务/缓存监控 + 在线用户（2026-06-10）
 
-[spec](./docs/specs/2026-06-10-p4-monitoring-tasks.md) · 各经 3 视角对抗审查收敛
+[spec](./docs/archive/specs/2026-06-10-p4-monitoring-tasks.md) · 各经 3 视角对抗审查收敛
 
 - **服务监控** `GET /monitor/server`（`system:server:list`）：psutil 采 CPU/内存/磁盘/进程/负载；阻塞 syscall 整体下沉 `anyio.to_thread`（不阻塞事件循环），单分区读失败跳过不整体 500。新依赖 `psutil` + `types-psutil`
 - **缓存监控** `GET /monitor/cache`（`system:cache:list`）：Redis `INFO` **白名单** 12 字段（不回整 dict，不泄露 executable/config/复制密钥）+ 命令统计；`asyncio.wait_for(2s)` 超时 + 不可达**降级 `available=False`**（监控面板不跟着 500）
@@ -78,7 +78,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 
 ### P3 运营配置：字典 + 参数 + 通知公告（2026-06-09）
 
-分支 `p1-rbac` · [spec](./docs/specs/2026-06-09-p3-operational-config.md)（Codex high 数据模型 PK 收敛）
+分支 `p1-rbac` · [spec](./docs/archive/specs/2026-06-09-p3-operational-config.md)（Codex high 数据模型 PK 收敛）
 
 - **字典管理** `domains/dict/`（迁移 0015）：`dict_types` + `dict_data` 双表单域两资源，共用 `system:dict:*`。关联决策（Codex PK）：`dict_data.dict_type_id` 外键到代理键 `dict_types.id` + **`ondelete RESTRICT`**（删有数据的类型 → 409 `dict.TYPE_HAS_DATA`，service 预检，不走 DB 静默级联删配置事实）；同类型 `value` 唯一、跨类型可复用；**单默认值**（service 设默认时清同类型其它默认）；`type` 创建后不可改（防前端契约漂移）；内置类型禁删。消费契约 `GET /dict/data/type/{type}` 取启用数据渲染下拉
 - **参数设置** `domains/config/`（迁移 0014）：`configs` 键值参数，`config_key` 全局唯一、内置参数禁删。**热更新决策（Codex PK）**：消费端点 `GET /configs/value/{key}` **纯读穿 DB 无缓存**——单/多 worker 都正确（READ COMMITTED + 一请求一事务，更新提交后下次读即新值），不接 `Settings`/`lru_cache`；P3 DoD「热更新生效」断言测试守门
@@ -89,7 +89,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 ### P2 审计持久化 + 登录日志 + 监控查询 API（2026-06-09）
 
 `caa0f66`→`37d8eb6`（分支 `p2-audit-log`，7 commit）·
-[spec](./docs/specs/2026-06-09-p2-audit-persistence.md)
+[spec](./docs/archive/specs/2026-06-09-p2-audit-persistence.md)
 
 - **audit_events 表**（迁移 0011）：`audit_event.v1` envelope 落库，`payload` JSONB 存完整 envelope（无损取证）+ 拆查询列；actor 无 FK 冗余快照（用户删后审计留存）；event_id UNIQUE 幂等键
 - **写入路径**（Claude×Codex PK 收敛红线）：**成功审计走业务 session `begin_nested()` SAVEPOINT 原子提交**（commit 失败审计一同回滚、审计写失败不连累业务）；**失败/拒绝审计走请求缓冲 + 响应后独立 session flush**（业务已回滚、不被吞）。`AuditSink` 抽象，P2.1 可换 Redis Stream
@@ -102,7 +102,7 @@ audit 后缀），自然实现"自审 build 不漂移 4 文档版本号"。
 ### P1.5 RBAC 绑定 API + 审计织入 + 安全加固（2026-06-09）
 
 `0d38ca8` + `1bfbb29` ·
-[spec](./docs/specs/2026-06-09-p1.5-rbac-binding-audit.md)
+[spec](./docs/archive/specs/2026-06-09-p1.5-rbac-binding-audit.md)
 
 - **绑定 API**：user-role / role-menu / role-dept / user-post 关联读写端点，全部
   经 `core/rbac_audit.audited_write` 织入 `rbac_write` 审计（成功/失败均落
