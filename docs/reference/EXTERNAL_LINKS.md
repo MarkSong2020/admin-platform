@@ -1,23 +1,12 @@
 # 外部锚点
 
-> 本仓引用的全局规范 / 上游标准 / 团队资产的真相源位置。
+> 本仓引用的上游标准（RFC / W3C）、工具官方文档与跨语言协同契约的真相源位置。
 
-## 全局规范
-
-| 文档 | 位置 | 作用 |
-|---|---|---|
-| 全局 CLAUDE.md | 开发规范文档 | 工作约束、技术栈、安全基线、Git 习惯 |
-| Python rules | 开发规范文档 | Python 主栈 / FastAPI 分层规则 / 测试 / Playwright / 异步 |
-| Java/Spring rules | 开发规范文档 | Java 维护规则（不主动新建） |
-| Frontend rules | 开发规范文档 | Vue 3 / React 原型规则 |
-| 通用原则 | 开发规范文档 | Defense-in-Depth / 化简级联 / 测试反模式 / 跨语言代码风格 |
-
-## 团队级 ADR
+## 跨语言协同契约
 
 | 文档 | 位置 | 引用关系 |
 |---|---|---|
-| Cross-Language Conventions ADR 0001 | 内部 ADR 仓（不公开） | 本仓所有契约的强制力来源；详见 [CROSS_LANGUAGE_ADR.md](./CROSS_LANGUAGE_ADR.md) |
-| 服务前缀注册表 | 内部 ADR 仓（不公开） | ADR §3 / Q11 落地 |
+| 跨语言协同契约（错误码 / 链路 / 分页 / 幂等） | 本仓 | HTTP 边界约定 + 实现位置速查 → [CROSS_LANGUAGE_ADR.md](./CROSS_LANGUAGE_ADR.md) |
 
 ## 上游标准（RFC / W3C）
 
@@ -45,7 +34,7 @@
 
 ## 候选平台 / 常见参考
 
-CI/CD 平台由业务团队按 ADR 决议自选，模板不指定。以下为常见选项（详见 [../operations/CI_MIGRATION.md](../operations/CI_MIGRATION.md)）：
+CI/CD 平台按需自选，本仓不指定。以下为常见选项（详见 [../operations/CI_MIGRATION.md](../operations/CI_MIGRATION.md)）：
 
 | 平台 | 用途 |
 |---|---|

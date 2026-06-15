@@ -25,7 +25,7 @@
 P0–P6 全落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任务 / 文件·Excel / Vue 前端）。逐阶段细节见 CHANGELOG + archive/specs。
 
 - **验证**：`make check`（fast lane：lint + type + unit + api + import-linter + schema-doc 漂移，须全绿）；`make test-integration` 需本地 DB + Redis；`make coverage` 门槛 85%。
-- ⚠️ 迁移 `0013–0019` 仅本地 dev + CI 临时容器跑过，**生产 / 共享库迁移待单独授权**。
+- ⚠️ 迁移 `0013–0020` 仅本地 dev + CI 临时容器跑过，**生产 / 共享库迁移待单独授权**。
 - **版本号**以 `pyproject.toml [project].version` 为准；`tests/unit/test_version_consistency.py` 守 README / AGENTS / PROJECT_OVERVIEW 与之一致（改版本号要同步三处）。
 
 ## AI 工作约束（核心）

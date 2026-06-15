@@ -1,11 +1,11 @@
 # 术语表
 
-> 本仓 / 跨语言 ADR / 团队约定中出现的术语。**碰到不明白的词先查这里**。
+> 本仓代码与文档中出现的术语。**碰到不明白的词先查这里**。
 
 ## A
 
 **ADR**（Architecture Decision Record）
-跨服务 / 跨语言的架构决策记录。本仓引用的正本是 内部 ADR 仓（不公开）。
+跨服务 / 跨语言的架构决策记录。本仓的跨语言协同契约速查见 [reference/CROSS_LANGUAGE_ADR.md](../reference/CROSS_LANGUAGE_ADR.md)。
 
 **AppError**
 `core/errors.py` 定义的业务异常类。签名：`AppError(code, title, *, detail=None, status_code=400, errors=None)`。所有业务异常**必须**通过它抛出，**不要**用 `HTTPException`。
@@ -79,7 +79,7 @@ Starlette 中间件入栈语义：**后注册的在外层**，入站时先执行
 `core/config.py` 中的 Pydantic `BaseSettings` 类。所有运行时配置（database_url / redis_url / cors_allow_origins 等）走它读取，**不要**业务代码硬编码。
 
 **`service_id`**
-`Settings` 字段（v0.4.6 实现）。用于 JWT `aud` 校验、OpenAPI tag root、Datadog `service` tag、Prometheus label 同源（详见 [../standards/NAMING_CONVENTIONS.md](../standards/NAMING_CONVENTIONS.md) 服务前缀段）。注册到团队仓 `service-prefix-registry.md` 才能用。
+`Settings` 字段（v0.4.6 实现）。用于 JWT `aud` 校验、OpenAPI tag root、Datadog `service` tag、Prometheus label 同源（详见 [../standards/NAMING_CONVENTIONS.md](../standards/NAMING_CONVENTIONS.md) 服务前缀段）。
 
 ## T
 
