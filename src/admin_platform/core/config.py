@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     idempotency_ttl_seconds: int = Field(default=86400, ge=60)
     # In-flight SET NX 锁的 TTL（v0.4.9+）。**必须**大于最慢合法 handler
     # 的运行时间 + 上游重试窗口 —— 否则一个长 POST 在锁到期之后才完成，
-    # 重试会重跑副作用。容量规划见 doc/operations/DEPLOYMENT.md。
+    # 重试会重跑副作用。容量规划见 docs/operations/DEPLOYMENT.md。
     # 下限 5s（亚秒级锁与 handler 冷启会有竞态）；上限 1h（更长就应该
     # 走 DB idempotency_keys 表，而不是 Redis 锁）。
     idempotency_lock_ttl_seconds: int = Field(default=30, ge=5, le=3600)

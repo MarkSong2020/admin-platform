@@ -33,7 +33,7 @@
   * Redis 在 ``setex`` 时不可达 → log warning，响应仍正常返回
 
 金额扣减场景的严格 at-most-once 需要 DB 级 idempotency 表（见
-``doc/architecture/REQUEST_LIFECYCLE.md`` —— Redis 锁只防并发竞态，
+``docs/architecture/REQUEST_LIFECYCLE.md`` —— Redis 锁只防并发竞态，
 扛不住 Redis 整体宕机）。
 """
 
