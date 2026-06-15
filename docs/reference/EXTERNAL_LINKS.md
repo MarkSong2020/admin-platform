@@ -6,18 +6,18 @@
 
 | 文档 | 位置 | 作用 |
 |---|---|---|
-| 全局 CLAUDE.md | `~/.claude/CLAUDE.md` | 工作约束、技术栈、安全基线、Git 习惯 |
-| Python rules | `~/.claude/rules/python.md` | Python 主栈 / FastAPI 分层规则 / 测试 / Playwright / 异步 |
-| Java/Spring rules | `~/.claude/rules/java-spring.md` | Java 维护规则（不主动新建） |
-| Frontend rules | `~/.claude/rules/frontend.md` | Vue 3 / React 原型规则 |
-| 通用原则 | `~/.claude/rules/principles.md` | Defense-in-Depth / 化简级联 / 测试反模式 / 跨语言代码风格 |
+| 全局 CLAUDE.md | 开发规范文档 | 工作约束、技术栈、安全基线、Git 习惯 |
+| Python rules | 开发规范文档 | Python 主栈 / FastAPI 分层规则 / 测试 / Playwright / 异步 |
+| Java/Spring rules | 开发规范文档 | Java 维护规则（不主动新建） |
+| Frontend rules | 开发规范文档 | Vue 3 / React 原型规则 |
+| 通用原则 | 开发规范文档 | Defense-in-Depth / 化简级联 / 测试反模式 / 跨语言代码风格 |
 
 ## 团队级 ADR
 
 | 文档 | 位置 | 引用关系 |
 |---|---|---|
-| Cross-Language Conventions ADR 0001 | `~/IdeaProjects/team-engineering-adr/0001-cross-language-conventions.md` | 本仓所有契约的强制力来源；详见 [CROSS_LANGUAGE_ADR.md](./CROSS_LANGUAGE_ADR.md) |
-| 服务前缀注册表 | `~/IdeaProjects/team-engineering-adr/service-prefix-registry.md` | ADR §3 / Q11 落地 |
+| Cross-Language Conventions ADR 0001 | 内部 ADR 仓（不公开） | 本仓所有契约的强制力来源；详见 [CROSS_LANGUAGE_ADR.md](./CROSS_LANGUAGE_ADR.md) |
+| 服务前缀注册表 | 内部 ADR 仓（不公开） | ADR §3 / Q11 落地 |
 
 ## 上游标准（RFC / W3C）
 

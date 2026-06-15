@@ -1,12 +1,10 @@
 # admin-platform — 项目指引（给 Claude Code）
 
-> 项目级 AI 上下文。全局规范在 `~/.claude/CLAUDE.md` 和 `~/.claude/rules/python.md`，**不要重复**。
+> 项目级 AI 上下文：本仓特有的分层约定、错误码规范、生成器流程等。通用 Python / FastAPI 工程规范不在此重复。
 
 ## 仓库角色
 
-单租户后台管理脚手架**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。已落地认证 + RBAC + 审计 + 运营配置 + 监控 / 定时任务 + 文件 / Excel + Vue 前端（P0–P6 全落地）。
-
-> 跨栈选型决策不在本仓口径——见 `~/.claude/CLAUDE.md` 的「技术栈」段（按需求选型，不预设默认）。
+单租户后台管理脚手架**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest），**对标 RuoYi（若依）**。派生自脚手架模板 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。已落地认证 + RBAC + 审计 + 运营配置 + 监控 / 定时任务 + 文件 / Excel + Vue 前端（P0–P6 全落地）。
 
 ## 完整文档
 
@@ -19,7 +17,7 @@
 
 ## 当前阶段（v0.0.1 — P0–P6 全落地）
 
-`make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
+`make check` 全绿（fast lane：lint + type + unit + api + import-linter + schema-doc 漂移）；`make test-integration` 需本地 DB + Redis；`make coverage` 门槛 85%。
 
 **进度**（对标路线图 → [`docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
@@ -49,7 +47,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`docs/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-P0–P6 全部落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任务 / 文件·Excel / Vue 前端 P6.0–6.5）；各阶段实现细节、关键决策与对抗审查修复见 [设计决策溯源](./docs/archive/specs/INDEX.md)。⚠️ **迁移 0013–0019（含 0016 / 0019）生产 / 共享库迁移仍待单独授权**——仅本地 dev + CI 临时容器跑过。
+P0–P6 全部落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任务 / 文件·Excel / Vue 前端 P6.0–6.5）；各阶段实现细节、关键决策与评审修复见 [设计决策溯源](./docs/archive/specs/INDEX.md)。⚠️ **迁移 0013–0019（含 0016 / 0019）生产 / 共享库迁移仍待单独授权**——仅本地 dev + CI 临时容器跑过。
 
 ## AI 工作约束
 
@@ -65,7 +63,7 @@ P0–P6 全部落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任
 
 ## 工作约束（给 Claude Code 的特定行为）
 
-- 严格遵守 `~/.claude/rules/python.md` 「Web 服务（FastAPI）」分层规则
+- 严格遵守本仓分层规则（[`docs/architecture/LAYERED_DESIGN.md`](./docs/architecture/LAYERED_DESIGN.md) + [`docs/standards/AI_CODING_RULES.md`](./docs/standards/AI_CODING_RULES.md)）
 - 不重新评估技术选型（FastAPI / uv / SA 2.x / Alembic / Ruff / Pyright / Pytest / Redis 已定）
 - 新增文档前先看 [`docs/INDEX.md`](./docs/INDEX.md) 是否已有，不要重复
 - 不主动 `git init` / `git commit`（按全局约定，等用户授权）
@@ -86,8 +84,6 @@ P0–P6 全部落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任
 
 7 条详情见 [`docs/archive/EVOLUTION.md`](./docs/archive/EVOLUTION.md) 起源段。
 
-## 外部资源
+## 跨语言协同
 
-- 跨语言 ADR 正本（团队仓）：`~/IdeaProjects/team-engineering-adr/0001-cross-language-conventions.md`
-- 全局 Python 规则：`~/.claude/rules/python.md`
-- shopsell-server（Java 维护仓，参考）：`~/IdeaProjects/shopsell-server/`
+本仓与其他语言后端的契约对齐（错误码 / Result / 鉴权边界）见 [`docs/reference/CROSS_LANGUAGE_ADR.md`](./docs/reference/CROSS_LANGUAGE_ADR.md)。

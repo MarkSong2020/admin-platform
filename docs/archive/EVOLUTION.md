@@ -8,10 +8,10 @@
 
 | Step | 产出 | 状态 |
 |---|---|---|
-| 1 | 全局规范更新（`~/.claude/CLAUDE.md` + `rules/python.md`） | ✅ Step 1 完成 |
+| 1 | 全局规范更新（开发规范文档 + `rules/python.md`） | ✅ Step 1 完成 |
 | 2 | 生成器 + AI 协作层 | ✅ 完成（`scripts/new_module.py` + 30 单测） |
 | 3 | 脚手架骨架 MVP（Phase A/B/C/D） | ✅ 完成 |
-| 4 | 跨语言协同 ADR | ✅ 完成（独立仓 `~/IdeaProjects/team-engineering-adr/`） |
+| 4 | 跨语言协同 ADR | ✅ 完成（独立仓 内部 ADR 仓（不公开）） |
 
 ## 版本演进
 
@@ -75,7 +75,7 @@ ADR 治理：
 
 ### `6d5c7e1` — ADR 迁出本仓
 
-- `docs/adr/0001-*.md` 迁到 `~/IdeaProjects/team-engineering-adr/`
+- `docs/adr/0001-*.md` 迁到 内部 ADR 仓（不公开）
 - 本仓 `docs/adr/README.md` 留 stub
 - 5 处引用全部更新到新路径
 
@@ -115,7 +115,7 @@ ADR 治理：
 
 **至此 4 个 Python follow-up 全部完成**。
 
-### v0.4.5 — 知识库重组（仿 shopsell-server）
+### v0.4.5 — 知识库重组（仿 某成熟后端项目）
 
 - `docs/` → `doc/` 七目录骨架
 - 新增 13 文档（INDEX / PROJECT_OVERVIEW / architecture×5 / standards×3 / operations×4 / reference×2 / tech-debt×2 / archive×2）
@@ -195,7 +195,7 @@ v0.5.2 清掉这部分基础设施债 —— 翻译 ~2100 行 docstring：
 | 2026-05-15 | Idempotency 选 Redis + Stripe 风格 cached replay | v0.4.3 |
 | 2026-05-15 | OTel 接入选**轻量**（仅 parse traceparent，不装 SDK） | v0.4.1 |
 | 2026-05-15 | startupProbe 强制（K8s manifest yaml 入 ADR §6） | v0.4.4 |
-| 2026-05-15 | 知识库仿 shopsell-server doc/ 七目录 | v0.4.5 |
+| 2026-05-15 | 知识库仿 某成熟后端项目 doc/ 七目录 | v0.4.5 |
 | 2026-05-16 | Idempotency-Key 引入 SET NX in-flight 锁 + 24h cache replay | v0.4.9 |
 | 2026-05-16 | `get_session` 真起 transaction（P0 修复） | v0.4.11 |
 | 2026-05-17 | Python 3.13 → 3.14 硬升 floor（`requires-python = ">=3.14"`） | v0.4.19 |
@@ -231,4 +231,4 @@ v0.5.2 清掉这部分基础设施债 —— 翻译 ~2100 行 docstring：
 ## 引用
 
 - 详细每轮 finding → [REVIEW_HISTORY.md](./REVIEW_HISTORY.md)
-- ADR Revision history → `~/IdeaProjects/team-engineering-adr/0001-cross-language-conventions.md`
+- ADR Revision history → 内部 ADR 仓（不公开）

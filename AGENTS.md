@@ -4,7 +4,7 @@
 
 ## 仓库角色
 
-单租户后台管理脚手架**应用**（不是模板），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+单租户后台管理脚手架**应用**（不是模板），**对标 RuoYi（若依）**。派生自脚手架模板 `python-web-service-template`（lineage v0.5.3）。
 已落地 JWT 认证 + RBAC + 审计 + 运营配置（字典/参数/通知）+ 监控/定时任务 + 文件管理/Excel + Vue 前端（P0–P6 全落地）。
 
 ## 完整文档
@@ -16,7 +16,7 @@
 
 ## 当前阶段（v0.0.1 — P0–P6 全落地）
 
-`make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%（fast-lane 单测 + API，DB-free；refresh 轮换 / 定时任务调度 / RBAC 绑定 / repository 等 DB·Redis-bound 路径覆盖在 `make test-integration`，不在 fast-lane 门槛内）。
+`make check` 全绿（fast lane：lint + type + unit + api，DB-free）；DB·Redis-bound 路径（refresh 轮换 / 调度 / RBAC 绑定 / repository）覆盖在 `make test-integration`；`make coverage` 门槛 85%。
 
 **进度**（对标路线图 → [`docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 - P0 认证地基：Argon2 密码 + JWT 签发/校验 + user 五层 CRUD + CLI 建超管 ✓
@@ -58,7 +58,6 @@
 
 详见 [`CLAUDE.md`](./CLAUDE.md) 「7 条 Errata 固化位置」段。
 
-## 外部资源
+## 跨语言协同
 
-- 跨语言 ADR 正本：`~/IdeaProjects/team-engineering-adr/0001-cross-language-conventions.md`
-- 全局 Python 规则：`~/.claude/rules/python.md`
+与其他语言后端的契约对齐（错误码 / Result / 鉴权边界）见 [`docs/reference/CROSS_LANGUAGE_ADR.md`](./docs/reference/CROSS_LANGUAGE_ADR.md)。

@@ -94,7 +94,7 @@ ADR 对账 + 生产准备度 + 整合盲点 + 测试覆盖：
 - ⚠ P2: 无 eager startup gate
 
 **落地**：本次知识库重组（v0.4.5）：
-- 仿 shopsell-server doc/ 七目录骨架
+- 仿 某成熟后端项目 doc/ 七目录骨架
 - 6 项 finding 全部进 [../tech-debt/KNOWN_DEVIATIONS.md](../tech-debt/KNOWN_DEVIATIONS.md)
 - 修 5 份文档 drift
 - 修 ADR Adoption status（用户在 IDE 中已同步到 v0.4.4 Implemented）
