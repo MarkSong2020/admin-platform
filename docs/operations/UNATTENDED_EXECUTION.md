@@ -26,7 +26,7 @@
 
 ### L1 — 团队权限基线（`.claude/settings.json`，进版本库）
 
-- `allow`：自动放行的安全操作（`make check`/`coverage`/`test`、`pytest`、`ruff`、`pyright`、`git add src|tests|doc`、`git commit`、`git switch -c`…）——顺带减少日常交互弹框。
+- `allow`：自动放行的只读 / 本地质量门安全操作（`make check`/`coverage`/`test`、`pytest`、`ruff`、`pyright`、`lint-imports`、起停本地容器、`make new-module`…）——顺带减少日常交互弹框。**git 写操作（`commit` / `switch -c` / `add`）与 `make migration` 故意不进团队基线 allow**，遵循 AGENTS.md「不主动 commit/push」，须人显式授权（无人值守场景下才由 L2 的 `--allowedTools` 临时放行，见下）。
 - `deny`：绝对红线（`git push --force`、`git add -A`、`git reset --hard`、`git clean -f`、`git stash drop/clear`、`rm -rf`/`rm -r`、`docker push`）——交互开发也不该做。
 - ⚠️ **普通 `git push` 故意不在 deny 里**：交互开发要用。无人值守不 push 靠 L2 + L3，不靠这里。
 

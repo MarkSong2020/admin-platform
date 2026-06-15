@@ -4,7 +4,7 @@
 >
 > **不重复**的内容请回到源头：
 > - 全局分层规则总论 → 开发规范文档 「Web 服务（FastAPI 主栈）」
-> - 跨语言协同约定 → 内部 ADR 仓（不公开）
+> - 跨语言协同约定 → 跨语言协同 ADR
 > - 项目阶段 / 工作流约束 → 本仓 `AGENTS.md`（`CLAUDE.md` 通过 `@AGENTS.md` 导入它）
 > - 生成器 CLI 与模板细节 → [CODE_GENERATOR.md](./CODE_GENERATOR.md)
 >
@@ -194,4 +194,4 @@ drift 是 bug——见 [INDEX.md](../INDEX.md) "文档维护原则"。
 - 业务建模与领域设计（看具体项目的 PRD）
 - 性能调优（看 开发规范文档 §5 与 开发规范文档 §性能）
 - 安全细节（看 开发规范文档 §安全基线）
-- Java/Python 跨语言协同（看 ADR 内部 ADR 仓（不公开），本仓 stub 在 [../reference/CROSS_LANGUAGE_ADR.md](../reference/CROSS_LANGUAGE_ADR.md)）
+- Java/Python 跨语言协同（看 ADR 跨语言协同 ADR，本仓 stub 在 [../reference/CROSS_LANGUAGE_ADR.md](../reference/CROSS_LANGUAGE_ADR.md)）

@@ -97,7 +97,7 @@ readinessProbe:
 |---|---|---|---|
 | Redis socket 超时 | `APP_REDIS_SOCKET_TIMEOUT_SECONDS` | `2.0` | idempotency / 缓存监控 / 在线用户派生用；不可达时降级，超时过大会拖慢请求 |
 
-> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0019**；其中 `0013–0019`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复 / P5 文件管理）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。
+> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0020**；其中 `0013–0020`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复 / P5 文件管理 / 日志分页索引）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。
 
 ## 资源 sizing 建议
 

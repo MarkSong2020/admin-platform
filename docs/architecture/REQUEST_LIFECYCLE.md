@@ -150,7 +150,7 @@ inbound request
 | `idempotency_ttl_seconds` | `86400` | 缓存 TTL（24h，ADR §11） |
 | `redis_url` | `redis://localhost:6379/0` | Redis 连接（lazy pool） |
 | `request_id_header` | `X-Request-ID` | header 名（不建议改） |
-| `service_id` | `service_name` | ADR §3 / §5 / §8 / §10 服务前缀（同源 OpenAPI tag / Datadog service / Prometheus label / JWT aud）。新前缀必须先在 `service-prefix-registry.md` 注册 |
+| `service_id` | `service_name` | ADR §3 / §5 / §8 / §10 服务前缀（同源 OpenAPI tag / Datadog service / Prometheus label / JWT aud）|
 | `database_url` | `postgresql+asyncpg://app:app@localhost:5432/app` | DB |
 
 ## 启动行为（lifespan）

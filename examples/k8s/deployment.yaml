@@ -3,8 +3,7 @@
 # ----------------------------------------------------------------------------
 # Replace these placeholders before applying (use envsubst / kustomize / helm):
 #   ${SERVICE_NAME}    — the service prefix (e.g. payment, ledger). Must match
-#                        APP_SERVICE_ID and the ADR §3/§5/§8/§10 prefix
-#                        registered in service-prefix-registry.md.
+#                        APP_SERVICE_ID and the ADR §3/§5/§8/§10 prefix.
 #   ${IMAGE}           — full image ref with digest, e.g.
 #                        registry.internal/ledger:sha-abc1234
 #   ${REPLICAS}        — start with 2 (HPA will scale); never set lower

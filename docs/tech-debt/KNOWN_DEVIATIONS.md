@@ -28,7 +28,7 @@
 
 ## ~~#2~~ — ~~`Settings.service_id` 字段未实现~~（✅ 已修，v0.4.6）
 
-✅ **v0.4.6 已修**：`core/config.py` 加 `service_id: str = "service_name"` 字段（含 docstring 关联 ADR §3 / §5 / §8 / §10 多上下文同源 + service-prefix-registry 引用）；`tests/unit/test_config.py` 加 2 项守门（默认值 + `APP_SERVICE_ID` env 覆盖）；`docs/operations/LOCAL_SETUP.md` 加 sed rename 后该字段自动 cover 的说明 + 注册前缀流程链接。
+✅ **v0.4.6 已修**：`core/config.py` 加 `service_id: str = "service_name"` 字段（含 docstring 关联 ADR §3 / §5 / §8 / §10 多上下文同源）；`tests/unit/test_config.py` 加 2 项守门（默认值 + `APP_SERVICE_ID` env 覆盖）。
 
 ---
 
