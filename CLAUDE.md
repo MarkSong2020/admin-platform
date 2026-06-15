@@ -4,7 +4,7 @@
 
 ## 仓库角色
 
-单租户后台管理脚手架**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。已有 JWT 认证 + user CRUD，目标长出 RBAC / 审计 / 字典 / 前端。
+单租户后台管理脚手架**应用**（FastAPI + uv + SQLAlchemy 2.x + Alembic + Redis + Ruff + Pytest），**对标 RuoYi（若依）**。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3），**不是模板本身**。已落地认证 + RBAC + 审计 + 运营配置 + 监控 / 定时任务 + 文件 / Excel + Vue 前端（P0–P6 全落地）。
 
 > 跨栈选型决策不在本仓口径——见 `~/.claude/CLAUDE.md` 的「技术栈」段（按需求选型，不预设默认）。
 
@@ -17,11 +17,11 @@
 → [`docs/STANDARDS.md`](./docs/STANDARDS.md)（标准与原则总览：分层/命名/错误码/数据建模/安全）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
-## 当前阶段（v0.0.1 — P1 RBAC + 登录增强 + P2 审计/监控查询 + P3 运营配置 + P4 监控/任务 + P5 文件管理/Excel 导入导出已落地）
+## 当前阶段（v0.0.1 — P0–P6 全落地）
 
 `make check` 650 ✓ / `make test-integration` 208 ✓ / `make coverage` 门槛 85%（集成需本地 DB + Redis）。
 
-**进度**（对标路线图 → [`docs/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
+**进度**（对标路线图 → [`docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md`](./docs/archive/specs/2026-06-04-ruoyi-parity-roadmap.md)）：
 
 | 阶段 | 状态 |
 |---|---|
@@ -49,7 +49,7 @@
 
 **脚手架 lineage / tech-debt**：generator、`docs/tech-debt/KNOWN_DEVIATIONS.md` 等继承自模板，是 lineage 资产。示例域 `todo`/`tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。
 
-下一步：**P6 Vue 前端**（P5 工具全落地）。**P5 Excel 导入导出已落地**（spec [`docs/specs/2026-06-11-p5-excel-import-export.md`](./docs/specs/2026-06-11-p5-excel-import-export.md)，对标 RuoYi 导入导出 + Codex PK 收敛 + 对抗审查修复）：通用机制 `admin_platform/excel/`（顶层叶子模块零 domain 知识——reader：openpyxl read-only 流式 + schema 驱动逐行 Pydantic 校验 + 坏行不阻断全量错误；writer：write-only 流式 + formula injection 防御；schemas：ExcelColumn/RowError/ParsedRow/ImportResult）+ **import-linter C10 契约**（excel 禁 import fastapi/sqlalchemy/domains/core，纯叶子，类比 authz C8）。第一版绑定 **post 岗位**（最小复杂度示范，避开 user 密码/scope、dict FK/单默认）：`domains/post/excel.py` 列适配（复用 PostCreate 作导入行 schema）+ service `import_posts`/`export_posts` + repository `list_existing_codes`/`bulk_create`/`list_for_export`。**2 端点**：`POST /api/v1/posts/import`（multipart xlsx，**一步全有全无** + 全量错误，**始终 200 + PostImportSummary{imported, errors}** 业务通道；并发撞 uq_posts_code → 409；超大 → 413）+ `GET /api/v1/posts/export`（全量 + 行数上限）。新增权限 `system:post:{import,export}`（三集一致 + seed `_resource_menu` 加 extra_buttons）。**无新迁移**（复用 posts 表）；新依赖 **openpyxl 3.1.5**。关键决策（Codex PK + Explore agent 两来源印证 + 一处 push back）：excel/ 顶层叶子（非 core 红线）/ 一步全有全无（push back Codex 两步暂存——一步同样避免部分写 + 全量报告，省暂存基建）/ 导入错误走 200+summary.errors（非 422，因 ProblemDetail.errors 受 debug 脱敏生产看不到行级反馈）。对抗审查修复（Codex 二审 + adversarial agent 两来源印证）：P0 Excel formula injection（导出 cell 以 =/+/-/@ 开头 → writer 前缀单引号文本化）/ P0 import 无 size 上限 OOM（→ 流式累计 + excel_max_upload_size_bytes 超限 413）；P1 审计 imported=0 记 success（→ display 标注错误数）/「始终 200」并发契约（→ spec 标并发 409 例外）；P2 非法 xlsx → 500（→ INVALID_FILE 业务错误）/ sort_order int4 越界（→ ge/le 约束）/ canonical 前导零漂移（→ docstring 诚实标注）。排期：zip bomb 深度防御 / 文本列强制 / 两步预览。**P5 文件管理已落地**（spec [`docs/specs/2026-06-11-p5-file-management.md`](./docs/specs/2026-06-11-p5-file-management.md)，用户 2026-06-11 拍板 + Codex PK 收敛）：P5 范围重新圈定——**砍 RuoYi 在线 codegen + introspection 逆向**（AI 时代过时：coding agent 直接读表生成五层 CRUD + 测试 + 迁移 + doc 比 velocity 模板灵活，绿地项目无遗留表逆向场景）；**保留 `make new-module` CLI**（不是 codegen，是 agent 生成时的「确定性护栏」——五层结构/import-linter/schema-doc/column-comment 自动注册，AI 时代防结构漂移更有用，「新模块必走 make new-module」规则不变）。**文件管理对标 RuoYi sys_oss**：`domains/file/` 五层 + `storage.py`（StorageBackend 抽象 + LocalFileStorage，**零新依赖**，python-multipart 随 fastapi[standard] 已装）；migration `0019_p5_file_management`（files 表 object_key/storage_backend/sha256/uploader_id FK→users.id RESTRICT/软删）；5 端点 `/api/v1/files` list/query/upload(multipart 流式)/download(StreamingResponse 流式)/remove(软删 + commit 后 BackgroundTasks 物理删)，6 权限点 `system:file:*` 过三集合契约 + seed 手写菜单块对标 RuoYi OSS；安全模型（defense-in-depth）：扩展名白名单 + 魔数头弱类型校验 + 边写边累计 size/sha256（不信 Content-Length）+ object_key=uuid4 分桶 + 路径穿越守卫 + Content-Disposition 注入防御（剥 CRLF/引号）+ X-Content-Type-Options: nosniff；对抗审查（Codex 二审 + adversarial agent 两独立来源）修复：P1 commit-after-unlink 数据丢失（改 commit 后 BackgroundTasks 物理删）/ P1 Content-Disposition 注入 / P2 nosniff XSS / P2 upload 孤儿清理 / object_key 不进 FileRead。排期项（spec §1）：orphan sweeper / ASGI body 上限 / 下载-删除 TOCTOU / content-type 白名单 / OOXML 深度校验 / 下载审计。**P4 监控/任务全落地**（spec [`docs/specs/2026-06-10-p4-monitoring-tasks.md`](./docs/specs/2026-06-10-p4-monitoring-tasks.md)）：P4a/P4b 服务/缓存监控（psutil + Redis INFO 白名单 + 降级）+ 在线用户（活动 refresh token family 派生，login_time 取轮换原点 + 强制下线 audited，仅撤 refresh）；**P4c 定时任务**（Codex PK medium 收敛 + 人值守拍板 §4，时区 Asia/Shanghai）：APScheduler `AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行（红线）** + **handler registry 白名单防 RCE**（管理员只选预注册 handler_key，非任意调用串）+ 手动触发 + 执行日志。关键纪律：`scheduler_enabled` 默认 False（CRUD/手动触发不依赖调度器）、手动并发靠任务行 FOR UPDATE 串行化、orphan running 靠 stale 阈值不冻调度。P4c 排期项：6 字段秒级 cron / SIGKILL 显式启动恢复 / 自动重试，见 spec §4 非目标。⚠️ **迁移 0019 + 0016 + 0013-0015 生产/共享库迁移仍待单独授权**（仅本地 dev + CI 临时容器跑过）。P3 运营配置已落地（spec [`docs/specs/2026-06-09-p3-operational-config.md`](./docs/specs/2026-06-09-p3-operational-config.md)，经 Codex high 数据模型 PK 收敛）；关键决策：**字典数据 FK→dict_types.id + RESTRICT**（删有数据的类型 409，不级联）、**参数热更新走读穿 DB 无缓存**（单/多 worker 都正确）、单默认值 partial unique index 兜底、is_builtin 可切换解保护（对抗审查 §6 收敛）。排期项：参数多 worker 版本化缓存（性能）、value_type 强类型解析、通知富文本渲染期净化（P6）、config 敏感值脱敏，见 spec §1 非目标。P2 排期项（Redis Stream / outbox / provider 连接池 / 非 HTTP RBAC 写原子性）仍未动，见 p2 spec §8。
+P0–P6 全部落地（认证 / RBAC / 审计 / 运营配置 / 监控·定时任务 / 文件·Excel / Vue 前端 P6.0–6.5）；各阶段实现细节、关键决策与对抗审查修复见 [设计决策溯源](./docs/archive/specs/INDEX.md)。⚠️ **迁移 0013–0019（含 0016 / 0019）生产 / 共享库迁移仍待单独授权**——仅本地 dev + CI 临时容器跑过。
 
 ## AI 工作约束
 

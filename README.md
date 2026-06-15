@@ -5,7 +5,7 @@
 
 开箱即用的后台「刚需地基」——认证、RBAC、审计、运营配置、监控、文件与 Excel 全部内置，照同一套五层分层 + 契约约束生长业务域。适合：**Fork 来搭自己的后台**、**直接部署当成品**、或**读代码学架构**。
 
-> 当前应用版本 **`v0.0.1`**，阶段 P0–P5 全部落地（后端），P6 Vue 前端进行中。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+> 当前应用版本 **`v0.0.1`**，P0–P6 全部落地（后端 + Vue 前端）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
 
 ---
 
@@ -49,7 +49,7 @@ make check                      # ruff + pyright + pytest 全绿
 | 🛠 想 Fork 二次开发 | [`docs/guide/USE_AS_SCAFFOLD.md`](./docs/guide/USE_AS_SCAFFOLD.md) |
 | 📚 想读代码学架构 | [`docs/guide/ARCHITECTURE_TOUR.md`](./docs/guide/ARCHITECTURE_TOUR.md) + [`docs/PROJECT_OVERVIEW.md`](./docs/PROJECT_OVERVIEW.md) |
 | 🤝 想贡献 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) ・ 安全见 [`SECURITY.md`](./SECURITY.md) |
-| 📋 看设计决策 | [`docs/specs/INDEX.md`](./docs/specs/INDEX.md)（各阶段 spec）・ [`CHANGELOG.md`](./CHANGELOG.md) |
+| 📋 看设计决策 | [`docs/archive/specs/INDEX.md`](./docs/archive/specs/INDEX.md)（各阶段 spec）・ [`CHANGELOG.md`](./CHANGELOG.md) |
 
 ## ➕ 添加业务模块
 

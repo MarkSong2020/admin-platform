@@ -23,6 +23,6 @@
 ## 阅读建议
 
 - **理解项目现状** → 先读 [`2026-06-04-ruoyi-parity-roadmap.md`](./2026-06-04-ruoyi-parity-roadmap.md)（全景），再按阶段下钻。
-- **⛔ 注意废弃方向**：[`2026-06-02-p0-multitenant-auth-foundation.md`](./2026-06-02-p0-multitenant-auth-foundation.md) 描述的多租户方向**已于 2026-06-05 回归单租户**而废弃，文中引用的 `tenant_filter` / `TenantMixin` / `tenants` 表等源文件大多已不存在。废弃背景见 [`../architecture/MULTI_TENANCY.md`](../architecture/MULTI_TENANCY.md)。
-- **标准/原则**（非阶段决策）→ [`../STANDARDS.md`](../STANDARDS.md)。
-- **文档总导航** → [`../INDEX.md`](../INDEX.md)。
+- **⛔ 注意废弃方向**：[`2026-06-02-p0-multitenant-auth-foundation.md`](./2026-06-02-p0-multitenant-auth-foundation.md) 描述的多租户方向**已于 2026-06-05 回归单租户**而废弃，文中引用的 `tenant_filter` / `TenantMixin` / `tenants` 表等源文件大多已不存在。废弃背景见 [`../architecture/MULTI_TENANCY.md`](../../architecture/MULTI_TENANCY.md)。
+- **标准/原则**（非阶段决策）→ [`../STANDARDS.md`](../../STANDARDS.md)。
+- **文档总导航** → [`../INDEX.md`](../../INDEX.md)。
