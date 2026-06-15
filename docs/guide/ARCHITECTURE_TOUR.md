@@ -88,7 +88,7 @@ HTTP request
 
 ## 3. 核心能力巡览
 
-每块给一句话定位 + 入口目录 + 设计正本（spec）。spec 总览见 [`../specs/INDEX.md`](../specs/INDEX.md)。
+每块给一句话定位 + 入口目录 + 设计正本（spec）。spec 总览见 [`../specs/INDEX.md`](../archive/specs/INDEX.md)。
 
 ### 3.1 认证地基（P0）
 
@@ -101,31 +101,31 @@ RuoYi 风格 RBAC：`domains/dept`（部门树）/ `domains/role`（角色 + 菜
 - `GET /api/v1/auth/user-info`（getInfo）：当前用户 + 角色 code + 权限标识（超管合成 `["superadmin"]` / `["*:*:*"]`）。
 - `GET /api/v1/menus/routers`（getRouters）：用户可见菜单树 → 若依 RouterVO 动态路由 payload（停用账号返回空树）。
 
-> 权限 / 菜单 Provider 在组合根经 `dependency_overrides` 注入（`DbPermissionProvider` / `DbMenuProvider`），避免 core → domains 耦合。正本 [`../specs/2026-06-05-p1.0-rbac-mechanism.md`](../specs/2026-06-05-p1.0-rbac-mechanism.md)；登录增强（refresh 轮换 / 验证码 / 限流）[`../specs/2026-06-09-p1.4-login-enhancement.md`](../specs/2026-06-09-p1.4-login-enhancement.md)；安全加固与审计织入 [`../specs/2026-06-09-p1.5-rbac-binding-audit.md`](../specs/2026-06-09-p1.5-rbac-binding-audit.md)。
+> 权限 / 菜单 Provider 在组合根经 `dependency_overrides` 注入（`DbPermissionProvider` / `DbMenuProvider`），避免 core → domains 耦合。正本 [`../specs/2026-06-05-p1.0-rbac-mechanism.md`](../archive/specs/2026-06-05-p1.0-rbac-mechanism.md)；登录增强（refresh 轮换 / 验证码 / 限流）[`../specs/2026-06-09-p1.4-login-enhancement.md`](../archive/specs/2026-06-09-p1.4-login-enhancement.md)；安全加固与审计织入 [`../specs/2026-06-09-p1.5-rbac-binding-audit.md`](../archive/specs/2026-06-09-p1.5-rbac-binding-audit.md)。
 
 ### 3.3 审计持久化（P2）
 
-`audit_events` 表（成功审计在事务内原子写、失败缓冲独立 flush）+ `login_logs`，由 `audit/sink.py` 的 `DbAuditSink` 落库（`audit_persistence_enabled=false` 时退化为仅 logger）。中间件补 IP / UA；监控查询 API 在 `domains/monitor`（operlog / logininfor 只读查询）。正本 [`../specs/2026-06-09-p2-audit-persistence.md`](../specs/2026-06-09-p2-audit-persistence.md)。
+`audit_events` 表（成功审计在事务内原子写、失败缓冲独立 flush）+ `login_logs`，由 `audit/sink.py` 的 `DbAuditSink` 落库（`audit_persistence_enabled=false` 时退化为仅 logger）。中间件补 IP / UA；监控查询 API 在 `domains/monitor`（operlog / logininfor 只读查询）。正本 [`../specs/2026-06-09-p2-audit-persistence.md`](../archive/specs/2026-06-09-p2-audit-persistence.md)。
 
 ### 3.4 字典 / 参数 / 通知（P3 运营配置）
 
-`domains/dict`（类型 + 数据双资源，数据 FK → `dict_types.id` 且 RESTRICT、单默认值 partial unique index）/ `domains/config`（参数热更新走读穿 DB、内置项禁删可切换）/ `domains/notice`（通知公告，不渲染 raw HTML）。正本 [`../specs/2026-06-09-p3-operational-config.md`](../specs/2026-06-09-p3-operational-config.md)。
+`domains/dict`（类型 + 数据双资源，数据 FK → `dict_types.id` 且 RESTRICT、单默认值 partial unique index）/ `domains/config`（参数热更新走读穿 DB、内置项禁删可切换）/ `domains/notice`（通知公告，不渲染 raw HTML）。正本 [`../specs/2026-06-09-p3-operational-config.md`](../archive/specs/2026-06-09-p3-operational-config.md)。
 
 ### 3.5 服务 / 缓存监控 + 在线用户（P4a / P4b）
 
-`domains/monitor`：服务监控（psutil 取 CPU / 内存 / 磁盘 / 进程）+ 缓存监控（Redis `INFO` 白名单 + 不可达时降级）+ 在线用户（由活动 refresh token family 派生，强制下线 audited、仅撤 refresh）。正本 [`../specs/2026-06-10-p4-monitoring-tasks.md`](../specs/2026-06-10-p4-monitoring-tasks.md)。
+`domains/monitor`：服务监控（psutil 取 CPU / 内存 / 磁盘 / 进程）+ 缓存监控（Redis `INFO` 白名单 + 不可达时降级）+ 在线用户（由活动 refresh token family 派生，强制下线 audited、仅撤 refresh）。正本 [`../specs/2026-06-10-p4-monitoring-tasks.md`](../archive/specs/2026-06-10-p4-monitoring-tasks.md)。
 
 ### 3.6 定时任务（P4c，APScheduler）
 
-`domains/scheduled_task`：`AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行** + **handler registry 白名单防 RCE**（管理员只能选预注册的 `handler_key`，不能传任意调用串）+ 手动触发 + 执行日志。调度器在 lifespan 由 `SchedulerController` 启停，`scheduler_enabled` 默认 `False`（CRUD / 手动触发不依赖调度器）。同 spec [`../specs/2026-06-10-p4-monitoring-tasks.md`](../specs/2026-06-10-p4-monitoring-tasks.md) §4。
+`domains/scheduled_task`：`AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行** + **handler registry 白名单防 RCE**（管理员只能选预注册的 `handler_key`，不能传任意调用串）+ 手动触发 + 执行日志。调度器在 lifespan 由 `SchedulerController` 启停，`scheduler_enabled` 默认 `False`（CRUD / 手动触发不依赖调度器）。同 spec [`../specs/2026-06-10-p4-monitoring-tasks.md`](../archive/specs/2026-06-10-p4-monitoring-tasks.md) §4。
 
 ### 3.7 文件管理（P5，对标 RuoYi sys_oss）
 
-`domains/file` 五层 + `storage.py`（`StorageBackend` 抽象 + `LocalFileStorage`，零新依赖）。5 端点 `/api/v1/files`：list / query / upload（multipart 流式）/ download（`StreamingResponse` 流式）/ remove（软删 + commit 后 `BackgroundTasks` 物理删）。安全模型 defense-in-depth：扩展名白名单 + 魔数头校验 + 边写边累计 size/sha256 + `object_key=uuid4` 分桶 + 路径穿越守卫 + Content-Disposition 注入防御 + `X-Content-Type-Options: nosniff`。正本 [`../specs/2026-06-11-p5-file-management.md`](../specs/2026-06-11-p5-file-management.md)。
+`domains/file` 五层 + `storage.py`（`StorageBackend` 抽象 + `LocalFileStorage`，零新依赖）。5 端点 `/api/v1/files`：list / query / upload（multipart 流式）/ download（`StreamingResponse` 流式）/ remove（软删 + commit 后 `BackgroundTasks` 物理删）。安全模型 defense-in-depth：扩展名白名单 + 魔数头校验 + 边写边累计 size/sha256 + `object_key=uuid4` 分桶 + 路径穿越守卫 + Content-Disposition 注入防御 + `X-Content-Type-Options: nosniff`。正本 [`../specs/2026-06-11-p5-file-management.md`](../archive/specs/2026-06-11-p5-file-management.md)。
 
 ### 3.8 Excel 导入导出（P5）
 
-通用机制 `src/admin_platform/excel/`（reader / writer / schemas，零 domain 知识的顶层叶子模块，受 import-linter C10 契约约束——禁 import fastapi / sqlalchemy / domains / core）。第一版绑定岗位：`POST /api/v1/posts/import`（一步全有全无 + 全量错误、始终 200 + summary）+ `GET /api/v1/posts/export`（含 formula injection 防御）。新依赖 openpyxl 3.1.5。正本 [`../specs/2026-06-11-p5-excel-import-export.md`](../specs/2026-06-11-p5-excel-import-export.md)。
+通用机制 `src/admin_platform/excel/`（reader / writer / schemas，零 domain 知识的顶层叶子模块，受 import-linter C10 契约约束——禁 import fastapi / sqlalchemy / domains / core）。第一版绑定岗位：`POST /api/v1/posts/import`（一步全有全无 + 全量错误、始终 200 + summary）+ `GET /api/v1/posts/export`（含 formula injection 防御）。新依赖 openpyxl 3.1.5。正本 [`../specs/2026-06-11-p5-excel-import-export.md`](../archive/specs/2026-06-11-p5-excel-import-export.md)。
 
 ---
 
@@ -133,27 +133,27 @@ RuoYi 风格 RBAC：`domains/dept`（部门树）/ `domains/role`（角色 + 菜
 
 **多租户已废弃**：本仓 P0 曾是 SaaS 共享库多租户设计（`tenant_filter` / `TenantMixin` / `tenants` 表 / `session.info` 租户上下文 / `system_session` bypass）。2026-06-05 决策**回归单租户**对标 RuoYi 本体，P0.9 已拆除全部多租户机制，数据权限改走 RuoYi 风格 dept 部门（见 §3.2）。
 
-> [`../architecture/MULTI_TENANCY.md`](../architecture/MULTI_TENANCY.md) 标注为历史/废弃文档，**不反映现行架构**，仅作决策留痕。背景见 [`../specs/2026-06-04-ruoyi-parity-roadmap.md`](../specs/2026-06-04-ruoyi-parity-roadmap.md) §3「单租户回归重构」。
+> [`../architecture/MULTI_TENANCY.md`](../architecture/MULTI_TENANCY.md) 标注为历史/废弃文档，**不反映现行架构**，仅作决策留痕。背景见 [`../specs/2026-06-04-ruoyi-parity-roadmap.md`](../archive/specs/2026-06-04-ruoyi-parity-roadmap.md) §3「单租户回归重构」。
 
 ---
 
 ## 5. 设计决策索引
 
-所有阶段决策（P0 → P6）的 spec 总览：[`../specs/INDEX.md`](../specs/INDEX.md)。对标 RuoYi 的整体路线图：[`../specs/2026-06-04-ruoyi-parity-roadmap.md`](../specs/2026-06-04-ruoyi-parity-roadmap.md)。
+所有阶段决策（P0 → P6）的 spec 总览：[`../specs/INDEX.md`](../archive/specs/INDEX.md)。对标 RuoYi 的整体路线图：[`../specs/2026-06-04-ruoyi-parity-roadmap.md`](../archive/specs/2026-06-04-ruoyi-parity-roadmap.md)。
 
 | 阶段 | spec |
 |---|---|
-| 对标路线图 | [`2026-06-04-ruoyi-parity-roadmap.md`](../specs/2026-06-04-ruoyi-parity-roadmap.md) |
-| P0 多租户认证地基（已废弃方向） | [`2026-06-02-p0-multitenant-auth-foundation.md`](../specs/2026-06-02-p0-multitenant-auth-foundation.md) |
-| P1.0 RBAC 机制 | [`2026-06-05-p1.0-rbac-mechanism.md`](../specs/2026-06-05-p1.0-rbac-mechanism.md) |
-| P1.4 登录增强 | [`2026-06-09-p1.4-login-enhancement.md`](../specs/2026-06-09-p1.4-login-enhancement.md) |
-| P1.5 RBAC 绑定 + 审计织入 | [`2026-06-09-p1.5-rbac-binding-audit.md`](../specs/2026-06-09-p1.5-rbac-binding-audit.md) |
-| P2 审计持久化 | [`2026-06-09-p2-audit-persistence.md`](../specs/2026-06-09-p2-audit-persistence.md) |
-| P3 运营配置 | [`2026-06-09-p3-operational-config.md`](../specs/2026-06-09-p3-operational-config.md) |
-| P4 监控 / 定时任务 | [`2026-06-10-p4-monitoring-tasks.md`](../specs/2026-06-10-p4-monitoring-tasks.md) |
-| P5 文件管理 | [`2026-06-11-p5-file-management.md`](../specs/2026-06-11-p5-file-management.md) |
-| P5 Excel 导入导出 | [`2026-06-11-p5-excel-import-export.md`](../specs/2026-06-11-p5-excel-import-export.md) |
-| P6 前端设计 | [`2026-06-11-p6-frontend-design.md`](../specs/2026-06-11-p6-frontend-design.md) |
+| 对标路线图 | [`2026-06-04-ruoyi-parity-roadmap.md`](../archive/specs/2026-06-04-ruoyi-parity-roadmap.md) |
+| P0 多租户认证地基（已废弃方向） | [`2026-06-02-p0-multitenant-auth-foundation.md`](../archive/specs/2026-06-02-p0-multitenant-auth-foundation.md) |
+| P1.0 RBAC 机制 | [`2026-06-05-p1.0-rbac-mechanism.md`](../archive/specs/2026-06-05-p1.0-rbac-mechanism.md) |
+| P1.4 登录增强 | [`2026-06-09-p1.4-login-enhancement.md`](../archive/specs/2026-06-09-p1.4-login-enhancement.md) |
+| P1.5 RBAC 绑定 + 审计织入 | [`2026-06-09-p1.5-rbac-binding-audit.md`](../archive/specs/2026-06-09-p1.5-rbac-binding-audit.md) |
+| P2 审计持久化 | [`2026-06-09-p2-audit-persistence.md`](../archive/specs/2026-06-09-p2-audit-persistence.md) |
+| P3 运营配置 | [`2026-06-09-p3-operational-config.md`](../archive/specs/2026-06-09-p3-operational-config.md) |
+| P4 监控 / 定时任务 | [`2026-06-10-p4-monitoring-tasks.md`](../archive/specs/2026-06-10-p4-monitoring-tasks.md) |
+| P5 文件管理 | [`2026-06-11-p5-file-management.md`](../archive/specs/2026-06-11-p5-file-management.md) |
+| P5 Excel 导入导出 | [`2026-06-11-p5-excel-import-export.md`](../archive/specs/2026-06-11-p5-excel-import-export.md) |
+| P6 前端设计 | [`2026-06-11-p6-frontend-design.md`](../archive/specs/2026-06-11-p6-frontend-design.md) |
 
 ---
 
