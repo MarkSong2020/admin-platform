@@ -5,7 +5,7 @@
 
 开箱即用的后台「刚需地基」——认证、RBAC、审计、运营配置、监控、文件与 Excel 全部内置，照同一套五层分层 + 契约约束生长业务域。适合：**Fork 来搭自己的后台**、**直接部署当成品**、或**读代码学架构**。
 
-> 当前应用版本 **`v0.0.1`**，P0–P6 全部落地（后端 + Vue 前端）。派生自团队脚手架 `python-web-service-template`（lineage v0.5.3）。
+> 当前应用版本 **`v0.0.1`**，P0–P6 全部落地（后端 + Vue 前端）。派生自脚手架模板 `python-web-service-template`。
 
 ---
 
@@ -32,7 +32,7 @@ make init                       # uv sync --all-extras --dev
 uv run pre-commit install       # 必须：装 git hook（漏装首次 commit 必被拦）
 make compose-up && make migrate # 起 PostgreSQL + 应用 Alembic 迁移
 make dev                        # http://127.0.0.1:8000/healthz
-make check                      # ruff + pyright + pytest 全绿
+make check                      # 全量质量门：lint + type + test + 分层契约 + schema 漂移
 ```
 
 打开 <http://localhost:8000/docs> 看 OpenAPI。完整起步（建超管、登录拿 token）→ **[`docs/guide/GETTING_STARTED.md`](./docs/guide/GETTING_STARTED.md)**。
@@ -73,7 +73,3 @@ Python 3.14（uv 管理）・ FastAPI ・ SQLAlchemy 2.x async + asyncpg ・ Ale
 - 贡献流程、提交规范、分层红线 → [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - 安全漏洞报告 → [`SECURITY.md`](./SECURITY.md)
 - **License**：[MIT](./LICENSE)。
-
----
-
-> 方向变更（2026-06-05）：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi 本体，背景见 [`docs/architecture/MULTI_TENANCY.md`](./docs/architecture/MULTI_TENANCY.md)（废弃说明）。
