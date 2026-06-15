@@ -38,7 +38,7 @@ def app_version() -> str:
         "README.md",
         "AGENTS.md",
         "CLAUDE.md",
-        "doc/PROJECT_OVERVIEW.md",
+        "docs/PROJECT_OVERVIEW.md",
     ],
 )
 def test_doc_mentions_current_app_version(doc_path: str, app_version: str) -> None:
@@ -58,7 +58,7 @@ def test_app_version_is_well_formed(app_version: str) -> None:
     "doc_path",
     [
         "README.md",
-        "doc/operations/LOCAL_SETUP.md",
+        "docs/operations/LOCAL_SETUP.md",
     ],
 )
 def test_onboarding_doc_mentions_pre_commit_install(doc_path: str) -> None:

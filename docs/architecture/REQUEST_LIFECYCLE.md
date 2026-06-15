@@ -5,10 +5,11 @@
 ## 中间件入栈顺序（`main.py` `create_app`）
 
 ```python
-# 注册顺序（按代码出现顺序）：
-1. CORSMiddleware            (if settings.cors_allow_origins)
-2. IdempotencyMiddleware     (if settings.idempotency_enabled)
-3. RequestIDMiddleware       (always)
+# 注册顺序（按 main.py create_app 代码出现顺序）：
+1. IdempotencyMiddleware     (if settings.idempotency_enabled)
+2. AuthMiddleware            (if settings.auth_enabled)
+3. CORSMiddleware            (if settings.cors_allow_origins)
+4. RequestIDMiddleware       (always)
 ```
 
 **Starlette LIFO 入栈语义**：后注册的中间件 → 栈顶 → **请求入站时先执行**。
@@ -20,7 +21,7 @@ inbound request
    │
    ▼
 ┌─────────────────────────────┐
-│ RequestIDMiddleware          │  ← 最先入站
+│ RequestIDMiddleware          │  ← 最先入站（always）
 │ • 解析 traceparent           │
 │ • 校验 X-Request-ID hex      │
 │ • 写 request.state.request_id│
@@ -30,19 +31,27 @@ inbound request
    │
    ▼
 ┌─────────────────────────────┐
-│ IdempotencyMiddleware        │
+│ CORSMiddleware               │  (if cors_allow_origins)
+│ • preflight 拒绝时 transport-│
+│   level，不走 §1 shape       │
+└─────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────┐
+│ AuthMiddleware               │  (if auth_enabled)
+│ • 解析 Bearer token / 校验   │
+│ • public path 放行           │
+│ • 注入身份到 request.state   │
+└─────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────┐
+│ IdempotencyMiddleware        │  (if idempotency_enabled)
 │ • 只检 POST + @idempotent    │
 │ • 读 Idempotency-Key header  │
 │ • Redis hash 查 cache        │
 │ • 命中：直接返 cached + Replayed│
 │ • 未命中：放行 + 缓存响应    │
-└─────────────────────────────┘
-   │
-   ▼
-┌─────────────────────────────┐
-│ CORSMiddleware               │
-│ • preflight 拒绝时 transport-│
-│   level，不走 §1 shape       │
 └─────────────────────────────┘
    │
    ▼

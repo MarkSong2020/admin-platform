@@ -28,7 +28,7 @@
 
 ## ~~#2~~ — ~~`Settings.service_id` 字段未实现~~（✅ 已修，v0.4.6）
 
-✅ **v0.4.6 已修**：`core/config.py` 加 `service_id: str = "service_name"` 字段（含 docstring 关联 ADR §3 / §5 / §8 / §10 多上下文同源 + service-prefix-registry 引用）；`tests/unit/test_config.py` 加 2 项守门（默认值 + `APP_SERVICE_ID` env 覆盖）；`doc/operations/LOCAL_SETUP.md` 加 sed rename 后该字段自动 cover 的说明 + 注册前缀流程链接。
+✅ **v0.4.6 已修**：`core/config.py` 加 `service_id: str = "service_name"` 字段（含 docstring 关联 ADR §3 / §5 / §8 / §10 多上下文同源 + service-prefix-registry 引用）；`tests/unit/test_config.py` 加 2 项守门（默认值 + `APP_SERVICE_ID` env 覆盖）；`docs/operations/LOCAL_SETUP.md` 加 sed rename 后该字段自动 cover 的说明 + 注册前缀流程链接。
 
 ---
 
@@ -52,7 +52,7 @@
 - 生产 env 设 `APP_STARTUP_EAGER_CONNECT=true` 启用
 - 守门：`tests/unit/test_config.py` +2（default False / env override True）
 
-文档：`doc/architecture/REQUEST_LIFECYCLE.md` 启动行为段标 opt-in；`doc/operations/DEPLOYMENT.md` 生产 checklist 加这一项。
+文档：`docs/architecture/REQUEST_LIFECYCLE.md` 启动行为段标 opt-in；`docs/operations/DEPLOYMENT.md` 生产 checklist 加这一项。
 
 ---
 
@@ -166,7 +166,7 @@ async with session.begin():           # 已被 get_session 包了
 
 Redis cache 只做性能加速，**不参与正确性保证**。这是 Stripe / Square 的标准做法。
 
-**已在 doc/architecture/REQUEST_LIFECYCLE.md "强 at-most-once 边界" 段写清** —— 此条作为提醒而非待修项。
+**已在 docs/architecture/REQUEST_LIFECYCLE.md "强 at-most-once 边界" 段写清** —— 此条作为提醒而非待修项。
 
 ### Redis 拓扑适用范围（v0.4.20 补充）
 

@@ -9,8 +9,9 @@
 
 ## 完整文档
 
-→ [`doc/INDEX.md`](./doc/INDEX.md)（按角色导航）
-→ [`doc/PROJECT_OVERVIEW.md`](./doc/PROJECT_OVERVIEW.md)（一页概览）
+→ [`docs/INDEX.md`](./docs/INDEX.md)（按角色导航）
+→ [`docs/PROJECT_OVERVIEW.md`](./docs/PROJECT_OVERVIEW.md)（一页概览）
+→ [`docs/STANDARDS.md`](./docs/STANDARDS.md)（标准与原则总览：分层/命名/错误码/数据建模/安全）
 → [`CHANGELOG.md`](./CHANGELOG.md)（完整版本演进）
 
 ## 当前阶段（v0.0.1 — P0–P5 全落地，下一步 P6 Vue 前端）
@@ -29,15 +30,15 @@
 - P5 文件管理（对标 RuoYi sys_oss：StorageBackend + LocalFileStorage / 扩展名白名单 + 魔数 + 流式 + 软删）+ Excel 导入导出（excel 叶子机制 + post 绑定 + formula injection 防御）✓
 - 下一步 P6 Vue 前端
 
-> **2026-06-05 重大方向**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi。背景见 [`doc/architecture/MULTI_TENANCY.md`](./doc/architecture/MULTI_TENANCY.md) 废弃说明 + roadmap §3。
+> **2026-06-05 重大方向**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi。背景见 [`docs/architecture/MULTI_TENANCY.md`](./docs/architecture/MULTI_TENANCY.md) 废弃说明 + roadmap §3。
 
 **脚手架 lineage**：派生自 `python-web-service-template` v0.5.3（generator / CI 等模板资产保留；示例域 `todo`/`tag` 已删除，建 domain 用 `make new-module`）。模板演进史 → [`CHANGELOG.md`](./CHANGELOG.md)。
 
-**KNOWN_DEVIATIONS 状态**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 按各自「触发条件」等待，不主动重写（v0.5.0 reality check）。详见 [`doc/tech-debt/KNOWN_DEVIATIONS.md`](./doc/tech-debt/KNOWN_DEVIATIONS.md)。
+**KNOWN_DEVIATIONS 状态**：#1-#6 / #9 / #10 已关；剩 #7 / #11 / #12 / #13 / #14 按各自「触发条件」等待，不主动重写（v0.5.0 reality check）。详见 [`docs/tech-debt/KNOWN_DEVIATIONS.md`](./docs/tech-debt/KNOWN_DEVIATIONS.md)。
 
 ## AI 工作约束（最重要）
 
-完整规则 → [`doc/standards/AI_CODING_RULES.md`](./doc/standards/AI_CODING_RULES.md)
+完整规则 → [`docs/standards/AI_CODING_RULES.md`](./docs/standards/AI_CODING_RULES.md)
 
 **红线 5 条**：
 
@@ -45,7 +46,7 @@
 2. **分层不能跨**：api 不写业务 / service 不抛 HTTPException / repository 不抛业务异常 / schemas 不混 ORM
 3. **AppError 用法**：`AppError(code, title, *, detail=None, status_code=400, errors=None)`，错误码 `{service}.{ERROR_CODE}`
 4. **提交前** `make check` 必须全绿；声称"测试通过"前必须跑过
-5. **改代码同步改 `doc/`**（drift 视为 bug）
+5. **改代码同步改 `docs/`**（drift 视为 bug）
 
 **docstring/comments 默认简体中文**（v0.5.1 起 AI_CODING_RULES.md §0 红线）：仅 code identifier / 错误码字面量 / 框架名保留英文。
 

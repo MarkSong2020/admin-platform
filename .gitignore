@@ -46,7 +46,3 @@ logs/
 
 # Claude Code — local-only permission allowlist (per developer; team settings live in .claude/settings.json)
 .claude/settings.local.json
-
-# 无人值守 harness 运行时产物（NIGHT_LOG 与每任务 claude 原始输出，不入库）
-NIGHT_LOG.md
-scripts/unattended/state/
