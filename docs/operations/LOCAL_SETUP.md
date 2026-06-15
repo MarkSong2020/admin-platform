@@ -35,7 +35,7 @@ grep -rl "service_name" \
 #    - Dockerfile image tag
 ```
 
-> **`Settings.service_id`**（ADR §3 / §5 / §8 / §10 服务前缀，用于错误码 / OpenAPI tag / JWT aud / Datadog service tag 同源）的默认值是 `"service_name"`——上面的 sed 命令会自动替换为 `"myservice"`。新服务建仓前需先在 `~/IdeaProjects/team-engineering-adr/service-prefix-registry.md` 注册前缀，否则错误码 / 监控 label 会冲突（详见 [../standards/NAMING_CONVENTIONS.md](../standards/NAMING_CONVENTIONS.md)）。
+> **`Settings.service_id`**（ADR §3 / §5 / §8 / §10 服务前缀，用于错误码 / OpenAPI tag / JWT aud / Datadog service tag 同源）的默认值是 `"service_name"`——上面的 sed 命令会自动替换为 `"myservice"`。新服务建仓前需先在 内部 ADR 仓（不公开） 注册前缀，否则错误码 / 监控 label 会冲突（详见 [../standards/NAMING_CONVENTIONS.md](../standards/NAMING_CONVENTIONS.md)）。
 
 ## 四步验证
 

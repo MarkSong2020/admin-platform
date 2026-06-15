@@ -3,9 +3,9 @@
 > 给 Claude / Codex / Cursor / Cline 等 AI agent 在本仓做业务功能开发时的工作流约束与边界。
 >
 > **不重复**的内容请回到源头：
-> - 全局分层规则总论 → `~/.claude/rules/python.md` 「Web 服务（FastAPI 主栈）」
-> - 跨语言协同约定 → `~/IdeaProjects/team-engineering-adr/0001-cross-language-conventions.md`
-> - 项目阶段 / 工作流约束 → 本仓 `CLAUDE.md` 与 `AGENTS.md`
+> - 全局分层规则总论 → 开发规范文档 「Web 服务（FastAPI 主栈）」
+> - 跨语言协同约定 → 内部 ADR 仓（不公开）
+> - 项目阶段 / 工作流约束 → 本仓 `AGENTS.md`（`CLAUDE.md` 通过 `@AGENTS.md` 导入它）
 > - 生成器 CLI 与模板细节 → [CODE_GENERATOR.md](./CODE_GENERATOR.md)
 >
 > 本文只讲：**做业务功能时按什么流程走、改哪些文件、不能改哪些文件、提交前怎么自检**。
@@ -187,11 +187,11 @@ drift 是 bug——见 [INDEX.md](../INDEX.md) "文档维护原则"。
 `CODE_GENERATOR.md` 是**生成器自身**的契约（CLI 行为、模板内容）。本规则是**使用者**的契约。两者冲突时：
 
 - 生成器输出的代码不符合本规则 → 修生成器模板，不要让 AI/人事后修补
-- 本规则没覆盖的边界 → 先读 `~/.claude/rules/python.md`「Web 服务」段，仍无解时在 PR 里提出来，**不要默选**
+- 本规则没覆盖的边界 → 先读 开发规范文档「Web 服务」段，仍无解时在 PR 里提出来，**不要默选**
 
 ## 10. 不在本规则范围
 
 - 业务建模与领域设计（看具体项目的 PRD）
-- 性能调优（看 `~/.claude/rules/principles.md` §5 与 `~/.claude/rules/python.md` §性能）
-- 安全细节（看 `~/.claude/CLAUDE.md` §安全基线）
-- Java/Python 跨语言协同（看 ADR `~/IdeaProjects/team-engineering-adr/0001-*.md`，本仓 stub 在 [../reference/CROSS_LANGUAGE_ADR.md](../reference/CROSS_LANGUAGE_ADR.md)）
+- 性能调优（看 开发规范文档 §5 与 开发规范文档 §性能）
+- 安全细节（看 开发规范文档 §安全基线）
+- Java/Python 跨语言协同（看 ADR 内部 ADR 仓（不公开），本仓 stub 在 [../reference/CROSS_LANGUAGE_ADR.md](../reference/CROSS_LANGUAGE_ADR.md)）

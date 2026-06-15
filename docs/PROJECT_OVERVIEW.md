@@ -79,8 +79,8 @@ make test-integration              # 集成测试（需 docker）
 ## 维护者
 
 - Baseline + ADR：team-backend
-- Java 协同仓：`spring-boot-scaffold`（独立维护，参照同一 ADR）
-- 跨语言 ADR：`~/IdeaProjects/team-engineering-adr/`（**正本**，本仓为引用）
+- Java 协同仓：`某 Java 后端仓`（独立维护，参照同一 ADR）
+- 跨语言 ADR：内部 ADR 仓（不公开）（**正本**，本仓为引用）
 
 ## 下一步看哪
 
