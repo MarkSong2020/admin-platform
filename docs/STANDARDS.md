@@ -85,4 +85,4 @@ AI agent（Claude / Codex / Cursor 等）在本仓做业务开发的工作流约
 - 文档总导航 → [`INDEX.md`](./INDEX.md)
 - 各阶段设计决策（spec 导航）→ [`specs/INDEX.md`](./archive/specs/INDEX.md)
 - 贡献流程 → [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-- 全局 Python Web 服务规则 → `~/.claude/rules/python.md`
+- 全局 Python Web 服务规则 → 开发规范文档

@@ -5,7 +5,7 @@
 ## A
 
 **ADR**（Architecture Decision Record）
-跨服务 / 跨语言的架构决策记录。本仓引用的正本是 `team-engineering-adr/0001-cross-language-conventions.md`。
+跨服务 / 跨语言的架构决策记录。本仓引用的正本是 内部 ADR 仓（不公开）。
 
 **AppError**
 `core/errors.py` 定义的业务异常类。签名：`AppError(code, title, *, detail=None, status_code=400, errors=None)`。所有业务异常**必须**通过它抛出，**不要**用 `HTTPException`。

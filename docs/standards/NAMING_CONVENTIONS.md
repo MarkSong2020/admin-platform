@@ -15,7 +15,7 @@ payment       (示例服务)
 └── Settings.service_id: "payment"  ← v0.4.6 实现（见 core/config.py:30）
 ```
 
-冲突治理：`team-engineering-adr/service-prefix-registry.md`（团队前缀注册表，ADR Open Q11 v0.4.5 已决议落地）—— 新前缀必须先在 registry 走 PR 注册。
+冲突治理：内部 ADR 仓（不公开）（团队前缀注册表，ADR Open Q11 v0.4.5 已决议落地）—— 新前缀必须先在 registry 走 PR 注册。
 
 ## 错误码（`type` 字段）
 
@@ -138,6 +138,6 @@ Python 标准库默认输出 `WARNING`（5 字符）；`logging.py` 顶层 `addL
 
 ## 引用
 
-- 全部命名规则的强制力来源：`team-engineering-adr/0001-cross-language-conventions.md` §3 / §4 / §7 / §8 / §10
+- 全部命名规则的强制力来源：内部 ADR 仓（不公开） §3 / §4 / §7 / §8 / §10
 - 实现细节：[../architecture/ERROR_RESPONSE.md](../architecture/ERROR_RESPONSE.md) / [../architecture/OBSERVABILITY.md](../architecture/OBSERVABILITY.md)
-- 服务前缀注册：`team-engineering-adr/service-prefix-registry.md`
+- 服务前缀注册：内部 ADR 仓（不公开）

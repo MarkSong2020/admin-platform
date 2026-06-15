@@ -16,7 +16,7 @@
 | ~~Q8~~ | ~~startup probe 是否强制；K8s 部署 manifest 模板~~ | ✅ **v0.4.4 已决议**（`/startupz` 强制；ADR §6 加 K8s yaml 示例） | — |
 | Q9 | `operation_id` snake_case vs camelCase（SDK 生成器跨语言偏好分歧）| SDK 自动生成上线前 | P2 |
 | Q10 | 监控指标命名独立 ADR（Prometheus label / Datadog service tag 规范） | 第一个跨服务监控告警建立时 | P2 |
-| ~~Q11~~ | ~~服务前缀命名空间治理~~ | ✅ **v0.4.5 已决议**：`team-engineering-adr/service-prefix-registry.md` 落地——6 条命名规则 / 5 处上下文同源映射 / PR 申请流程 + Platform team 仲裁 / 6 个月弃用窗口 | — |
+| ~~Q11~~ | ~~服务前缀命名空间治理~~ | ✅ **v0.4.5 已决议**：内部 ADR 仓（不公开） 落地——6 条命名规则 / 5 处上下文同源映射 / PR 申请流程 + Platform team 仲裁 / 6 个月弃用窗口 | — |
 
 ## 状态解读
 
