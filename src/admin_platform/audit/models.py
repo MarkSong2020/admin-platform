@@ -8,7 +8,7 @@ login_failed / refresh_reused 都进）。
 设计要点（spec §2.1 + Codex PK）：
   * actor **不设 FK**——审计须在用户删除后留存（CASCADE 误删、SET NULL 损调查价值），
     只存 user_id + username 冗余快照。
-  * ``metadata`` 已在构造时经 ``redact_metadata`` deny-list 脱敏，存 JSONB。
+  * ``metadata`` 已在构造时经 ``redact_metadata`` deny-list 脱敏，存 SQLAlchemy 通用 JSON。
   * ``event_id`` UNIQUE —— 幂等键（同一事件重复投递不产生重复行，为 P2.1 Redis Stream 留位）。
   * 不做时间分区（用户拍板：普通表 + 时间索引，量大再迁移）。
 """
@@ -18,18 +18,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from admin_platform.audit.events import AuditEvent
-from admin_platform.db.base import Base, IdMixin, TimestampMixin
+from admin_platform.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
 
 
 def _trunc(value: str | None, maxlen: int) -> str | None:
     """把入库 VARCHAR 列截断到列宽（审计 review F3：超长 UA/path 攻击者可控，PG VARCHAR 超长
     是抛 StringDataRightTruncation 而非截断 → 会让整批 add_all 失败、连累同请求其它安全事件丢失）。
-    **完整原值仍存在 payload JSONB（无长度限制）里，故拆查询列截断零数据损失。**
+    **完整原值仍存在 payload JSON（无长度限制）里，故拆查询列截断零数据损失。**
     """
     if value is None:
         return None
@@ -48,9 +47,16 @@ class AuditEventLog(Base, IdMixin, TimestampMixin):
         Index("ix_audit_events_actor_time", "actor_user_id", "occurred_at"),
         Index("ix_audit_events_result_status", "result_status"),
         # 复合索引（status 过滤 + occurred_at 倒序 + id tiebreaker）——支撑 operlog「按结果状态筛 +
-        # 时间倒序」深翻页：PG 反向扫描索引免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
+        # 时间倒序」深翻页：MySQL 反向扫描复合索引免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
         Index("ix_audit_events_status_time", "result_status", "occurred_at", "id"),
         Index("ix_audit_events_request_id", "request_id"),
+        CheckConstraint(
+            "actor_is_super_admin IN (0, 1)",
+            name="ck_audit_events_actor_is_super_admin_bool",
+        ),
+        CheckConstraint(
+            "redaction_applied IN (0, 1)", name="ck_audit_events_redaction_applied_bool"
+        ),
     )
 
     event_id: Mapped[str] = mapped_column(String(64), unique=True, comment="事件UUID(幂等键)")
@@ -59,7 +65,7 @@ class AuditEventLog(Base, IdMixin, TimestampMixin):
     action: Mapped[str] = mapped_column(String(128), comment="权限点/操作标识")
     title: Mapped[str] = mapped_column(String(256), comment="人读操作标题")
     occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), comment="事件发生时刻(UTC,来自envelope)"
+        UTCDateTime(), comment="事件发生时刻(UTC,来自envelope)"
     )
 
     # actor 冗余快照（无 FK：用户删除后审计仍留存）
@@ -103,10 +109,10 @@ class AuditEventLog(Base, IdMixin, TimestampMixin):
     risk_level: Mapped[str] = mapped_column(String(16), comment="风险等级(low/medium/high)")
     # 属性名避开 DeclarativeBase 保留的 ``metadata``——映射到 DB 列名 "metadata"。
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, comment="脱敏后业务负载(JSONB)"
+        "metadata", JSON, comment="脱敏后业务负载(JSON)"
     )
     redaction_applied: Mapped[bool] = mapped_column(Boolean, comment="是否发生过脱敏")
-    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, comment="完整envelope(无损取证)")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, comment="完整envelope(无损取证)")
 
     @classmethod
     def from_envelope(cls, event: AuditEvent) -> AuditEventLog:

@@ -36,8 +36,8 @@
 
 - **2.x → 2.x**：稳定，按 release notes 升即可
 - **典型踩坑**：`Mapped[]` typed-mapping 严格性提升、`session.begin()` 与隐式事务的交互、`select(Model).filter_by()` 行为
-- **测试守门**：4 项 transaction integration（`tests/integration/test_transaction_commit.py`）+ `alembic check` 漂移检测
-- **升级前必跑**：`make test-integration` + `make check-db`
+- **测试守门**：`make check`；涉及 DB 行为时补 `make check-db` 和本地 MySQL smoke
+- **升级前必跑**：`make check`；涉及 DB 行为时补 MySQL smoke
 
 ### `alembic`
 
@@ -45,17 +45,17 @@
 - **风险点**：`compare_server_default=True`（已开）跨大版本可能 false-positive 漂移
 - **守门**：`alembic check` 必跑
 
-### `asyncpg`
+### `asyncmy`
 
 - 稳定，跟着 SQLAlchemy 升即可
-- **典型踩坑**：连接参数（statement_cache_size、prepared statement 行为）、SSL 配置 schema 变化
+- **典型踩坑**：MySQL 认证插件（`caching_sha2_password` 需要 `cryptography`）、SSL 配置 schema 变化、连接断开后的 pool 回收
 
 ### `redis-py`
 
 - **当前 floor `>=7.4`**（v0.4.22 起；5.x/6.x 在 lockfile 解析阶段就会被拒）
 - `redis.asyncio` 7.x API 稳定（5.x → 7.x 的 import 路径 / `from_url(...)` 签名向后兼容；本模板 `tests/integration/test_idempotency_redis.py` 5 项实测通过）
 - **风险点**：`from_url(...)` 参数（connection pool sizing）、`decode_responses=False` 默认行为
-- **升级守门**：必跑 `STRICT_REDIS_INTEGRATION=1 uv run pytest -m redis_integration`
+- **升级守门**：必跑 `APP_TEST_DB_ALLOW_DESTRUCTIVE=1 STRICT_REDIS_INTEGRATION=1 uv run pytest -m redis_integration`
 
 ### `argon2-cffi`（密码哈希）
 
@@ -121,9 +121,11 @@ uv sync --all-extras --dev --frozen
 
 # 4. 跑完整守门套件
 make check                # 单测 + lint + type
-make compose-up-cache && make migrate
-make test-integration     # 含 redis_integration（CI 模式）
-STRICT_REDIS_INTEGRATION=1 uv run pytest -m redis_integration
+# make compose-up-cache
+# make migrate
+# make check-db
+# make test-integration
+# APP_TEST_DB_ALLOW_DESTRUCTIVE=1 STRICT_REDIS_INTEGRATION=1 uv run pytest -m redis_integration
 make smoke-generator      # generator 模板还能跑通
 make audit                # 没新 CVE
 

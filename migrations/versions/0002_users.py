@@ -30,18 +30,19 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.CheckConstraint("is_super_admin IN (0, 1)", name="ck_users_is_super_admin_bool"),
         sa.UniqueConstraint("username", name="uq_users_username"),
     )
 

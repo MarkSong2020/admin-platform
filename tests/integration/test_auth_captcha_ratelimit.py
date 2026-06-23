@@ -7,13 +7,14 @@ Redis 不可用则整组 skip（本仓 Redis opt-in）。
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
-from sqlalchemy import text
+from redis.exceptions import RedisError
 
 from admin_platform.core.config import get_settings
 from admin_platform.core.security import hash_password
@@ -22,28 +23,35 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.auth import login_guard
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.redis_integration]
 
 _SECRET = "integration-captcha-secret-" + "x" * 32
 _REDIS_URL = "redis://localhost:6379/0"
 _PW = "correct-horse-battery-staple"
 
 
-async def _redis_available() -> bool:
+async def _require_redis_available() -> None:
     try:
         r = Redis.from_url(_REDIS_URL)
         await r.ping()  # type: ignore[misc]  # redis-py 7.x stub 把 async ping 标 bool（同 main.py）
         await r.aclose()
-        return True
-    except Exception:
-        return False
+    except (RedisError, OSError) as exc:
+        strict = os.environ.get("STRICT_REDIS_INTEGRATION", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        msg = f"Redis 不可用（opt-in），跳过验证码/限流测试: {_REDIS_URL}: {exc}"
+        if strict:
+            pytest.fail(msg + " — STRICT_REDIS_INTEGRATION=1 is set.")
+        pytest.skip(msg)
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    if not await _redis_available():
-        pytest.skip("Redis 不可用（opt-in），跳过验证码/限流测试")
+    await _require_redis_available()
     monkeypatch.setenv("APP_AUTH_ENABLED", "true")
     monkeypatch.setenv("APP_AUTH_JWT_SECRET", _SECRET)
     monkeypatch.setenv("APP_REDIS_URL", _REDIS_URL)
@@ -55,14 +63,12 @@ async def _setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     r = Redis.from_url(_REDIS_URL)
     await r.flushdb()
     await r.aclose()
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
     yield
     r = Redis.from_url(_REDIS_URL)
     await r.flushdb()
     await r.aclose()
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
     await dispose_engine()
     get_settings.cache_clear()
 

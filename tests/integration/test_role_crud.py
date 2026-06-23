@@ -10,7 +10,7 @@
     ``get_permission_provider``，经 FastAPI 同步依赖（threadpool worker 线程）命中
     ``get_is_super_admin`` 的 DB 查询 —— 验证 ``anyio.from_thread.run`` 桥接在生产路径可用。
 
-自引用 / 跨表 FK：清表用 ``TRUNCATE ... CASCADE``（一并清子表绑定）。
+自引用 / 跨表 FK：清表经 MySQL helper 临时关闭外键检查后逐表 TRUNCATE（一并清子表绑定）。
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -40,6 +39,7 @@ from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.provider import DbPermissionProvider
 from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.models import User
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -95,13 +95,9 @@ def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncC
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(
-            text(
-                "TRUNCATE TABLE role_menus, menus, user_roles, role_depts, roles, users, depts"
-                " CASCADE"
-            )
-        )
+    await truncate_tables(
+        "role_menus", "menus", "user_roles", "role_depts", "roles", "users", "depts"
+    )
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -390,11 +386,11 @@ async def test_effective_scope_excludes_disabled_role(client: AsyncClient) -> No
     assert scope.include_self is False
 
 
-# ---- Codex 深审 F3：绑定全量替换并发 last-writer-wins（advisory lock 串行化）---
+# ---- Codex 深审 F3：绑定全量替换并发 last-writer-wins（事务级行锁串行化）---
 
 
 async def test_set_user_roles_concurrent_last_writer_wins(client: AsyncClient) -> None:
-    # 两请求并发把同一 user 的角色分别替换为 [r1] / [r2]：advisory lock 串行化后最终恰好
+    # 两请求并发把同一 user 的角色分别替换为 [r1] / [r2]：事务级行锁串行化后最终恰好
     # 一个角色（last-writer-wins），而非并集 [r1, r2]，也不撞 uq_user_roles。
     async with db_session() as session:
         user = User(username="u-concurrent", password_hash="x")

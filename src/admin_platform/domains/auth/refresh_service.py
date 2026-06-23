@@ -42,6 +42,13 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """MySQL DATETIME 读回为 naive；本域约定所有库时间均为 UTC。"""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 async def issue_refresh_token(
     session: AsyncSession,
     *,
@@ -98,7 +105,7 @@ async def enforce_concurrency_limit(session: AsyncSession, *, user_id: int) -> N
 
 
 async def issue_login_refresh(session: AsyncSession, *, user_id: int) -> IssuedRefresh:
-    """登录签发 refresh —— per-user advisory lock 串行化「签新 family + 并发上限淘汰」临界区
+    """登录签发 refresh —— per-user 事务级行锁串行化「签新 family + 并发上限淘汰」临界区
     （Codex 深审 F）：先拿锁再签发，关掉并发登录各自签 family 互不可见、超 max_sessions 的窗口。
     """
     repo = RefreshTokenRepository(session)
@@ -134,7 +141,7 @@ async def rotate_refresh_token(session: AsyncSession, *, raw_token: str) -> Rota
 
     now = _now()
     repo = RefreshTokenRepository(session)
-    # H1：先无锁读 user_id → 取 per-user advisory lock，再 FOR UPDATE 锁行。统一「先 user 锁、再行
+    # H1：先无锁读 user_id → 取 per-user 事务级行锁，再 FOR UPDATE 锁行。统一「先 user 锁、再行
     # 锁」顺序，串行化本用户的轮换/撤销/强制下线，关掉新插 token 逃逸并发撤销快照的竞态（防死锁）。
     user_id = await repo.get_user_id_by_jti(jti)
     if user_id is None:
@@ -168,13 +175,13 @@ async def rotate_refresh_token(session: AsyncSession, *, raw_token: str) -> Rota
         )
 
     # 已撤销（非轮换原因，如 logout/concurrency）或已过期 → 无效。
-    if row.revoked_at is not None or row.expires_at <= now:
+    if row.revoked_at is not None or _as_utc(row.expires_at) <= now:
         raise _invalid()
 
     # absolute 上限锚定 family 首登（轮换不续期 absolute，hardening-r1 H2）：直接读本行持久化的
     # family_absolute_at（签发时落列、轮换透传），不再 min(issued_at) 聚合——后者会随 cleanup
     # 删早期行而前移，让持续刷新的会话永不过期。超上限即拒绝，须重登。
-    family_absolute = row.family_absolute_at
+    family_absolute = _as_utc(row.family_absolute_at)
     if now >= family_absolute:
         raise _invalid()
 

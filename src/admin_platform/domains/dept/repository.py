@@ -1,22 +1,23 @@
 """Dept repository — SQLAlchemy 2.x async 数据访问层。返回 ORM 行 / None / 集合，不抛业务异常。
 
-树查询用 PostgreSQL recursive CTE（O1：邻接表存储 + 按需 CTE 展开）：
+树查询用 SQL recursive CTE（O1：邻接表存储 + 按需 CTE 展开）：
   * ``list_descendant_dept_ids`` —— 向下展开子孙（含自身），供「本部门及以下」/ 移动防环；
   * ``list_ancestor_dept_ids`` —— 向上回溯祖先（不含自身，root→parent 有序），供面包屑。
 """
 
 from __future__ import annotations
 
-from sqlalchemy import func, literal, select, text
+from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.authz.data_scope import apply_data_scope
 from admin_platform.authz.scope import DataScope
+from admin_platform.db.locks import acquire_transaction_lock
 from admin_platform.domains.dept.models import Dept
 from admin_platform.domains.dept.schemas import DeptCreate, DeptUpdate
 
-# pg_advisory_xact_lock 的稳定 key —— 串行化所有 dept 树写（移动/删除防并发成环）。
-_DEPT_TREE_LOCK_KEY = 478221  # 任意固定 bigint，全仓 dept 树写共用
+# app_locks 稳定锁名 —— 串行化所有 dept 树写（移动/删除防并发成环）。
+_DEPT_TREE_LOCK_NAME = "dept:tree"
 _MAX_DEPT_DEPTH = 64  # recursive CTE 深度兜底（实际深度 <10）；坏数据成环时防死循环
 
 
@@ -44,14 +45,12 @@ class DeptRepository:
         return int(result.scalar_one())
 
     async def acquire_tree_lock(self) -> None:
-        """事务级 advisory lock，串行化 dept 树写（移动/删除防并发成环）。
+        """事务级行锁，串行化 dept 树写（移动/删除防并发成环）。
 
         提交/回滚自动释放。配合锁内重新校验，关掉 ``_check_no_cycle`` 的 TOCTOU 窗口
         （两个并发移动 A→B、B→A 各自校验都过、提交后成环）。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_DEPT_TREE_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _DEPT_TREE_LOCK_NAME)
 
     async def get(self, dept_id: int) -> Dept | None:
         return await self._session.get(Dept, dept_id)

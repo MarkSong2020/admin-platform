@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from admin_platform.authz.providers import PermissionProvider
@@ -26,6 +25,7 @@ from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.dict.api import router as dict_router
 from admin_platform.domains.dict.models import DictData
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -64,8 +64,7 @@ class _NoPermProvider(PermissionProvider):
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE dict_data, dict_types CASCADE"))
+    await truncate_tables("dict_data", "dict_types")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -188,7 +187,7 @@ async def test_consumption_endpoint_returns_enabled_sorted() -> None:
 
 
 async def test_partial_unique_index_blocks_two_defaults() -> None:
-    # 对抗审查 B1：DB partial unique index 兜底——绕过 service clear-siblings 直接插两条
+    # 对抗审查 B1：DB 生成列唯一索引兜底——绕过 service clear-siblings 直接插两条
     # is_default=true 同类型 → 第二条撞 uq_dict_data_one_default_per_type → IntegrityError。
     async with _client(_SuperProvider) as c:
         tid = await _new_type(c, type_str="sys_bool")

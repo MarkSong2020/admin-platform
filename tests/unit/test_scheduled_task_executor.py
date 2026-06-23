@@ -10,13 +10,17 @@ manual 经同步 HTTP 执行，长占请求连接/事务 → run() 对 trigger_t
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
+from admin_platform.domains.scheduled_task import executor as executor_mod
 from admin_platform.domains.scheduled_task.executor import (
     _MANUAL_RUN_MAX_TIMEOUT,
     TaskExecutor,
+    _as_utc_for_storage,
 )
 from admin_platform.domains.scheduled_task.registry import JobHandlerRegistry
 
@@ -51,6 +55,24 @@ class _CapturingExecutor(TaskExecutor):
 
     async def _finish(self, *args: object, **kwargs: object) -> None:  # type: ignore[override]
         return None
+
+
+class _ClaimOrderExecutor(TaskExecutor):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(JobHandlerRegistry())
+        self._events = events
+
+    async def _claim_once(  # type: ignore[override]
+        self,
+        task_id: int,
+        *,
+        trigger_type: str,
+        scheduled_at: datetime | None,
+        actor_user_id: int | None,
+        execution_id: uuid.UUID,
+    ) -> tuple[int, str, dict, int | None, bool]:
+        self._events.append("claim")
+        return (1, "noop", {}, None, True)
 
 
 async def _run(executor: _CapturingExecutor, trigger_type: str) -> None:
@@ -90,3 +112,62 @@ async def test_schedule_keeps_unset_timeout_none() -> None:
     ex = _CapturingExecutor(claim_timeout=None)
     await _run(ex, "schedule")
     assert ex.invoked_timeout is None
+
+
+async def test_claim_ensures_task_lock_row_before_opening_claim_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    async def fake_ensure(name: str) -> None:
+        events.append(f"ensure:{name}")
+
+    monkeypatch.setattr(executor_mod, "ensure_transaction_lock_row", fake_ensure, raising=False)
+
+    ex = _ClaimOrderExecutor(events)
+    await ex._claim(
+        42,
+        trigger_type="schedule",
+        scheduled_at=None,
+        actor_user_id=None,
+        execution_id=uuid.uuid4(),
+    )
+
+    assert events == ["ensure:scheduled-task:claim:42", "claim"]
+
+
+def test_scheduled_at_storage_converts_non_utc_tick_to_utc() -> None:
+    """MySQL DATETIME 无 timezone；非 UTC cron tick 写库前必须保存 UTC instant。"""
+    tick = datetime(2026, 6, 11, 2, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    stored = _as_utc_for_storage(tick)
+
+    assert stored == datetime(2026, 6, 10, 18, 0, tzinfo=UTC)
+
+
+def _integrity_error(code: int, message: str) -> IntegrityError:
+    """构造带 MySQL 错误码 + 消息的 IntegrityError（orig.args[0]=code，str(orig) 含 message）。"""
+    return IntegrityError("INSERT ...", {}, Exception(code, message))
+
+
+def test_is_claim_taken_true_for_1062_claim_index() -> None:
+    exc = _integrity_error(
+        1062,
+        "Duplicate entry '1-2026' for key "
+        "'scheduled_task_logs.uq_scheduled_task_logs_schedule_claim'",
+    )
+    assert executor_mod._is_claim_taken(exc) is True
+
+
+def test_is_claim_taken_false_for_1062_other_unique() -> None:
+    # execution_id unique 也是 1062，但 key 名不同 → 不能当 claim 被抢，必须上抛。
+    exc = _integrity_error(
+        1062, "Duplicate entry 'uuid' for key 'scheduled_task_logs.execution_id'"
+    )
+    assert executor_mod._is_claim_taken(exc) is False
+
+
+def test_is_claim_taken_false_for_non_1062_violation() -> None:
+    # CHECK 违例（3819）等非 duplicate 错误必须上抛，不被吞成「被抢占」。
+    exc = _integrity_error(3819, "Check constraint 'ck_x' is violated")
+    assert executor_mod._is_claim_taken(exc) is False

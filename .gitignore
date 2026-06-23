@@ -44,5 +44,14 @@ Thumbs.db
 *.log
 logs/
 
+# 本地临时诊断/调试转储（.zzz_ 前缀，勿提交）
+.zzz_*
+
+# 迁移任务临时 prompt（codex 任务说明，勿入库）
+me.md
+
+# 运行时本地存储（file_storage_root 默认 var/uploads，运行产生，勿提交）
+var/
+
 # Claude Code — local-only permission allowlist (per developer; team settings live in .claude/settings.json)
 .claude/settings.local.json

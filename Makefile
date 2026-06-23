@@ -1,7 +1,7 @@
 # 集成测试排除约定（2026-06-14 收口）：`-m "not integration"` 不再放在 pyproject 全局
 # addopts（曾导致点名跑集成测试被静默 deselect、假绿）。排除现显式收口在下列 target：
-# test / coverage / check。裸 `pytest`（无参）默认**含**集成测试，跑前需 `make compose-up`
-# + `make migrate`；只想跑集成用 `make test-integration`（`-m integration`）。
+# test / coverage / check。裸 `pytest`（无参）默认**含**集成测试；日常 fast lane 用
+# `make check`，MySQL 集成链路用 `make test-integration`（`-m integration`）。
 .PHONY: help init dev test test-integration coverage lint format format-files typecheck audit migrate migration new-module smoke-generator check check-openapi-contract check-layer-boundaries check-db schema-doc compose-up compose-up-cache compose-down docker-build
 
 help:  ## Show available targets
@@ -17,6 +17,7 @@ test:  ## Run unit + API tests (excludes integration)
 	uv run pytest -m "not integration"
 
 test-integration:  ## Run integration tests (requires compose-up + migrate)
+	@test "$$APP_TEST_DB_ALLOW_DESTRUCTIVE" = "1" || (echo "Error: APP_TEST_DB_ALLOW_DESTRUCTIVE=1 is required; integration tests TRUNCATE the disposable MySQL test database." >&2; exit 2)
 	uv run pytest -m integration
 
 coverage:  ## Run unit + API tests with coverage report (fail under per pyproject.toml [tool.coverage.report] fail_under)
@@ -75,10 +76,10 @@ check-db:  ## Alembic migration drift detection (Errata #3, requires compose-up)
 schema-doc:  ## Regenerate docs/architecture/DATA_MODEL.md from ORM models (no DB needed)
 	uv run python scripts/dump_schema.py
 
-compose-up:  ## Bring up local Postgres and wait until healthy (Errata #5: redis is opt-in)
+compose-up:  ## Bring up local MySQL and wait until healthy (Errata #5: redis is opt-in)
 	docker compose up -d --wait db
 
-compose-up-cache:  ## Bring up Postgres + Redis (cache profile), wait until healthy
+compose-up-cache:  ## Bring up MySQL + Redis (cache profile), wait until healthy
 	docker compose --profile cache up -d --wait
 
 compose-down:  ## Tear down compose stack (incl. opt-in profiles like cache)

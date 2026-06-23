@@ -167,13 +167,19 @@ class Order(Base):
     __tablename__ = "orders"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column()
-    gmt_create: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    gmt_create: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
     gmt_modified: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),                # ORM-level，session.commit() 时触发；不映射到 DDL
+        UTCDateTime(),
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=lambda: datetime.now(UTC),  # ORM-level，session.commit() 时触发；不映射到 DDL
     )
 ```
+
+> MySQL 基线：时间列使用 `admin_platform.db.base.UTCDateTime`，库内保存 UTC `DATETIME`；
+> DDL 默认值用 `CURRENT_TIMESTAMP`，不要写 PostgreSQL 专用 `timestamptz` / `func.now()` 示例。
 
 ## 测试模板（自动产出）
 

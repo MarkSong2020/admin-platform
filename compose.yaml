@@ -1,6 +1,6 @@
 name: admin-platform
 
-# Local dev only. Production must run Postgres via managed RDS (or equivalent)
+# Local dev only. Production must run MySQL via managed RDS (or equivalent)
 # with secrets injected from K8s/Vault, never docker-compose. The password
 # variables read from the developer's .env or fall back to "app" — strictly
 # fine for an isolated dev DB; an explicit env var is provided so a developer
@@ -8,21 +8,27 @@ name: admin-platform
 
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_bin
+      - --log-bin-trust-function-creators=1
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
-      POSTGRES_DB: ${POSTGRES_DB:-app}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${MYSQL_USER:-app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
     ports:
       # 默认仅绑回环，不暴露到 0.0.0.0（防共享/公网开发机同网段访问 dev 库）。
       # 需远程访问时设 BIND_ADDR=0.0.0.0（或具体网卡 IP）覆盖。
-      - "${BIND_ADDR:-127.0.0.1}:5432:5432"
+      # 本机已有 MySQL 或 OrbStack 端口转发异常时，可用 MYSQL_HOST_PORT=13306 覆盖。
+      - "${BIND_ADDR:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}
+        - mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent
       interval: 5s
       timeout: 5s
       retries: 10
@@ -41,4 +47,4 @@ services:
       retries: 10
 
 volumes:
-  pg_data:
+  mysql_data:

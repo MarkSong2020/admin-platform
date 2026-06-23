@@ -11,7 +11,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "0011"
 down_revision: str | Sequence[str] | None = "0010"
@@ -66,14 +65,14 @@ def upgrade() -> None:
         ),
         sa.Column(
             "metadata",
-            postgresql.JSONB(astext_type=sa.Text()),
+            sa.JSON(),
             nullable=False,
-            comment="脱敏后业务负载(JSONB)",
+            comment="脱敏后业务负载(JSON)",
         ),
         sa.Column("redaction_applied", sa.Boolean(), nullable=False, comment="是否发生过脱敏"),
         sa.Column(
             "payload",
-            postgresql.JSONB(astext_type=sa.Text()),
+            sa.JSON(),
             nullable=False,
             comment="完整envelope(无损取证)",
         ),
@@ -81,18 +80,26 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.CheckConstraint(
+            "actor_is_super_admin IN (0, 1)",
+            name="ck_audit_events_actor_is_super_admin_bool",
+        ),
+        sa.CheckConstraint(
+            "redaction_applied IN (0, 1)",
+            name="ck_audit_events_redaction_applied_bool",
+        ),
         sa.UniqueConstraint("event_id"),
     )
     op.create_index(

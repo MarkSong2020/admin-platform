@@ -23,20 +23,21 @@ env:
 
 jobs:
   e2e:
-    name: login flow (real backend + chromium)
+    name: MySQL browser E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      postgres:
-        image: postgres:16-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
-          POSTGRES_DB: app
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+          MYSQL_DATABASE: app
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U app -d app"
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uapp -papp --silent"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -50,8 +51,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      APP_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+      APP_DATABASE_URL: mysql+asyncmy://app:app@localhost:3306/app
       APP_REDIS_URL: redis://localhost:6379/0
+      MYSQL_ROOT_PASSWORD: root
       # 登录闭环必需：auth 开 + jwt secret（非空且足够长）+ refresh pepper（空则签发 refresh 失败）
       APP_AUTH_ENABLED: "true"
       APP_AUTH_JWT_SECRET: "ci-e2e-only-not-a-real-secret-0123456789abcdef0123456789abcdef"
@@ -74,58 +76,85 @@ jobs:
       - name: Sync backend deps
         run: uv sync --all-extras --dev --frozen
 
-      - name: Apply migrations
-        run: make migrate
-      - name: Seed RBAC（菜单/权限/角色，幂等）
-        run: uv run python -m admin_platform.cli rbac seed
-      - name: Create super admin（admin / ADMIN_BOOTSTRAP_PASSWORD）
-        # 绕后端 #17（cli.py 未导入全部 FK 引用 model → 干净 metadata 下 flush users 报
-        # NoReferencedTableError）：先 create_app() 预导入全部 domain model 再调 CLI。
-        # 后端 #17 修复后可还原为 `uv run python -m admin_platform.cli create-super-admin --username admin`。
-        run: >-
-          uv run python -c "from admin_platform.main import create_app; create_app();
-          from admin_platform.cli import main;
-          raise SystemExit(main(['create-super-admin', '--username', 'admin']))"
-
-      - name: Start backend（uvicorn 后台）+ 等 healthz
+      - name: Configure MySQL collation
         run: |
-          nohup uv run uvicorn admin_platform.main:app \
-            --host 127.0.0.1 --port 8000 --no-access-log > /tmp/backend.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8000/healthz && exit 0
-            sleep 1
-          done
-          echo "backend 未就绪，日志：" && cat /tmp/backend.log && exit 1
+          uv run python - <<'PY'
+          import asyncio
+          import os
+
+          from sqlalchemy import text
+          from sqlalchemy.engine import make_url
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          async def main() -> None:
+              url = make_url(os.environ["APP_DATABASE_URL"])
+              database = url.database or "app"
+              escaped_database = database.replace("`", "``")
+              root_url = url.set(
+                  username="root",
+                  password=os.environ["MYSQL_ROOT_PASSWORD"],
+              )
+              engine = create_async_engine(root_url)
+              async with engine.begin() as conn:
+                  await conn.execute(text("SET GLOBAL log_bin_trust_function_creators = 1"))
+                  await conn.execute(
+                      text(
+                          f"ALTER DATABASE `{escaped_database}` "
+                          "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin"
+                      )
+                  )
+              await engine.dispose()
+
+          asyncio.run(main())
+          PY
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: Install frontend deps
+
+      - name: Sync frontend deps
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Build frontend（指向本机后端）
+
+      - name: Apply migrations
+        run: make migrate
+
+      - name: Seed RBAC manifest
+        run: uv run python -m admin_platform.cli rbac seed
+
+      - name: Bootstrap super admin
+        run: uv run python -m admin_platform.cli create-super-admin --username admin
+
+      - name: Build frontend
         working-directory: frontend
         env:
           VITE_API_BASE: http://localhost:8000
         run: pnpm build
+
       - name: Install Playwright Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
-      - name: Run E2E（playwright 自启 preview :4173）
-        working-directory: frontend
-        env:
-          CI: "true"
-        run: pnpm exec playwright test --project=chromium
 
-      - name: Upload Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: frontend/playwright-report/
-          retention-days: 7
+      - name: Start backend
+        run: |
+          uv run uvicorn admin_platform.main:app --host 127.0.0.1 --port 8000 \
+            > /tmp/admin-platform-api.log 2>&1 &
+          echo "$!" > /tmp/admin-platform-api.pid
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8000/readyz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/admin-platform-api.log
+          exit 1
+
+      - name: Browser E2E
+        working-directory: frontend
+        run: pnpm test:e2e

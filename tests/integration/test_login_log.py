@@ -7,13 +7,15 @@ guard 路径（限流 / 锁 / 验证码）的登录日志 Redis-gated（无 Redi
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
-from sqlalchemy import select, text
+from redis.exceptions import RedisError
+from sqlalchemy import select
 
 from admin_platform.audit.models import AuditEventLog
 from admin_platform.audit.sink import DbAuditSink, configure_audit_sink
@@ -24,6 +26,7 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.auth.models import LoginLog
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -33,20 +36,24 @@ _PW = "correct-horse-battery-staple"
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(
-            text("TRUNCATE TABLE login_logs, audit_events, auth_refresh_tokens, users CASCADE")
-        )
+    await truncate_tables("login_logs", "audit_events", "auth_refresh_tokens", "users")
 
 
-async def _redis_available() -> bool:
+async def _require_redis_available(reason: str) -> None:
     try:
         r = Redis.from_url(_REDIS_URL)
         await r.ping()  # type: ignore[misc]
         await r.aclose()
-        return True
-    except Exception:
-        return False
+    except (RedisError, OSError) as exc:
+        strict = os.environ.get("STRICT_REDIS_INTEGRATION", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        msg = f"Redis 不可用（opt-in），跳过 {reason}: {_REDIS_URL}: {exc}"
+        if strict:
+            pytest.fail(msg + " — STRICT_REDIS_INTEGRATION=1 is set.")
+        pytest.skip(msg)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -141,10 +148,10 @@ async def test_login_unknown_user_records_failure_without_user_id(client: AsyncC
     assert logs[0].user_id is None  # 未知用户：防枚举不暴露，user_id 空
 
 
+@pytest.mark.redis_integration
 async def test_login_guard_captcha_path_logged() -> None:
     # Redis-gated：失败达验证码阈值后，下一次登录要求验证码 → login_logs 记 captcha_required。
-    if not await _redis_available():
-        pytest.skip("Redis 不可用（opt-in），跳过 guard 路径登录日志")
+    await _require_redis_available("guard 路径登录日志")
     r = Redis.from_url(_REDIS_URL)
     await r.flushdb()
     await r.aclose()

@@ -30,24 +30,41 @@ make dev                        # http://127.0.0.1:8000/healthz 返回 {"status"
 
 > **为什么单独列 `pre-commit install`**：`pre-commit` v0.4.17 起入 dev deps（`make init` 会装），但 `.pre-commit-config.yaml` 描述的 git hook 必须显式 `install` 才能生效。漏装 → 首次 commit 时 ruff-format 会改文件、commit 失败，新人误以为环境坏了。
 
-## 接 PostgreSQL（含 ORM model 时必须）
+## 接 MySQL
 
 ```bash
-make compose-up        # docker compose up -d --wait db (postgres:16-alpine, 端口 5432)
-make migrate           # alembic upgrade head (应用 baseline)
-make check-db          # alembic check (0 drift)
-make test-integration  # pytest -m integration（数量以 pytest -m integration --collect-only 为准）
+make compose-up        # docker compose up -d --wait db (mysql:8.0, 端口 3306)
+make migrate           # 本地 MySQL 执行 Alembic 迁移（生产/共享库仍需单独授权）
+make check-db          # schema drift 检测
+APP_TEST_DB_ALLOW_DESTRUCTIVE=1 make test-integration   # MySQL 集成测试，会 TRUNCATE disposable 测试库
 make compose-down      # 停 Docker
 ```
 
-**`make test-integration` 当前覆盖**（P0 baseline；示例域 todo/tag 已删，跑 `pytest -m integration --collect-only` 自查最新数字）：
+MySQL schema 必须使用 `utf8mb4_0900_bin` 默认 collation（保留 PostgreSQL 的大小写敏感
+unique / CHECK 语义）；`compose.yaml` 已配置新建 volume 的默认值。若旧本地 volume 是迁移前
+创建的，`make migrate` 会在 Alembic 入口报错；确认是 disposable dev 库后再执行
+`docker compose down -v` 重建。
+
+迁移链还会创建 `depts` / `menus` 的 self-parent 防护 trigger。若 MySQL 开启 binary logging，
+实例参数必须设置 `log_bin_trust_function_creators=1`；本地 `compose.yaml` 已配置，生产/共享库
+由 DBA 在迁移窗口前设置，Alembic 入口会提前校验。
+
+若本机 3306 已被占用，或 Docker/OrbStack 的 3306 发布端口行为异常，可显式换端口：
+
+```bash
+MYSQL_HOST_PORT=13306 make compose-up
+APP_DATABASE_URL=mysql+asyncmy://app:app@127.0.0.1:13306/app make migrate
+APP_DATABASE_URL=mysql+asyncmy://app:app@127.0.0.1:13306/app APP_TEST_DB_ALLOW_DESTRUCTIVE=1 make test-integration
+```
+
+**`make test-integration` 覆盖**（示例域 todo/tag 已删，跑 `pytest -m integration --collect-only` 自查最新数字）：
 - `test_db_smoke.py` 2 项（DB 连通 + transaction commit smoke）
 - `test_transaction_commit.py` 3 项（`get_session` 起真事务 / 回滚 / SAVEPOINT）
 - `test_idempotency_redis.py` 5 项（Redis-backed idempotency E2E，需 Redis 起来）
 
-Redis（idempotency 中间件用）默认 lazy 连——本地开发不强制起。`compose-up`（不带 -cache）只起 Postgres，Redis 相关测试通常跑过去因为 `STRICT_REDIS_INTEGRATION` 默认未设时 redis_integration 标记的测试**会 skip**；要真测就 `make compose-up-cache` 起 Redis + 跑 `uv run pytest -m redis_integration`。
+Redis（idempotency 中间件 / 缓存监控用）默认 lazy 连——本地开发不强制起。`compose-up`（不带 -cache）只起 MySQL，Redis 相关测试通常跑过去因为 `STRICT_REDIS_INTEGRATION` 默认未设时 `redis_integration` 标记的测试**会 skip**；要真测就 `make compose-up-cache` 起 Redis + 跑 `APP_TEST_DB_ALLOW_DESTRUCTIVE=1 uv run pytest -m redis_integration`。
 
-> ⚠️ **改 idempotency 相关代码必须跑 `pytest -m redis_integration`**：本地默认 `make test-integration` 包括 redis_integration 但需要 Redis 起着才不 skip。改 `core/idempotency.py` / 中间件链 / generator POST 模板的 PR 必须先 `make compose-up-cache`，否则 5 个关键 Redis 测试静默 skip 而你以为绿了。
+> ⚠️ **改 idempotency / 缓存监控相关代码必须跑 `APP_TEST_DB_ALLOW_DESTRUCTIVE=1 uv run pytest -m redis_integration`**：本地默认 `make test-integration` 包括 `redis_integration` 但需要 Redis 起着才不 skip。改 `core/idempotency.py` / 中间件链 / generator POST 模板 / `domains/monitor` 缓存采集的 PR 必须先 `make compose-up-cache`，否则关键 Redis 测试静默 skip 而你以为绿了。
 >
 > CI 自动设 `STRICT_REDIS_INTEGRATION=1`——Redis 不可达时把 skip 强转 fail，避免线上跑了但日志被忽略。
 
@@ -61,12 +78,12 @@ Redis（idempotency 中间件用）默认 lazy 连——本地开发不强制起
 | `make check` | ruff + pyright + pytest（排除 integration） |
 | `make audit` | `uvx pip-audit`（依赖漏洞扫描） |
 | `make new-module name=order [with-model=1] [plural=...] [dry-run=1] [force=1]` | 生成业务模块（[CODE_GENERATOR.md](../standards/CODE_GENERATOR.md)） |
-| `make compose-up` / `make compose-down` | 启停 PostgreSQL |
+| `make compose-up` / `make compose-down` | 启停 MySQL |
 | `make compose-up-cache` | 同上 + Redis（profile=cache） |
-| `make migrate` | `alembic upgrade head` |
+| `make migrate` | `alembic upgrade head`（生产/共享库仍需单独授权） |
 | `make migration name=...` | `alembic revision --autogenerate -m ...` |
 | `make check-db` | `alembic check`（schema drift 检测） |
-| `make test-integration` | `pytest -m integration` |
+| `make test-integration` | `pytest -m integration`（MySQL 集成测试） |
 | `make docker-build` | 多阶段 Dockerfile build |
 | `make format` / `make format-files` | ruff format 全仓 / 指定文件 |
 | `make lint` / `make typecheck` | ruff check / pyright |

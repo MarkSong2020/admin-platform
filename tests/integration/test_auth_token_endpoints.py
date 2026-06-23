@@ -20,6 +20,7 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.auth.models import RefreshToken
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -29,8 +30,7 @@ _PW = "correct-horse-battery-staple"
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -17,6 +17,7 @@
 | **P5** | [`2026-06-11-p5-file-management.md`](./2026-06-11-p5-file-management.md) | 文件管理（对标 RuoYi sys_oss：StorageBackend 抽象 + 本地存储 + 安全模型）+ 砍除在线 codegen | ✓ |
 | **P5** | [`2026-06-11-p5-excel-import-export.md`](./2026-06-11-p5-excel-import-export.md) | 通用 Excel 导入（一步全有全无）/ 导出无状态叶子机制 + post 绑定 | ✓ |
 | **P6** | [`2026-06-11-p6-frontend-design.md`](./2026-06-11-p6-frontend-design.md) | 前端技术栈选型与架构：完全自建 Vue3 + TS（不 fork RuoYi），对标后端工程纪律 | 🚧 进行中 |
+| **DB 迁移** | [`2026-06-23-mysql-migration-phase0-poc.md`](./2026-06-23-mysql-migration-phase0-poc.md) | PostgreSQL → MySQL 8 迁移阶段 0：`GET_LOCK` 断连接管 + 调度 claim 并发去重 PoC | ✓ |
 
 ---
 

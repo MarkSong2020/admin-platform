@@ -3,7 +3,7 @@
 补 P1 缺口（review 🔴）：repository 已有 ``set_*`` 但无 service/API 出口 → 管理端不可配 RBAC。
 经 deps 注入各域 repository（共享一请求 session），统一：
   ① 主体存在 + 数据权限可见性校验；② 绑定 ids all-or-nothing 存在性校验（缺失 422）；
-  ③ 调既有 ``set_*``（全量替换，advisory lock 串行化）；④ emit ``rbac_write``（成功/失败都记）。
+  ③ 调既有 ``set_*``（全量替换，事务级行锁串行化）；④ emit ``rbac_write``（成功/失败都记）。
 
 分层：抛 ``AppError``（不抛 HTTPException）；不 import fastapi / CurrentUser —— actor 由 api 层
 传 ``AuditActor``。跨域 repository 仅构造注入（deps.py 组装）。

@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from admin_platform.core.config import get_settings
 from admin_platform.core.security import hash_password
@@ -20,6 +20,7 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.auth.models import RefreshToken
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -30,8 +31,7 @@ _NEW_PW = "brand-new-secure-pw-2026"
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

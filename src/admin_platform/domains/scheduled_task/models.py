@@ -4,9 +4,9 @@
 预注册 registry 的键）+ ``params_json``，**不存任意调用目标字符串**（无 RCE 面）。
 
 多 worker 安全（roadmap P4 红线）：自动触发的执行 claim 用 ``scheduled_task_logs`` 上
-``(task_id, scheduled_at) WHERE trigger_type='schedule'`` 的 **partial unique index** 兜底——
+MySQL 生成列 + unique 兜底，只约束 ``trigger_type='schedule'`` 的 ``(task_id, scheduled_at)``。
 即使 leader failover 窗口两个 worker 同时触发同一 cron tick，也只有一条 INSERT 成功，另一条
-撞唯一约束被跳过。leader election（advisory lock）是效率层，此约束是正确性层。
+撞唯一约束被跳过。leader election 是效率层，此约束是正确性层。
 """
 
 from __future__ import annotations
@@ -16,10 +16,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
-    DateTime,
+    Computed,
     ForeignKey,
     Index,
     Integer,
@@ -28,11 +29,10 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from admin_platform.core.errors import register_unique_constraint
-from admin_platform.db.base import Base, IdMixin, TimestampMixin
+from admin_platform.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
 
 
 class ScheduledTask(Base, IdMixin, TimestampMixin):
@@ -43,6 +43,9 @@ class ScheduledTask(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("name", name="uq_scheduled_tasks_name"),
         CheckConstraint("status IN ('enabled', 'disabled')", name="ck_scheduled_tasks_status"),
+        CheckConstraint(
+            "allow_concurrent IN (0, 1)", name="ck_scheduled_tasks_allow_concurrent_bool"
+        ),
         CheckConstraint("misfire_grace_seconds >= 0", name="ck_scheduled_tasks_misfire_nonneg"),
         Index("ix_scheduled_tasks_status", "status"),
         Index("ix_scheduled_tasks_handler_key", "handler_key"),
@@ -53,7 +56,7 @@ class ScheduledTask(Base, IdMixin, TimestampMixin):
         String(128), comment="处理器键(命中代码侧registry,非任意调用目标)"
     )
     params_json: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="处理器参数(JSON)"
+        JSON, nullable=False, default=dict, comment="处理器参数(JSON)"
     )
     cron_expression: Mapped[str] = mapped_column(
         String(128), comment="cron表达式(5字段标准crontab,经校验)"
@@ -65,7 +68,7 @@ class ScheduledTask(Base, IdMixin, TimestampMixin):
         String(16), server_default=text("'disabled'"), comment="状态(enabled/disabled)"
     )
     allow_concurrent: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("false"), comment="是否允许上次未跑完时并发执行"
+        Boolean, server_default=text("0"), comment="是否允许上次未跑完时并发执行"
     )
     misfire_grace_seconds: Mapped[int] = mapped_column(
         Integer, server_default=text("300"), comment="错过触发的宽限秒数"
@@ -74,7 +77,7 @@ class ScheduledTask(Base, IdMixin, TimestampMixin):
         Integer, nullable=True, comment="单次执行超时秒数(空=不限)"
     )
     last_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="最近一次执行时刻(UTC)"
+        UTCDateTime(), nullable=True, comment="最近一次执行时刻(UTC)"
     )
     last_status: Mapped[str | None] = mapped_column(
         String(16), nullable=True, comment="最近一次执行结果状态"
@@ -95,20 +98,20 @@ class ScheduledTaskLog(Base, IdMixin, TimestampMixin):
         CheckConstraint(
             "trigger_type IN ('schedule', 'manual')", name="ck_scheduled_task_logs_trigger"
         ),
-        # L：schedule 触发必须有 scheduled_at（claim 正确性层兜底）——否则 partial unique 在 PG16
-        # NULLS DISTINCT 下对 schedule+NULL 行完全失效，去重被静默旁路（防未来代码/手写 SQL/回放工具
+        # L：schedule 触发必须有 scheduled_at（claim 正确性层兜底）——否则 MySQL unique 允许
+        # 多个 NULL，schedule+NULL 行会绕过去重（防未来代码/手写 SQL/回放工具
         # 以 schedule+NULL 插入绕过红线）。manual 触发 scheduled_at 合法为 NULL，不受此约束。
         CheckConstraint(
             "trigger_type <> 'schedule' OR scheduled_at IS NOT NULL",
             name="ck_scheduled_task_logs_schedule_at",
         ),
-        # 多 worker 执行 claim（P4 红线核心）：同一任务同一 cron tick 只能有一条自动触发记录。
+        # 多 worker 执行 claim（P4 红线核心）：MySQL 生成列只投影自动触发行，manual 行为 NULL，
+        # 利用唯一索引允许多个 NULL 实现条件唯一语义。
         Index(
             "uq_scheduled_task_logs_schedule_claim",
             "task_id",
-            "scheduled_at",
+            "schedule_claim_scheduled_at",
             unique=True,
-            postgresql_where=text("trigger_type = 'schedule'"),
         ),
         Index("ix_scheduled_task_logs_task_started", "task_id", "started_at"),
         Index("ix_scheduled_task_logs_status_created", "status", "created_at"),
@@ -125,18 +128,27 @@ class ScheduledTaskLog(Base, IdMixin, TimestampMixin):
         String(16), comment="触发方式(schedule自动/manual手动)"
     )
     scheduled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="计划触发时刻(UTC,自动触发用于claim去重)"
+        UTCDateTime(), nullable=True, comment="计划触发时刻(UTC,自动触发用于claim去重)"
+    )
+    schedule_claim_scheduled_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(),
+        Computed(
+            "CASE WHEN trigger_type = 'schedule' THEN scheduled_at ELSE NULL END",
+            persisted=True,
+        ),
+        nullable=True,
+        comment="MySQL生成列: 自动触发claim计划时间, manual为NULL",
     )
     handler_key: Mapped[str] = mapped_column(String(128), comment="处理器键(快照)")
     params_json: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="执行参数快照(JSON)"
+        JSON, nullable=False, default=dict, comment="执行参数快照(JSON)"
     )
     status: Mapped[str] = mapped_column(String(16), comment="执行状态")
     started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="开始执行时刻(UTC)"
+        UTCDateTime(), nullable=True, comment="开始执行时刻(UTC)"
     )
     finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="结束时刻(UTC)"
+        UTCDateTime(), nullable=True, comment="结束时刻(UTC)"
     )
     duration_ms: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="执行耗时(毫秒)"

@@ -2,7 +2,7 @@
 
 除标准 CRUD 外，承载岗位绑定查询与写（镜像 role 域 ``user_roles``，岗位无 data_scope 故更简单）：
   * ``list_posts_for_user`` —— JOIN ``user_posts`` 取用户的全部岗位。
-  * ``set_user_posts`` —— 全量替换绑定（先取 advisory lock 再先删后插，幂等）。
+  * ``set_user_posts`` —— 全量替换绑定（先取事务级行锁再先删后插，幂等）。
 """
 
 from __future__ import annotations
@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
-from sqlalchemy import ColumnElement, Select, delete, func, select, text
+from sqlalchemy import ColumnElement, Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.core.pagination import SortColumn, SortExpr, ilike_contains
+from admin_platform.db.locks import acquire_transaction_lock
 from admin_platform.domains.post.models import Post, UserPost
 from admin_platform.domains.post.schemas import PostCreate, PostListQuery, PostUpdate
 
@@ -30,10 +31,10 @@ def _post_filters(query: PostListQuery) -> list[ColumnElement[bool]]:
     return conds
 
 
-# pg_advisory_xact_lock 的稳定 key —— 串行化 user_posts「先删后插」的全量替换（镜像 role 域
-# F3 修复）：并发两请求替换同一目标时，避免最终落成两请求的并集 / 撞 uq_user_posts。事务级锁，
-# 提交/回滚自动释放。取与 dept(478221) / role(478231-2) / menu(478241-2) 不同的值避免跨域互锁。
-_USER_POSTS_LOCK_KEY = 478251  # 串行化 user_posts 替换
+# app_locks 稳定锁名 —— 串行化 user_posts「先删后插」的全量替换（镜像 role 域 F3 修复）：
+# 并发两请求替换同一目标时，避免最终落成两请求的并集 / 撞 uq_user_posts。事务级锁，
+# 提交/回滚自动释放。保持既有全局串行粒度。
+_USER_POSTS_LOCK_NAME = "post:user-posts"
 
 
 class PostRepository:
@@ -117,13 +118,11 @@ class PostRepository:
     async def set_user_posts(self, user_id: int, post_ids: list[int]) -> None:
         """全量替换用户的岗位绑定（去重；空列表 = 解绑所有岗位）。
 
-        先取事务级 advisory lock 串行化「先删后插」（镜像 role 域 F3 修复）：并发两请求替换
+        先取事务级行锁串行化「先删后插」（镜像 role 域 F3 修复）：并发两请求替换
         同一/不同用户的绑定时，避免最终落成两请求的并集或撞 ``uq_user_posts``。提交/回滚
         自动释放锁。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_USER_POSTS_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _USER_POSTS_LOCK_NAME)
         await self._session.execute(delete(UserPost).where(UserPost.user_id == user_id))
         await self._session.flush()
         for post_id in dict.fromkeys(post_ids):

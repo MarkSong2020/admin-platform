@@ -53,7 +53,7 @@ async def _eager_probe_dependencies(app: FastAPI) -> None:
     生产环境应当设置 ``APP_STARTUP_EAGER_CONNECT=true``，让不可达依赖在
     ASGI lifespan startup 阶段抛错 → uvicorn 非零退出 → K8s **不**把 pod
     标记为 ready（流量永远不会打到坏 pod）。默认 False 是为了本地开发与
-    CI 不强依赖活的 PostgreSQL / Redis 才能 import app。
+    CI 不强依赖活的 MySQL / Redis 才能 import app。
     """
     async with get_engine().connect() as conn:
         await conn.execute(text("SELECT 1"))
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ):
             await _eager_probe_dependencies(app)
         # P4c 定时任务调度器：scheduler_enabled 默认 False 时 start/stop 均 no-op；启用则仅抢到
-        # PG advisory leader 锁的 worker 真正起 AsyncIOScheduler。最后 push → LIFO 最先执行：
+        # MySQL GET_LOCK leader 锁的 worker 真正起 AsyncIOScheduler。最后 push → LIFO 最先执行：
         # stop（释放 leader 锁 + 停调度）跑在 dispose_engine 之前，避免对已释放引擎取连接。
         scheduler = SchedulerController(settings, JOB_REGISTRY)
         stack.push_async_callback(scheduler.stop)

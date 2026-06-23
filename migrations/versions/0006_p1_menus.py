@@ -45,22 +45,51 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.CheckConstraint("menu_type IN ('M', 'C', 'F')", name="ck_menus_menu_type"),
         sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_menus_status"),
-        sa.CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_menus_not_self_parent"),
+        sa.CheckConstraint("visible IN (0, 1)", name="ck_menus_visible_bool"),
         sa.ForeignKeyConstraint(["parent_id"], ["menus.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
+    )
+    # MySQL 8 不允许 CHECK 引用 auto-increment 列，self-parent 防护改用 trigger。
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER ck_menus_not_self_parent_bi
+            BEFORE INSERT ON menus
+            FOR EACH ROW
+            BEGIN
+                IF NEW.parent_id IS NOT NULL AND NEW.parent_id = NEW.id THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ck_menus_not_self_parent';
+                END IF;
+            END
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER ck_menus_not_self_parent_bu
+            BEFORE UPDATE ON menus
+            FOR EACH ROW
+            BEGIN
+                IF NEW.parent_id IS NOT NULL AND NEW.parent_id = NEW.id THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ck_menus_not_self_parent';
+                END IF;
+            END
+            """
+        )
     )
     op.create_index(
         "ix_menus_parent_sort", "menus", ["parent_id", "sort_order", "id"], unique=False
@@ -74,14 +103,14 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
@@ -98,5 +127,7 @@ def downgrade() -> None:
     op.drop_index("ix_role_menus_role", table_name="role_menus")
     op.drop_index("ix_role_menus_menu", table_name="role_menus")
     op.drop_table("role_menus")
+    op.execute(sa.text("DROP TRIGGER IF EXISTS ck_menus_not_self_parent_bu"))
+    op.execute(sa.text("DROP TRIGGER IF EXISTS ck_menus_not_self_parent_bi"))
     op.drop_index("ix_menus_parent_sort", table_name="menus")
     op.drop_table("menus")

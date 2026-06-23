@@ -44,17 +44,24 @@ def upgrade() -> None:
         sa.text(
             """
             UPDATE auth_refresh_tokens AS t
-            SET family_absolute_at = origin.min_issued + make_interval(secs => :ttl)
-            FROM (
+            JOIN (
                 SELECT family_id, min(issued_at) AS min_issued
                 FROM auth_refresh_tokens
                 GROUP BY family_id
             ) AS origin
-            WHERE t.family_id = origin.family_id
+              ON t.family_id = origin.family_id
+            SET t.family_absolute_at = DATE_ADD(origin.min_issued, INTERVAL :ttl SECOND)
             """
         ).bindparams(ttl=ttl_seconds)
     )
-    op.alter_column("auth_refresh_tokens", "family_absolute_at", nullable=False)
+    op.alter_column(
+        "auth_refresh_tokens",
+        "family_absolute_at",
+        existing_type=sa.DateTime(timezone=True),
+        existing_nullable=True,
+        nullable=False,
+        existing_comment="family绝对过期上限(UTC,首登锚定,轮换透传不随清理漂移)",
+    )
     # M：family_id 前导索引——revoke_family / get_online_session / 在线用户 family_id IN(子查询)
     # 全按纯 family_id 过滤，(user_id,family_id) 复合索引前导是 user_id 服务不了，原为全表扫。
     op.create_index(

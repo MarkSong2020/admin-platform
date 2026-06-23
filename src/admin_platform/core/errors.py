@@ -129,17 +129,21 @@ AUTH_PASSWORD_TOO_WEAK = "auth.PASSWORD_TOO_WEAK"  # noqa: S105
 
 # ----------------------------- IntegrityError 兜底映射 ----------------------------- #
 # 业务 service 的 find_by_xxx 预检与 DB 写之间存在 race 窗口：两个并发请求
-# 同时查到「不存在」，各自 INSERT，第二个撞 DB UniqueConstraint → asyncpg
-# 抛 UniqueViolationError → SQLAlchemy 包成 IntegrityError。本 handler 把
+# 同时查到「不存在」，各自 INSERT，第二个撞 DB UniqueConstraint → driver
+# 抛唯一冲突错误 → SQLAlchemy 包成 IntegrityError。本 handler 把
 # IntegrityError 兜底成 409，避免落到通用 Exception handler 退化成 500。
 #
 # 业务 domain 在 import 时通过 ``register_unique_constraint`` 注册自己的
 # 约束名 → 业务错误码映射；未注册的约束走 framework.CONFLICT fallback。
 _UNIQUE_CONSTRAINT_CODES: dict[str, tuple[str, str]] = {}
 
-# Postgres 错误消息里的 constraint 名抽取（asyncpg 的 orig 有
-# ``constraint_name`` 属性；其它 driver 可能只有字符串形式，所以双轨）。
+# 约束名抽取：asyncpg 的 orig 有 ``constraint_name`` 属性；MySQL 1062 唯一冲突只有
+# ``Duplicate entry ... for key 'table.uq_xxx'`` 文本，1451/1452 等 FK 冲突则在
+# ``CONSTRAINT `fk_xxx``` 文本中带约束名，统一归一后走同一注册表。
 _CONSTRAINT_RE = re.compile(r'constraint "([^"]+)"')
+_MYSQL_DUPLICATE_ENTRY = 1062
+_MYSQL_KEY_RE = re.compile(r"for key ['`\"](?P<key>[^'`\"]+)['`\"]", re.IGNORECASE)
+_MYSQL_CONSTRAINT_RE = re.compile(r"CONSTRAINT [`'\"](?P<constraint>[^`'\"]+)[`'\"]")
 
 
 def register_unique_constraint(constraint_name: str, code: str, title: str) -> None:
@@ -176,7 +180,9 @@ def _extract_constraint_name(exc: IntegrityError) -> str | None:
     """从 SQLAlchemy IntegrityError 抽取数据库约束名。
 
     asyncpg 的 ``UniqueViolationError`` 有 ``constraint_name`` 属性；其它
-    driver 没有时 fallback 解析 ``str(exc.orig)`` 里的 ``constraint "xxx"``。
+    driver 没有时 fallback 解析 ``str(exc.orig)`` 里的 ``constraint "xxx"``；
+    MySQL 1062 解析 ``Duplicate entry ... for key 'table.uq_xxx'``，MySQL
+    FK / CHECK 等冲突解析 ``CONSTRAINT `fk_xxx```。
     """
     orig = exc.orig
     if orig is not None and hasattr(orig, "constraint_name"):
@@ -184,9 +190,23 @@ def _extract_constraint_name(exc: IntegrityError) -> str | None:
         if isinstance(name, str) and name:
             return name
     if orig is not None:
+        if _dbapi_error_code(orig) == _MYSQL_DUPLICATE_ENTRY:
+            match = _MYSQL_KEY_RE.search(str(orig))
+            if match:
+                return match.group("key").rsplit(".", 1)[-1]
+        match = _MYSQL_CONSTRAINT_RE.search(str(orig))
+        if match:
+            return match.group("constraint")
         match = _CONSTRAINT_RE.search(str(orig))
         if match:
             return match.group(1)
+    return None
+
+
+def _dbapi_error_code(orig: object) -> int | None:
+    args = getattr(orig, "args", ())
+    if args and isinstance(args[0], int):
+        return int(args[0])
     return None
 
 

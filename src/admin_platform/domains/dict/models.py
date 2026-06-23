@@ -15,12 +15,12 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     ForeignKey,
     Index,
     Integer,
     String,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,7 @@ class DictType(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("type", name="uq_dict_types_type"),
         CheckConstraint("status IN ('active', 'disabled')", name="ck_dict_types_status"),
+        CheckConstraint("is_builtin IN (0, 1)", name="ck_dict_types_is_builtin_bool"),
     )
 
     name: Mapped[str] = mapped_column(String(64), comment="字典名称")
@@ -56,14 +57,14 @@ class DictData(Base, IdMixin, TimestampMixin):
         # 同一类型内 value 唯一（跨类型可复用）。
         UniqueConstraint("dict_type_id", "value", name="uq_dict_data_type_value"),
         CheckConstraint("status IN ('active', 'disabled')", name="ck_dict_data_status"),
-        # 单默认值不变式（DB 兜底，对抗审查 B1）：同类型至多一行 is_default=true。service 层
-        # clear-siblings 只保证串行 happy path；READ COMMITTED 下并发双默认靠此 partial unique
-        # index 拦（第二个 INSERT 撞约束 → 409 dict.DEFAULT_DUPLICATE）。镜像 0003 单超管约束。
+        CheckConstraint("is_default IN (0, 1)", name="ck_dict_data_is_default_bool"),
+        # 单默认值不变式（DB 兜底，对抗审查 B1）：MySQL 生成列 + unique 利用「多个 NULL 不冲突」
+        # 实现同类型至多一行 is_default=true。
         Index(
             "uq_dict_data_one_default_per_type",
             "dict_type_id",
+            "default_unique_key",
             unique=True,
-            postgresql_where=text("is_default"),
         ),
         # 常按类型 + 排序拉某类型的全部数据（消费契约）。
         Index("ix_dict_data_type_sort", "dict_type_id", "sort_order", "id"),
@@ -85,6 +86,12 @@ class DictData(Base, IdMixin, TimestampMixin):
     is_default: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="是否默认(同类型仅一条)"
     )
+    default_unique_key: Mapped[int | None] = mapped_column(
+        Integer,
+        Computed("CASE WHEN is_default = 1 THEN 1 ELSE NULL END", persisted=True),
+        nullable=True,
+        comment="MySQL生成列: is_default=true时为1,否则NULL",
+    )
     css_class: Mapped[str | None] = mapped_column(
         String(128), nullable=True, comment="前端样式(CSS class)"
     )
@@ -92,7 +99,7 @@ class DictData(Base, IdMixin, TimestampMixin):
 
 
 # DB 约束名 → 业务错误码（IntegrityError handler 据此把竞态 500 翻成 409；含 unique / FK /
-# partial index，均经 asyncpg orig.constraint_name 提取）。错误码常量见 service.py。
+# 生成列唯一索引）。错误码常量见 service.py。
 register_unique_constraint(
     "uq_dict_types_type",
     "dict.TYPE_DUPLICATE",
@@ -103,7 +110,7 @@ register_unique_constraint(
     "dict.DATA_DUPLICATE",
     "Dict data value already exists in this type",
 )
-# 单默认值 partial unique index 竞态兜底 → dict.DEFAULT_DUPLICATE（对抗审查 B1）。
+# 单默认值生成列唯一索引竞态兜底 → dict.DEFAULT_DUPLICATE（对抗审查 B1）。
 register_unique_constraint(
     "uq_dict_data_one_default_per_type",
     "dict.DEFAULT_DUPLICATE",

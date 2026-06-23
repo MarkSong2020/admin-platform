@@ -1,4 +1,4 @@
-"""登录 API 集成测试（需本地 DB：make compose-up + make migrate）。
+"""登录 API 集成测试（MySQL）。
 
 覆盖验收（成功拿 token / 错密码 401 / 未知用户 401 / 停用用户 401）。
 """

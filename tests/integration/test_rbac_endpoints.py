@@ -13,7 +13,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from admin_platform.api.v1.rbac import router as rbac_router
 from admin_platform.core.auth import CurrentUser, require_current_user
@@ -32,15 +32,13 @@ from admin_platform.domains.user.api import router as user_router
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
 from admin_platform.rbac.seed import seed_rbac
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(
-            text("TRUNCATE TABLE role_menus, user_roles, menus, roles, users CASCADE")
-        )
+    await truncate_tables("role_menus", "user_roles", "menus", "roles", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

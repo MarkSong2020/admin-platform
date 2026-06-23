@@ -36,18 +36,19 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_dict_types_status"),
+        sa.CheckConstraint("is_builtin IN (0, 1)", name="ck_dict_types_is_builtin_bool"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("type", name="uq_dict_types_type"),
     )
@@ -66,37 +67,43 @@ def upgrade() -> None:
         sa.Column("sort_order", sa.Integer(), nullable=False, comment="显示顺序"),
         sa.Column("status", sa.String(length=16), nullable=False, comment="状态(active/disabled)"),
         sa.Column("is_default", sa.Boolean(), nullable=False, comment="是否默认(同类型仅一条)"),
+        sa.Column(
+            "default_unique_key",
+            sa.Integer(),
+            sa.Computed("CASE WHEN is_default = 1 THEN 1 ELSE NULL END", persisted=True),
+            nullable=True,
+            comment="MySQL生成列: is_default=true时为1,否则NULL",
+        ),
         sa.Column("css_class", sa.String(length=128), nullable=True, comment="前端样式(CSS class)"),
         sa.Column("remark", sa.String(length=255), nullable=True, comment="备注"),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_dict_data_status"),
+        sa.CheckConstraint("is_default IN (0, 1)", name="ck_dict_data_is_default_bool"),
         sa.ForeignKeyConstraint(
             ["dict_type_id"], ["dict_types.id"], ondelete="RESTRICT", name="fk_dict_data_type_id"
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("dict_type_id", "value", name="uq_dict_data_type_value"),
     )
-    # 单默认值不变式（DB 兜底，对抗审查 B1）：同类型至多一行 is_default=true（partial unique index，
-    # 镜像 0003 单超管约束）。
+    # 单默认值不变式（DB 兜底，对抗审查 B1）：MySQL 生成列 + unique 实现条件唯一语义。
     op.create_index(
         "uq_dict_data_one_default_per_type",
         "dict_data",
-        ["dict_type_id"],
+        ["dict_type_id", "default_unique_key"],
         unique=True,
-        postgresql_where=sa.text("is_default"),
     )
     op.create_index(
         "ix_dict_data_type_sort",

@@ -4,7 +4,7 @@
 import domains），但 domains 的**实现**可以反向依赖 authz 抽象 —— 这里就是把抽象落到 DB。
 
 **sync→async 桥**（关键约束）：``PermissionProvider`` 抽象方法是**同步**的，``require_permission``
-依赖（``core/permissions.py``，红线不可改）也同步调用它们；而本仓 DB 栈是纯 async（asyncpg）。
+依赖（``core/permissions.py``，红线不可改）也同步调用它们；而本仓 DB 栈是纯 async。
 FastAPI 把同步依赖跑在 threadpool worker 线程，故同步方法用 ``anyio.from_thread.run`` 桥回宿主
 事件循环执行协程（worker 线程由 ``anyio.to_thread.run_sync`` 派生，支持 ``from_thread``）。
 异步内核（``a_*`` 方法 + 纯函数 ``compute_effective_data_scope``）可在 pytest-asyncio 里直接

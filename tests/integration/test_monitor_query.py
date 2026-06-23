@@ -12,7 +12,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.audit.models import AuditEventLog
 from admin_platform.authz.permissions import Permissions
@@ -25,6 +24,7 @@ from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.auth.models import LoginLog
 from admin_platform.domains.monitor.api import router as monitor_router
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -65,8 +65,7 @@ class _NoLogPermProvider(PermissionProvider):
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE audit_events, login_logs CASCADE"))
+    await truncate_tables("audit_events", "login_logs")
 
 
 async def _seed_audit(n: int, *, event_type: str = "rbac_write", status: str = "success") -> None:

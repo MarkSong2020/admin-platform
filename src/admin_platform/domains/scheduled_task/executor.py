@@ -2,7 +2,7 @@
 
 **两段 session（Codex 风险 #5 + 多 worker 红线）**：
 1. claim session：建 running 日志并提交——让 claim 立即对其他 worker 可见，且 schedule 触发的
-   ``(task_id, scheduled_at)`` partial unique 在 INSERT 时即生效（failover 窗口两 worker 同触发，
+   ``(task_id, scheduled_at)`` 生成列唯一索引在 INSERT 时即生效（failover 窗口两 worker 同触发，
    只有一条成功，另一条撞唯一约束 → 跳过）。
 2. handler 在**事务外**跑（不长持事务/连接）。
 3. result session：写回 success/failure + 任务 last_run，提交。
@@ -21,8 +21,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from admin_platform.db.locks import (
+    acquire_transaction_lock,
+    app_lock_name,
+    ensure_transaction_lock_row,
+)
 from admin_platform.db.session import db_session
 from admin_platform.domains.scheduled_task.cron import CronValidationError, scheduled_tick_at
 from admin_platform.domains.scheduled_task.models import ScheduledTaskLog
@@ -37,6 +42,14 @@ _DEFAULT_STALE_SECONDS = 3600
 # manual 手动触发经同步 HTTP 执行，长占请求连接/事务（schedule 后台触发不占）：manual 路径强制
 # 兜底超时上限，最长 5min；task.timeout_seconds=None（不设）时也兜底，schedule 仍用任务级值（可至 86400）。
 _MANUAL_RUN_MAX_TIMEOUT = 300
+_SCHEDULED_TASK_CLAIM_LOCK_NAMESPACE = "scheduled-task:claim"
+# claim 去重生成列唯一索引名（须与 models.ScheduledTaskLog 的 Index 名一致）：
+# 只有撞它才算「被其他 worker 抢占」，其它 IntegrityError 上抛（不静默吞）。
+_CLAIM_UNIQUE_INDEX = "uq_scheduled_task_logs_schedule_claim"
+_MYSQL_DEADLOCK = 1213
+_MYSQL_DUPLICATE = 1062
+_CLAIM_LOCK_RETRY_LIMIT = 3
+_CLAIM_LOCK_RETRY_BACKOFF_SECONDS = 0.02
 
 # F6：执行日志脱敏兜底——error_message / result_summary 可能含 handler 异常里的连接串/密钥
 # （admin-only 日志，但 handler registry 是扩展点，纵深防御屏蔽常见敏感模式胜过裸写）。
@@ -49,6 +62,39 @@ _SECRET_PATTERN = re.compile(
 def _redact(text: str) -> str:
     """屏蔽常见敏感模式（key=value / key:value 形式的密钥 + URL 内嵌凭据）。"""
     return _SECRET_PATTERN.sub("***REDACTED***", text)
+
+
+def _mysql_error_code(exc: BaseException) -> int | None:
+    orig = getattr(exc, "orig", None)
+    for candidate in (orig, exc):
+        args = getattr(candidate, "args", ())
+        if args and isinstance(args[0], int):
+            return int(args[0])
+    return None
+
+
+def _is_claim_taken(exc: IntegrityError) -> bool:
+    """IntegrityError 是否为 schedule claim 生成列唯一索引冲突（被其他 worker 抢占 → 跳过）。
+
+    先确认 MySQL 1062 duplicate-entry 错误码，再匹配 claim 索引名（codex 对抗审查 #4 + 第二轮）：
+    execution_id unique 也是 1062 但 key 名不同 → 被第二段挡下；CHECK/FK 等非 1062 → 第一段直接
+    False。两段都不命中即真实约束错误，必须上抛，不能伪装成「被抢占」掩盖数据/程序错误。
+    """
+    if _mysql_error_code(exc) != _MYSQL_DUPLICATE:
+        return False
+    return _CLAIM_UNIQUE_INDEX in str(exc.orig)
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    """MySQL DATETIME 经 asyncmy 读回为 naive；本仓约定其语义是 UTC。"""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _as_utc_for_storage(value: datetime) -> datetime:
+    """写入库前统一成 UTC；MySQL DATETIME 不保存 timezone 信息。"""
+    return _as_utc_aware(value)
 
 
 @dataclass(frozen=True)
@@ -111,13 +157,49 @@ class TaskExecutor:
     ) -> tuple[int, str, dict, int | None, bool] | None:
         """claim session：建日志。返回 (log_id, handler_key, params, timeout, skipped) 或 None。
 
-        None = 任务已删 / schedule claim 被其他 worker 抢占（partial unique 冲突）。
+        None = 任务已删 / schedule claim 被其他 worker 抢占（生成列唯一索引冲突）。
         skipped=True = allow_concurrent=False 且已有 running（记 skipped 日志，不执行）。
         """
+        await ensure_transaction_lock_row(
+            app_lock_name(_SCHEDULED_TASK_CLAIM_LOCK_NAMESPACE, task_id)
+        )
+        for attempt in range(_CLAIM_LOCK_RETRY_LIMIT):
+            try:
+                return await self._claim_once(
+                    task_id,
+                    trigger_type=trigger_type,
+                    scheduled_at=scheduled_at,
+                    actor_user_id=actor_user_id,
+                    execution_id=execution_id,
+                )
+            except DBAPIError as exc:
+                if (
+                    _mysql_error_code(exc) != _MYSQL_DEADLOCK
+                    or attempt == _CLAIM_LOCK_RETRY_LIMIT - 1
+                ):
+                    raise
+                await asyncio.sleep(_CLAIM_LOCK_RETRY_BACKOFF_SECONDS * (2**attempt))
+        return None
+
+    async def _claim_once(
+        self,
+        task_id: int,
+        *,
+        trigger_type: str,
+        scheduled_at: datetime | None,
+        actor_user_id: int | None,
+        execution_id: uuid.UUID,
+    ) -> tuple[int, str, dict, int | None, bool] | None:
+        """单次 claim 事务；MySQL 1213 由外层重开事务重试。"""
         try:
             async with db_session() as session:
                 repo = ScheduledTaskRepository(session)
-                # FOR UPDATE 锁任务行：串行化同一任务的并发触发（含 manual，无 partial unique 兜底），
+                # app_locks sentinel 按 task_id 粒度串行化 claim 临界区，避免照搬阶段 0 PoC 的全局锁
+                # 导致不同任务互相阻塞。随后再 FOR UPDATE 锁任务行，保留任务删除/更新的行级一致性。
+                await acquire_transaction_lock(
+                    session, app_lock_name(_SCHEDULED_TASK_CLAIM_LOCK_NAMESPACE, task_id)
+                )
+                # FOR UPDATE 锁任务行：串行化同一任务的并发触发（含 manual，无生成列唯一索引兜底），
                 # 把 count_running 检查 + claim INSERT 收进同一行锁临界区，消除 TOCTOU。
                 task = await repo.get_for_update(task_id)
                 if task is None:
@@ -135,7 +217,9 @@ class TaskExecutor:
                         )
                     except CronValidationError:
                         tick = None  # 防御：cron 被并发改非法（reconcile 已挡，几不可达）→ 墙钟兜底
-                    scheduled_at = tick or now_.replace(second=0, microsecond=0)
+                    scheduled_at = _as_utc_for_storage(
+                        tick or now_.replace(second=0, microsecond=0)
+                    )
                 stale_seconds = task.timeout_seconds or _DEFAULT_STALE_SECONDS
                 since = datetime.now(UTC) - timedelta(seconds=stale_seconds)
                 concurrency_skip = (
@@ -162,9 +246,12 @@ class TaskExecutor:
                     task.timeout_seconds,
                     concurrency_skip,
                 )
-        except IntegrityError:
-            # schedule claim 撞 (task_id, scheduled_at) partial unique → 已被其他 worker 抢占。
-            return None
+        except IntegrityError as exc:
+            # 只把 claim 生成列唯一索引的 1062 冲突当作「被其他 worker 抢占」→ 跳过；execution_id
+            # unique / CHECK / FK 等真实约束错误必须上抛（详见 _is_claim_taken）。
+            if _is_claim_taken(exc):
+                return None
+            raise
 
     async def _invoke(
         self, handler_key: str, params: dict, timeout_seconds: int | None
@@ -213,7 +300,9 @@ class TaskExecutor:
                 log.error_message = error_message
                 log.result_summary = result_summary
                 if log.started_at is not None:
-                    log.duration_ms = int((now - log.started_at).total_seconds() * 1000)
+                    log.duration_ms = int(
+                        (now - _as_utc_aware(log.started_at)).total_seconds() * 1000
+                    )
             task = await repo.get(task_id)
             if task is not None:
                 await repo.mark_task_last_run(task, status=status, when=now)

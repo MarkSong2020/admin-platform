@@ -30,6 +30,8 @@ def _load_all_domain_models() -> None:
         except ModuleNotFoundError:
             # 该 domain 还没长出 models.py（仅 api/service 等）—— 跳过。
             continue
+    # app_locks 是 DB 基础设施表，不属于业务 domains，但同样受列 comment 门禁约束。
+    importlib.import_module("admin_platform.db.locks")
 
 
 def test_every_orm_column_has_comment() -> None:

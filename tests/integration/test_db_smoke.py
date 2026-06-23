@@ -1,4 +1,4 @@
-"""Smoke tests against the compose Postgres — proves connectivity end-to-end."""
+"""Smoke tests against the compose MySQL database — proves connectivity end-to-end."""
 
 import pytest
 from httpx import AsyncClient

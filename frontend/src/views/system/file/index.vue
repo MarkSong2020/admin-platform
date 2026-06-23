@@ -28,6 +28,23 @@ const table = useCrudTable<FileRead, Record<string, never>>({
 })
 
 const uploadRef = ref<UploadInstance>()
+const UPLOAD_REFRESH_RETRY_DELAYS_MS = [0, 50, 150] as const
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function refreshUntilUploadedVisible(created: FileRead): Promise<void> {
+  table.page.value = 1
+  for (const delay of UPLOAD_REFRESH_RETRY_DELAYS_MS) {
+    if (delay > 0) await wait(delay)
+    const page = await listFiles({ page: 1, size: table.size.value })
+    table.rows.value = page.items
+    table.total.value = page.total
+    if (table.rows.value.some((row) => row.id === created.id)) return
+  }
+  ElMessage.info('上传成功，列表稍后会显示最新文件')
+}
 
 /**
  * el-upload :auto-upload=false 时 before-upload 不触发（仅 autoUpload 走 upload()），
@@ -36,12 +53,19 @@ const uploadRef = ref<UploadInstance>()
  */
 async function handleFileChange(file: UploadFile): Promise<void> {
   if (file.status !== 'ready' || !file.raw) return
+  let created: FileRead
   try {
-    const created = await uploadFile(file.raw)
-    ElMessage.success(`上传成功：${created.original_filename}`)
-    await table.refresh()
+    created = await uploadFile(file.raw)
   } catch (err) {
     ElMessage.error(normalizeApiError(err).message)
+    uploadRef.value?.clearFiles()
+    return
+  }
+  ElMessage.success(`上传成功：${created.original_filename}`)
+  try {
+    await refreshUntilUploadedVisible(created)
+  } catch (err) {
+    ElMessage.warning(`上传成功，但列表刷新失败：${normalizeApiError(err).message}`)
   } finally {
     uploadRef.value?.clearFiles()
   }

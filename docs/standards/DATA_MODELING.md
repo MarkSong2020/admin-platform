@@ -9,7 +9,7 @@
 ## 现状
 
 - ✅ `IdMixin` / `TimestampMixin` 落地（`db/base.py`，与模板同款）
-- ✅ `users` 采用 mixin：BIGINT `id` + `created_at` / `updated_at`（timestamptz、均带中文 comment）；迁移 `0002_users`
+- ✅ `users` 采用 mixin：BIGINT `id` + `created_at` / `updated_at`（MySQL `DATETIME`，应用层 `UTCDateTime` 统一 UTC，均带中文 comment）；迁移 `0002_users`
 - ✅ 全列中文 comment 回填；迁移同步（`make check-db` 比对 comment 零漂移）
 - ✅ comment 门禁 `tests/unit/test_column_comments.py`（自动发现 domain），与模板同款
 - ✅ schema 速览 `scripts/dump_schema.py` 渲染列 comment

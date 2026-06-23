@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from admin_platform.db.base import Base, IdMixin, TimestampMixin
+from admin_platform.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
 
 
 class File(Base, IdMixin, TimestampMixin):
@@ -45,5 +45,5 @@ class File(Base, IdMixin, TimestampMixin):
         String(16), default="active", comment="状态(active/deleted)"
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="软删时间(NULL=未删)"
+        UTCDateTime(), nullable=True, comment="软删时间(NULL=未删)"
     )

@@ -11,7 +11,7 @@
 #
 # Topology assumptions (must match docs/operations/DEPLOYMENT.md):
 #   - uvicorn single-worker per pod (NOT --workers N). Scale = pod count.
-#   - PostgreSQL + Redis are managed services with secrets injected.
+#   - MySQL + Redis are managed services with secrets injected.
 #   - Idempotency requires Redis single-node OR primary-replica with sync
 #     replication; see docs/tech-debt/KNOWN_DEVIATIONS.md #12 for the
 #     Cluster failover caveat.
@@ -64,7 +64,7 @@ metadata:
   namespace: ${SERVICE_NAME}
 type: Opaque
 stringData:
-  APP_DATABASE_URL: "postgresql+asyncpg://USER:PASS@HOST:5432/DB"
+  APP_DATABASE_URL: "mysql+asyncmy://USER:PASS@HOST:3306/DB"
   APP_REDIS_URL: "redis://HOST:6379/0"
 
 ---
@@ -136,7 +136,7 @@ spec:
           resources:
             requests:
               # Single-worker async uvicorn — CPU is bursty around request
-              # serialisation. Memory floor for SQLAlchemy + asyncpg pools.
+              # serialisation. Memory floor for SQLAlchemy + asyncmy pools.
               cpu: "200m"
               memory: "256Mi"
             limits:

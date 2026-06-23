@@ -13,7 +13,9 @@
 1. 看 server log 找最近一条 `service_name.errors` 含 stack trace 的记录（debug=True 时才有）
 2. 直接连 DB 验证：
    ```bash
-   psql "$APP_DATABASE_URL"  # 或 docker exec into pg container 跑 SELECT 1;
+   mysql --defaults-extra-file="$HOME/.my.cnf" \
+     --init-command="SET time_zone = '+00:00'" \
+     -e "SELECT 1;"  # ~/.my.cnf 权限 600；手工会话也固定 UTC，避免 CURRENT_TIMESTAMP 写入本地墙钟
    ```
 3. 检查 pod 网络：DB host 在 K8s 内是否可达（NetworkPolicy / DNS 解析）
 
@@ -30,12 +32,18 @@
 **根因**：P0.9 单租户回归（2026-06-05）**重写了 `0002` 迁移**（同 revision id，内容从多租户 `tenants`/`users` 改为单租户 `users`）。已跑过**旧** `0002_p0_tenant_user` 的库，`alembic_version` 已记 `0002` applied，`alembic upgrade head` 不会重跑新 `0002` 的 DDL → 残留旧多租户结构。
 
 **解决**（dev/CI 库，无生产数据）：
+
+> PostgreSQL 历史库排障路径；当前 MySQL 本地迁移链另按 `make migrate` 执行，生产 / 共享库仍需单独授权。
+
 ```bash
-docker compose down -v            # 删数据卷
-make compose-up && make migrate   # 全新跑迁移链 0001 → 0002 users
+# 仅在迁移前 PostgreSQL 历史分支 / tag 上执行；当前 MySQL 分支不要照抄本段。
+git checkout <postgres-history-branch-or-tag>
+docker compose down -v            # 删历史 dev 数据卷
+make compose-up                   # 历史 PostgreSQL compose：起一次性 DB
+make migrate                      # 历史迁移链：全新跑 0001 → 0002 users
 make check-db                     # 应零漂移
 ```
-fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
+fresh clone / 全新 PostgreSQL 历史基线 DB 无此问题。
 
 > 这是"重写已 applied 迁移"的固有要求。若将来有**不可重建**的持久库，必须改用新 `0003` 做显式转换（drop `tenant_id`/`tenants`），而非重写 `0002`。
 
@@ -46,7 +54,7 @@ fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
 **诊断**：
 1. 端点是否标了 `@idempotent`？
    ```bash
-   grep -B2 "def create_" src/<service>/domains/<name>/api.py
+   rg -B2 "def create_" src/<service>/domains/<name>/api.py
    ```
    没标的 POST 路由**默认不缓存**——`IdempotencyMiddleware` 跳过它。
 2. Redis 是否可达？
@@ -57,7 +65,7 @@ fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
 3. `Idempotency-Key` header 是否真带了？
    middleware 收不到 header 时 log warning 但放行：
    ```bash
-   grep "idempotent route invoked without" /var/log/app.log
+   rg "idempotent route invoked without" /var/log/app.log
    ```
 
 **修复**：
@@ -97,12 +105,13 @@ fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
 **症状**：pod READY 但请求超时或 5xx。
 
 **诊断**：
-- Redis / DB lazy 连——`Redis.from_url` / `create_async_engine` 都不在 lifespan 主动连
-- 第一次请求才触发；如 Redis host 错，第一次 idempotency 请求会失败但 log only warning（middleware 降级）
-- DB host 错，第一次 `/readyz` 才暴露
+- 生产/K8s 建议开启 `APP_STARTUP_EAGER_CONNECT=true`（模板已配）：startup 阶段会主动探 DB / Redis，
+  配置错误会卡在 startupProbe 而不是等第一笔业务请求暴露
+- 本地/dev 默认仍可 lazy 连：如 Redis host 错，第一次 idempotency 请求会失败但 log only warning（middleware 降级）
+- DB host 错，`/readyz` 一定暴露；若已开 eager connect，`/startupz` 也会提前暴露
 
 **修复 / 缓解**：
-- K8s 起 startupProbe `/startupz`（已在 [DEPLOYMENT.md](./DEPLOYMENT.md)）但**不**强制依赖就绪——这是已知偏差，见 [../tech-debt/KNOWN_DEVIATIONS.md](../tech-debt/KNOWN_DEVIATIONS.md) #5
+- K8s 起 startupProbe `/startupz`（已在 [DEPLOYMENT.md](./DEPLOYMENT.md)）并保持 `APP_STARTUP_EAGER_CONNECT=true`
 - 部署前 smoke test：`curl /readyz` 必 200
 
 ## Migration autogenerate 出 `NameError`
@@ -130,9 +139,9 @@ fresh clone / 全新 DB 无此问题（直接 `make migrate`）。
 
 **修复**：恢复 `addLevelName` 调用 + 跑 `tests/unit/test_logging.py` 守门。
 
-## 迁移 0017 / 0020：生产大表执行（锁 / 回填 / CONCURRENTLY 中断恢复）
+## 迁移 0017 / 0020：PostgreSQL 历史生产大表执行（锁 / 回填 / CONCURRENTLY 中断恢复）
 
-> `0013–0020` 仅本地 dev + CI 临时容器跑过（见 [DEPLOYMENT.md](./DEPLOYMENT.md) 迁移 gated 段）。
+> `0013–0020` 是 PostgreSQL 历史迁移说明；MySQL 迁移后的当前迁移链不再按本节执行 PostgreSQL 专用 DDL。
 > 生产 / 共享库**首跑前**按本节评估——这两条是迁移链里唯二碰大表 / 长锁的。
 
 ### 0020 — audit_events / login_logs 分页复合索引
@@ -153,7 +162,7 @@ psql "$APP_DATABASE_URL" -c "SELECT relname, n_live_tup, pg_size_pretty(pg_total
 psql "$APP_DATABASE_URL" -c "SELECT pid, state, now()-xact_start AS age, left(query,60) FROM pg_stat_activity WHERE state <> 'idle' ORDER BY age DESC LIMIT 5;"
 ```
 
-**执行**：`make migrate`（= `alembic upgrade head`）。建议先 `alembic upgrade 0019:0020 --sql`
+**PostgreSQL 历史执行**：`make migrate`（= `alembic upgrade head`）。建议先 `alembic upgrade 0019:0020 --sql`
 导出 SQL 交 DBA 审。建索引期间另开连接监控：
 ```sql
 SELECT now()-query_start AS dur, query FROM pg_stat_activity WHERE query LIKE 'CREATE INDEX CONCURRENTLY%';
@@ -191,7 +200,7 @@ alembic -x refresh_absolute_ttl_seconds=<历史秒数> upgrade 0017
 ```bash
 psql "$APP_DATABASE_URL" -c "SELECT count(*), count(DISTINCT family_id) FROM auth_refresh_tokens;"
 ```
-体量小（典型 < 数十万行）→ 直接 `make migrate`；若异常大，先评估 `UPDATE` 时长再排窗口。
+PostgreSQL 历史库体量小（典型 < 数十万行）→ 直接 `make migrate`；若异常大，先评估 `UPDATE` 时长再排窗口。
 
 ## 其它
 

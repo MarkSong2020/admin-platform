@@ -6,7 +6,7 @@ opening a transaction, so handler-side ``session.flush()`` writes were
 silently rolled back at ``session.close()``. Every generator-produced
 ``create/update/delete`` was a no-op against the database.
 
-These tests prove, against a real Postgres, that:
+These tests prove, against a real MySQL database, that:
 
   1. a 2xx-returning handler COMMITs its writes (next request can read them)
   2. a handler that raises ROLLBACKs all writes from the same request

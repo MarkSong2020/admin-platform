@@ -1,7 +1,7 @@
 """Menu ORM 映射 — 表 ``menus``（菜单树，邻接表）+ 关联表 ``role_menus``（角色 ↔ 菜单）。
 
 菜单树镜像 dept 树存储（O1：邻接表 ``parent_id`` 自引用，几百节点、深度 <10，闭包表 / 路径
-枚举属过度工程）。查子孙用 PostgreSQL recursive CTE（见 ``repository.py``），删父防有子复用。
+枚举属过度工程）。查子孙用 SQL recursive CTE（见 ``repository.py``），删父防有子复用。
 ``parent_id`` 外键 ``ondelete=RESTRICT``：DB 层硬保证有子菜单时禁删父；service 另做友好 409
 预检（``menu.HAS_CHILDREN``）。
 
@@ -25,7 +25,6 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,16 +39,14 @@ class Menu(Base, IdMixin, TimestampMixin):
         CheckConstraint("menu_type IN ('M', 'C', 'F')", name="ck_menus_menu_type"),
         # status 枚举约束：只允许 active / disabled（与 schemas Literal 对齐）。
         CheckConstraint("status IN ('active', 'disabled')", name="ck_menus_status"),
-        # 防自环：parent_id 不能指向自身（移动成环的更深检测在 service 层用子孙集合做）。
-        CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_menus_not_self_parent"),
+        CheckConstraint("visible IN (0, 1)", name="ck_menus_visible_bool"),
         # 按父节点取子节点并排序的复合索引（建树 / 同级排序的主查询路径）。
         Index("ix_menus_parent_sort", "parent_id", "sort_order", "id"),
-        # seed_key 部分唯一（仅非空）：rbac seed 幂等 upsert 的锚点（§13.1），保证内置菜单唯一。
+        # seed_key 唯一：MySQL unique 允许多个 NULL，天然只约束非空 seed_key。
         Index(
             "uq_menus_seed_key",
             "seed_key",
             unique=True,
-            postgresql_where=text("seed_key IS NOT NULL"),
         ),
     )
 

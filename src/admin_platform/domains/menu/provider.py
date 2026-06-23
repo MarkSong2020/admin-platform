@@ -5,7 +5,7 @@ domains），但 domains 的**实现**可以反向依赖 authz 抽象 —— 这
 
 **sync→async 桥**（关键约束，镜像 ``domains.role.provider.DbPermissionProvider``）：
 ``MenuProvider.get_user_menu_tree`` 抽象方法是**同步**的（与 ``require_permission`` 同步依赖
-对齐），而本仓 DB 栈是纯 async（asyncpg）。FastAPI 把同步依赖跑在 threadpool worker 线程，故
+对齐），而本仓 DB 栈是纯 async。FastAPI 把同步依赖跑在 threadpool worker 线程，故
 同步方法用 ``anyio.from_thread.run`` 桥回宿主事件循环执行协程。异步内核 ``a_get_user_menu_tree``
 + 纯函数 ``assemble_menu_forest`` 可在 pytest-asyncio 里直接 ``await`` 单测，桥只在生产 HTTP 路径生效。
 
@@ -33,7 +33,7 @@ def assemble_menu_forest(menus: list[Menu]) -> list[MenuNode]:
 
     每层按 ``(sort_order, id)`` 排序。父不在集合内的节点（被可见性 / status 过滤掉父）提升为根，
     保证授予的子菜单不因父缺失而丢失（对标若依按 id 集合建树）。数据成环时（FK ck 已防自环、
-    service advisory lock 防深环）只下挂能从根可达的节点，不会无限递归。
+    service 事务级行锁防深环）只下挂能从根可达的节点，不会无限递归。
     """
     by_id = {menu.id: menu for menu in menus}
     children: dict[int | None, list[Menu]] = {}

@@ -11,10 +11,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
-from sqlalchemy import ColumnElement, Select, delete, func, select, text
+from sqlalchemy import ColumnElement, Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.core.pagination import SortColumn, SortExpr, ilike_contains
+from admin_platform.db.locks import acquire_transaction_lock
 from admin_platform.domains.role.models import Role, RoleDept, UserRole
 from admin_platform.domains.role.schemas import RoleCreate, RoleListQuery, RoleUpdate
 
@@ -35,11 +36,11 @@ def _role_filters(query: RoleListQuery) -> list[ColumnElement[bool]]:
     return conds
 
 
-# pg_advisory_xact_lock 的稳定 key —— 串行化绑定表「先删后插」的全量替换（Codex 深审 F3）：
+# app_locks 稳定锁名 —— 串行化绑定表「先删后插」的全量替换（Codex 深审 F3）：
 # 并发两请求替换同一目标时，避免最终变成两请求的并集 / 撞 uq。事务级锁，提交/回滚自动释放。
-# 与 dept 的 _DEPT_TREE_LOCK_KEY(478221) 取不同值避免跨域互锁。绑定是低频管理写，全局串行可接受。
-_USER_ROLES_LOCK_KEY = 478231  # 串行化 user_roles 替换
-_ROLE_DEPTS_LOCK_KEY = 478232  # 串行化 role_depts 替换
+# 绑定是低频管理写，保持既有全局串行粒度。
+_USER_ROLES_LOCK_NAME = "role:user-roles"
+_ROLE_DEPTS_LOCK_NAME = "role:role-depts"
 
 
 class RoleRepository:
@@ -137,13 +138,11 @@ class RoleRepository:
     async def set_user_roles(self, user_id: int, role_ids: list[int]) -> None:
         """全量替换用户的角色绑定（去重；空列表 = 解绑所有角色）。
 
-        先取事务级 advisory lock 串行化「先删后插」（Codex 深审 F3）：并发两请求替换
+        先取事务级行锁串行化「先删后插」（Codex 深审 F3）：并发两请求替换
         同一/不同用户的绑定时，避免最终落成两请求的并集或撞 ``uq_user_roles``。提交/回滚
         自动释放锁。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_USER_ROLES_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _USER_ROLES_LOCK_NAME)
         await self._session.execute(delete(UserRole).where(UserRole.user_id == user_id))
         await self._session.flush()
         for role_id in dict.fromkeys(role_ids):
@@ -153,11 +152,9 @@ class RoleRepository:
     async def set_role_depts(self, role_id: int, dept_ids: list[int]) -> None:
         """全量替换角色的自定义部门绑定（去重；空列表 = 清空自定义部门）。
 
-        同 ``set_user_roles``：事务级 advisory lock 串行化「先删后插」（Codex 深审 F3）。
+        同 ``set_user_roles``：事务级行锁串行化「先删后插」（Codex 深审 F3）。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_ROLE_DEPTS_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _ROLE_DEPTS_LOCK_NAME)
         await self._session.execute(delete(RoleDept).where(RoleDept.role_id == role_id))
         await self._session.flush()
         for dept_id in dict.fromkeys(dept_ids):

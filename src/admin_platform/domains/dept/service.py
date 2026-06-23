@@ -83,8 +83,8 @@ class DeptService:
             # 数据权限不可见 = 当作不存在（不泄露存在性）。
             raise self._not_found(item_id)
         await self._check_code_unique(existing, payload)
-        # 移动校验：payload 显式包含 parent_id（含移到根 None）即进树写串行化 —— 先拿 advisory
-        # lock，锁内做数据范围 + 父存在 + 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动
+        # 移动校验：payload 显式包含 parent_id（含移到根 None）即进树写串行化 —— 先拿 app_locks
+        # 事务级行锁，锁内做数据范围 + 父存在 + 防环校验，关掉 _check_no_cycle 的 TOCTOU 窗口（并发移动
         # A→B、B→A 各自都过、提交后成环）。⚠️ 必须覆盖 parent_id=None（Codex 深审越权）：否则
         # 非超管显式把可见部门提升到根可绕过「建根需 ALL」不变式（与 create 数据范围校验同口径）。
         if "parent_id" in payload.model_fields_set:

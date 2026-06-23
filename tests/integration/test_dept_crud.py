@@ -8,7 +8,7 @@
     override 模拟登录），code 重复 409、有子禁删 409、删叶 204。
 
 部门树自引用 FK ``ondelete=RESTRICT``：批量 ``DELETE`` 会触发即时约束检查（无法保证子先于父删），
-故清表用 ``TRUNCATE``（PostgreSQL 允许对自引用表 TRUNCATE）。
+故清表经 MySQL helper 临时关闭外键检查后逐表 TRUNCATE。
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -28,9 +27,9 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine, get_sessionmaker
-from admin_platform.db.session import db_session
 from admin_platform.domains.dept.api import router as dept_router
 from admin_platform.domains.dept.repository import DeptRepository
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -94,8 +93,7 @@ def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncC
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE depts CASCADE"))
+    await truncate_tables("depts")
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -16,17 +16,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_platform.authz.permissions import Permissions
+from admin_platform.db.locks import acquire_transaction_lock
 from admin_platform.domains.menu.models import Menu
 from admin_platform.domains.role.models import Role
 
-# pg_advisory_xact_lock 的稳定 key —— 串行化 seed 全过程（Codex 系统级 PK）：防两个并发
+# app_locks 稳定锁名 —— 串行化 seed 全过程（Codex 系统级 PK）：防两个并发
 # `rbac seed`（多实例部署初始化）同时从空库启动时撞 roles.code / menus.seed_key 唯一约束。
-# 事务级锁，提交/回滚自动释放。取与各域绑定锁（478221-478251）不同的值避免互锁。
-_SEED_LOCK_KEY = 478261
+# 事务级锁，提交/回滚自动释放。
+_SEED_LOCK_NAME = "rbac:seed"
 
 
 @dataclass(frozen=True)
@@ -399,8 +400,8 @@ async def seed_rbac(session: AsyncSession) -> SeedResult:
     """幂等 apply manifest（菜单按 seed_key、角色按 code），返回统计。重跑结果一致。"""
     result = SeedResult()
 
-    # 0) advisory lock 串行化整个 seed（并发重跑防撞唯一约束，Codex 系统级 PK）。
-    await session.execute(text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_SEED_LOCK_KEY))
+    # 0) app_locks 行锁串行化整个 seed（并发重跑防撞唯一约束，Codex 系统级 PK）。
+    await acquire_transaction_lock(session, _SEED_LOCK_NAME)
 
     # 1) 角色：按 code upsert（用户自建角色 code 不同 → 不碰）。
     for sr in ROLES:
