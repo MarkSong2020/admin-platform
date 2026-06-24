@@ -9,7 +9,8 @@
 git clone <repo-url> admin-platform && cd admin-platform
 make init                       # 装依赖（uv sync --all-extras --dev）
 uv run pre-commit install       # 必须：装 git hook
-make compose-up && make migrate # 起 PostgreSQL + 应用迁移
+make compose-up                 # 起 MySQL
+make migrate                    # 本地 MySQL 执行 Alembic 迁移
 make dev                        # 起服务 → http://127.0.0.1:8000
 ```
 
@@ -21,7 +22,7 @@ make dev                        # 起服务 → http://127.0.0.1:8000
 |---|---|---|
 | Python | **3.14**（`pyproject.toml` 的 `requires-python = ">=3.14"`） | 由 uv 管理，不强制系统全局装 |
 | uv | 0.9+ | 依赖 / venv / Python 版本一体化管理 |
-| PostgreSQL | 16（`make compose-up` 起 `postgres:16-alpine`） | 主数据库；可用本机已有实例替代 |
+| MySQL | 8.0（`make compose-up` 起 `mysql:8.0`，目标实例需 ≥ 8.0.16） | 主数据库；可用本机已有实例替代 |
 | Redis | 7.x（可选） | 仅幂等 / 缓存 / 验证码 / 登录限流用，默认 lazy 连，本地不强制起 |
 | Docker | 任意现代版本 | 起依赖容器；推荐 OrbStack（Mac） |
 | Make | macOS/Linux 自带 | 所有命令入口 |
@@ -46,16 +47,16 @@ uv run pre-commit install  # ⚠️ 必须：装 git hook
 
 > **`uv run pre-commit install` 不能漏**：`pre-commit` 已随 `make init` 装进 dev 依赖，但 `.pre-commit-config.yaml` 描述的 git hook 必须显式 `install` 才生效。漏装 → 首次 `git commit` 时 ruff-format 会改文件、commit 失败，新人常误以为环境坏了。
 
-## 4. 起依赖容器 + 应用迁移
+## 4. 起依赖容器
 
 ```bash
-make compose-up   # docker compose up -d --wait db（起 PostgreSQL 并等到 healthy）
-make migrate      # alembic upgrade head（应用全部 Alembic 迁移）
+make compose-up   # docker compose up -d --wait db（起 MySQL 并等到 healthy）
+make migrate      # 本地 MySQL 执行 Alembic 迁移（生产/共享库仍需单独授权）
 ```
 
-可选：想真测 Redis 相关功能（验证码 / 登录限流 / 幂等）用 `make compose-up-cache` 起 Postgres + Redis（profile=cache）。
+可选：想真测 Redis 相关功能（验证码 / 登录限流 / 幂等）用 `make compose-up-cache` 起 MySQL + Redis（profile=cache）。
 
-> **数据库连接**：默认连 `postgresql+asyncpg://app:app@localhost:5432/app`（与 `make compose-up` 起的容器一致）。要连别的库或开启鉴权，在仓库根建 `.env`（参照 `.env.example`），配置项统一带 `APP_` 前缀（如 `APP_DATABASE_URL`、`APP_AUTH_ENABLED`、`APP_AUTH_JWT_SECRET`）。
+> **数据库连接**：默认连 `mysql+aiomysql://app:app@localhost:3306/app`（与 `make compose-up` 起的容器一致）。要连别的库或开启鉴权，在仓库根建 `.env`（参照 `.env.example`），配置项统一带 `APP_` 前缀（如 `APP_DATABASE_URL`、`APP_AUTH_ENABLED`、`APP_AUTH_JWT_SECRET`）。
 >
 > ⚠️ 共享库 / 生产库的迁移需单独授权，别对非本地库直接 `make migrate`。
 
@@ -94,7 +95,7 @@ ADMIN_BOOTSTRAP_PASSWORD='<你的强口令>' \
 # → created super admin: id=1 username=root
 ```
 
-> 这是 **一次性 bootstrap**：只要库里已存在任意超管就拒绝重复创建（应用层检查 + DB partial unique index 双保险）。
+> 这是 **一次性 bootstrap**：只要库里已存在任意超管就拒绝重复创建（应用层检查 + DB 生成列唯一索引双保险）。
 >
 > 想初始化内置菜单 / 权限 / 角色（幂等，可重跑）：`uv run python -m admin_platform.cli rbac seed`。
 

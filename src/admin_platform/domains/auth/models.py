@@ -17,10 +17,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Uuid
+from sqlalchemy import BigInteger, ForeignKey, Index, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from admin_platform.db.base import Base, IdMixin, TimestampMixin
+from admin_platform.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
 
 
 class RefreshToken(Base, IdMixin, TimestampMixin):
@@ -49,23 +49,23 @@ class RefreshToken(Base, IdMixin, TimestampMixin):
         Uuid, nullable=True, comment="轮换后继jti(非空=已被轮换,再用即reuse)"
     )
     revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="撤销时间(非空=已撤销)"
+        UTCDateTime(), nullable=True, comment="撤销时间(非空=已撤销)"
     )
     revoked_reason: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
         comment="撤销原因(rotated/logout/reuse_detected/concurrency_limit/expired_cleanup)",
     )
-    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="签发时间(UTC)")
+    issued_at: Mapped[datetime] = mapped_column(UTCDateTime(), comment="签发时间(UTC)")
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), comment="过期时间(UTC,min(idle,family_absolute))"
+        UTCDateTime(), comment="过期时间(UTC,min(idle,family_absolute))"
     )
     family_absolute_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         comment="family绝对过期上限(UTC,首登锚定,轮换透传不随清理漂移)",
     )
     last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="最后轮换时间(UTC)"
+        UTCDateTime(), nullable=True, comment="最后轮换时间(UTC)"
     )
 
 
@@ -81,7 +81,7 @@ class LoginLog(Base, IdMixin, TimestampMixin):
         Index("ix_login_logs_status", "status"),
         Index("ix_login_logs_login_at", "login_at_utc"),
         # 复合索引（status 过滤 + login_at_utc 倒序 + id tiebreaker）——支撑 logininfor「按状态筛 +
-        # 时间倒序」深翻页：PG 反向扫描免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
+        # 时间倒序」深翻页：MySQL 反向扫描复合索引免 sort，避免 OFFSET 深分页全表扫（PK 项3）。
         Index("ix_login_logs_status_time", "status", "login_at_utc", "id"),
     )
 
@@ -100,6 +100,4 @@ class LoginLog(Base, IdMixin, TimestampMixin):
     request_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, comment="请求ID(关联audit_events)"
     )
-    login_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), comment="登录尝试时刻(UTC)"
-    )
+    login_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), comment="登录尝试时刻(UTC)")

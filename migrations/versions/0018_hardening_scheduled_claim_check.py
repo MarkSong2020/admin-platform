@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # L：claim 正确性层兜底——partial unique (task_id, scheduled_at) WHERE trigger_type='schedule'
+    # L：claim 正确性层兜底——生成列唯一索引只约束 trigger_type='schedule' 的 scheduled_at
     # 在 PG16 NULLS DISTINCT 下对 schedule+NULL 行完全失效（去重被静默旁路）。此 CHECK 让任何
     # schedule+NULL 插入直接失败，堵死未来代码/手写 SQL/回放工具绕过红线。manual 仍可 NULL。
     op.create_check_constraint(

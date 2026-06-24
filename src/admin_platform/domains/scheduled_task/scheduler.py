@@ -1,10 +1,10 @@
 """定时任务调度器控制器（P4c）—— leader election + AsyncIOScheduler 生命周期。
 
 **多 worker 安全（roadmap P4 红线，Codex PK §2）**：
-- 进程级 leader：每个 worker 起一条专用连接 ``pg_try_advisory_lock(leader_key)``，**仅抢到锁的
+- 进程级 leader：每个 worker 起一条专用连接 ``GET_LOCK(leader_name, 0)``，**仅抢到锁的
   worker** 起 AsyncIOScheduler 触发 cron；非 leader 周期重试夺锁（leader 进程死 → 连接断 → 锁释放
   → standby 接管）。
-- 任务级 claim：``scheduled_task_logs`` 的 ``(task_id, scheduled_at)`` partial unique（见 0016
+- 任务级 claim：``scheduled_task_logs`` 的 ``(task_id, scheduled_at)`` 生成列唯一索引（见 0016
   迁移）兜 failover 窗口——即便新旧 leader 短暂同时触发同一分钟 tick，也只有一条 INSERT 成功。
 
 调度器只注册一个 wrapper ``_fire``（逻辑全在 executor + DB + registry），**不用 SQLAlchemyJobStore**
@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from admin_platform.core.config import Settings
@@ -40,6 +42,18 @@ _log = logging.getLogger("admin_platform.scheduler")
 
 # H6：leader 连接探活超时（秒）——half-open 分区下不挂到 OS TCP 超时，把降级延迟拉回秒级。
 _LEADER_VERIFY_TIMEOUT_S = 5.0
+_LEADER_LOCK_PREFIX = "admin-platform:scheduler"
+
+
+def _leader_lock_name(settings: Settings) -> str:
+    """MySQL GET_LOCK 的全局 leader 锁名。
+
+    MySQL named lock 是实例级命名空间，不随 schema/database 隔离；把当前 database
+    名的 hash 纳入锁名，避免同一 MySQL 实例上的多套环境互相抢 leader。
+    """
+    database = make_url(settings.database_url).database or "default"
+    scope = hashlib.sha256(database.encode("utf-8")).hexdigest()[:16]
+    return f"{_LEADER_LOCK_PREFIX}:{scope}:{settings.scheduler_leader_lock_key}"
 
 
 class SchedulerController:
@@ -71,7 +85,7 @@ class SchedulerController:
             await asyncio.sleep(self._settings.scheduler_poll_seconds)
             try:
                 if self._is_leader:
-                    # H6：先在专用连接上探活——连接被 PG/网络杀则锁已释放（standby 可能已接管），
+                    # H6：先在专用连接上探活——MySQL 连接被杀则 GET_LOCK 已释放（standby 可能已接管），
                     # 必须自降级，避免老 leader 仍 _is_leader=True 与新 leader 双触发。
                     if await self._verify_leadership():
                         await self._reconcile()
@@ -88,12 +102,12 @@ class SchedulerController:
         try:
             got = (
                 await conn.execute(
-                    text("SELECT pg_try_advisory_lock(:k)"),
-                    {"k": self._settings.scheduler_leader_lock_key},
+                    text("SELECT GET_LOCK(:name, 0)"),
+                    {"name": _leader_lock_name(self._settings)},
                 )
             ).scalar()
-            # H6：commit 释放隐式事务——会话级 advisory lock 不依赖事务存续（commit 后锁仍持有），
-            # 否则连接终身 idle-in-transaction，被 PG idle_in_transaction_session_timeout 杀即丢锁。
+            # MySQL GET_LOCK 是会话级锁，不依赖事务存续；commit 只结束 SQLAlchemy 隐式事务，
+            # 避免专用连接长期 idle-in-transaction。
             await conn.commit()
         except Exception:
             await conn.close()  # 拿锁查询出错也要回收连接，否则反复重试会耗尽 pool
@@ -111,7 +125,7 @@ class SchedulerController:
         return True
 
     async def _verify_leadership(self) -> bool:
-        """H6：在 leader 专用连接上探活。连接失活（被 PG/网络杀）→ 锁已释放 → 自降级回夺锁态。"""
+        """H6：在 leader 专用连接上探活。连接失活（被 MySQL/网络杀）→ 锁已释放 → 自降级回夺锁态。"""
         conn = self._leader_conn
         if conn is None:
             self._is_leader = False
@@ -120,9 +134,18 @@ class SchedulerController:
             # H6：探活包超时——half-open 分区下 SELECT 1 会挂到 OS TCP 重传超时（数分钟），加超时让
             # 降级延迟回到秒级（双执行正确性始终由 DB claim 兜，这是收敛速度/可用性加固）。
             async with asyncio.timeout(_LEADER_VERIFY_TIMEOUT_S):
-                await conn.execute(text("SELECT 1"))
+                owns_lock = (
+                    await conn.execute(
+                        text("SELECT IS_USED_LOCK(:name) = CONNECTION_ID()"),
+                        {"name": _leader_lock_name(self._settings)},
+                    )
+                ).scalar()
                 await conn.commit()
-            return True
+            if owns_lock:
+                return True
+            _log.warning("scheduler leader 连接仍存活但已不持有 GET_LOCK，自降级回到夺锁态")
+            await self._demote()
+            return False
         except Exception:
             _log.warning("scheduler leader 连接探活失败/超时，自降级回到夺锁态")
             await self._demote()
@@ -135,7 +158,9 @@ class SchedulerController:
             self._scheduler = None
         if self._leader_conn is not None:
             with contextlib.suppress(Exception):
-                await self._leader_conn.close()
+                # 异常降级时不要把可能仍持有 GET_LOCK 的连接放回 pool；直接丢弃物理连接，
+                # 让 MySQL 会话级锁随断连释放，避免锁泄漏阻塞 standby。
+                await self._leader_conn.invalidate()
             self._leader_conn = None
         self._is_leader = False
 
@@ -170,7 +195,7 @@ class SchedulerController:
 
     async def _fire(self, task_id: int) -> None:
         """cron 触发 wrapper。scheduled_at 由 executor 按 cron 计划 tick 计算（H3，非触发墙钟分钟）→
-        failover/misfire 下同 tick 同键 → claim partial unique 去重。登记 in-flight 供 stop 优雅 drain。"""
+        failover/misfire 下同 tick 同键 → claim 生成列唯一索引去重。登记 in-flight 供 stop 优雅 drain。"""
         task = asyncio.current_task()
         if task is not None:
             self._inflight.add(task)
@@ -200,13 +225,14 @@ class SchedulerController:
             )
             self._inflight.clear()
         if self._leader_conn is not None:
-            # H6：unlock + close 各自包 suppress——连接被 PG/网络杀时不应穿透 lifespan shutdown；
-            # 连接关闭/进程退出本身即释放会话级 advisory lock。
+            # H6：unlock + close 各自包 suppress——连接被 MySQL/网络杀时不应穿透 lifespan shutdown；
+            # 连接关闭/进程退出本身即释放会话级 GET_LOCK。
             with contextlib.suppress(Exception):
                 await self._leader_conn.execute(
-                    text("SELECT pg_advisory_unlock(:k)"),
-                    {"k": self._settings.scheduler_leader_lock_key},
+                    text("SELECT RELEASE_LOCK(:name)"),
+                    {"name": _leader_lock_name(self._settings)},
                 )
+                await self._leader_conn.commit()
             with contextlib.suppress(Exception):
                 await self._leader_conn.close()
             self._leader_conn = None

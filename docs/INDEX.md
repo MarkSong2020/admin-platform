@@ -7,8 +7,8 @@
 ```bash
 git clone https://github.com/MarkSong2020/admin-platform.git && cd admin-platform
 make init          # uv sync + pre-commit install
-make compose-up    # 起本地 Postgres（端口 5432；Redis 是 opt-in，详见 compose.yaml）
-make migrate       # 应用 Alembic 迁移（当前 head 0020；0013–0020 仅本地 dev + CI 跑过，生产迁移 gated）
+make compose-up    # 起本地 MySQL（端口 3306；Redis 是 opt-in，详见 compose.yaml）
+make migrate       # 本地 MySQL 执行 Alembic 迁移（生产/共享库仍需单独授权）
 make dev           # 起 FastAPI dev server（端口 8000，hot reload）
 ```
 

@@ -52,7 +52,7 @@ Bash(git switch -c:*),Bash(git add src/*),Bash(git add tests/*),Bash(git commit:
 L1/L2 都是命令层，挡不住「脚本内部 subprocess 调 git push」这类间接调用。物理隔离从环境上让不可逆操作**没有通道**：
 
 - **无 push 通道**：在 feature 分支工作；进阶——用专门的 git worktree 跑，移除该 worktree 的 remote 或不提供 push 凭证。即使 agent 绕过命令层跑了 push，没凭证也推不出去。
-- **一次性 DB**：supervisor 启动前把 `APP_DATABASE_URL` 指向本地 docker compose 的 throwaway Postgres。migration apply 到它验证，错了 `make compose-down && make compose-up && make migrate` 重置。**绝不连真库 / 共享库**。
+- **一次性 DB**：supervisor 启动前把 `APP_DATABASE_URL` 指向本地 docker compose 的 throwaway MySQL，可执行 `make migrate` / `make check-db` 验证当前迁移链。**绝不连真库 / 共享库**。
 - **可丢弃**：所有改动在 feature 分支，没 push 没 merge。你 review 后决定 merge 或 `git branch -D` 丢弃。
 
 ---

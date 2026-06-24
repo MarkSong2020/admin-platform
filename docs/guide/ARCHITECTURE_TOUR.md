@@ -109,7 +109,7 @@ RuoYi 风格 RBAC：`domains/dept`（部门树）/ `domains/role`（角色 + 菜
 
 ### 3.4 字典 / 参数 / 通知（P3 运营配置）
 
-`domains/dict`（类型 + 数据双资源，数据 FK → `dict_types.id` 且 RESTRICT、单默认值 partial unique index）/ `domains/config`（参数热更新走读穿 DB、内置项禁删可切换）/ `domains/notice`（通知公告，不渲染 raw HTML）。正本 [`../archive/specs/2026-06-09-p3-operational-config.md`](../archive/specs/2026-06-09-p3-operational-config.md)。
+`domains/dict`（类型 + 数据双资源，数据 FK → `dict_types.id` 且 RESTRICT、单默认值生成列唯一索引）/ `domains/config`（参数热更新走读穿 DB、内置项禁删可切换）/ `domains/notice`（通知公告，不渲染 raw HTML）。正本 [`../archive/specs/2026-06-09-p3-operational-config.md`](../archive/specs/2026-06-09-p3-operational-config.md)。
 
 ### 3.5 服务 / 缓存监控 + 在线用户（P4a / P4b）
 
@@ -117,7 +117,7 @@ RuoYi 风格 RBAC：`domains/dept`（部门树）/ `domains/role`（角色 + 菜
 
 ### 3.6 定时任务（P4c，APScheduler）
 
-`domains/scheduled_task`：`AsyncIOScheduler` + **PG advisory leader election + DB execution claim 双层防多 worker 重复执行** + **handler registry 白名单防 RCE**（管理员只能选预注册的 `handler_key`，不能传任意调用串）+ 手动触发 + 执行日志。调度器在 lifespan 由 `SchedulerController` 启停，`scheduler_enabled` 默认 `False`（CRUD / 手动触发不依赖调度器）。同 spec [`../archive/specs/2026-06-10-p4-monitoring-tasks.md`](../archive/specs/2026-06-10-p4-monitoring-tasks.md) §4。
+`domains/scheduled_task`：`AsyncIOScheduler` + **DB leader election + DB execution claim 双层防多 worker 重复执行**（MySQL GET_LOCK 迁移在阶段 3 落地）+ **handler registry 白名单防 RCE**（管理员只能选预注册的 `handler_key`，不能传任意调用串）+ 手动触发 + 执行日志。调度器在 lifespan 由 `SchedulerController` 启停，`scheduler_enabled` 默认 `False`（CRUD / 手动触发不依赖调度器）。同 spec [`../archive/specs/2026-06-10-p4-monitoring-tasks.md`](../archive/specs/2026-06-10-p4-monitoring-tasks.md) §4。
 
 ### 3.7 文件管理（P5，对标 RuoYi sys_oss）
 

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from admin_platform.core.errors import register_unique_constraint
@@ -18,7 +18,10 @@ from admin_platform.db.base import Base, IdMixin, TimestampMixin
 class Config(Base, IdMixin, TimestampMixin):
     __tablename__ = "configs"
 
-    __table_args__ = (UniqueConstraint("config_key", name="uq_configs_key"),)
+    __table_args__ = (
+        UniqueConstraint("config_key", name="uq_configs_key"),
+        CheckConstraint("is_builtin IN (0, 1)", name="ck_configs_is_builtin_bool"),
+    )
 
     name: Mapped[str] = mapped_column(String(128), comment="参数名称")
     config_key: Mapped[str] = mapped_column(String(128), comment="参数键名(全局唯一)")

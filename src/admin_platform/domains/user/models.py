@@ -19,12 +19,14 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
+    Computed,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,14 +41,13 @@ class User(Base, IdMixin, TimestampMixin):
         UniqueConstraint("username", name="uq_users_username"),
         # status 枚举约束（Codex 系统级 PK：与 dept/role/menu/post 同源，防脏状态被隐式停用）。
         CheckConstraint("status IN ('active', 'disabled')", name="ck_users_status"),
-        # P0.9 临时信任根约束：DB 硬保证【至多一个】超管（一次性 bootstrap，防 CLI 并发竞态）。
-        # partial unique index 让 is_super_admin=true 的行在索引上唯一 → 至多一行 true。
+        CheckConstraint("is_super_admin IN (0, 1)", name="ck_users_is_super_admin_bool"),
+        # P0.9 临时信任根约束：MySQL 生成列 + unique 利用「多个 NULL 不冲突」实现条件唯一。
         # P1 RBAC 接管超管模型（roadmap §7 Q6：布尔 vs 角色）后复审是否放宽。
         Index(
             "uq_users_one_super_admin",
-            "is_super_admin",
+            "super_admin_unique_key",
             unique=True,
-            postgresql_where=text("is_super_admin"),
         ),
         # dept_id 索引（Codex 深审）：部门删除 ON DELETE SET NULL 需按 dept_id 定位用户行；
         # 后续 data_scope「本部门」按 dept_id 查用户也走它。无索引则两者全表扫 + SET NULL 取锁慢。
@@ -57,7 +58,13 @@ class User(Base, IdMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), comment="密码哈希")
     nickname: Mapped[str] = mapped_column(String(64), default="", comment="昵称")
     status: Mapped[str] = mapped_column(String(16), default="active", comment="状态")
-    is_super_admin: Mapped[bool] = mapped_column(default=False, comment="是否超级管理员")
+    is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否超级管理员")
+    super_admin_unique_key: Mapped[int | None] = mapped_column(
+        Integer,
+        Computed("CASE WHEN is_super_admin = 1 THEN 1 ELSE NULL END", persisted=True),
+        nullable=True,
+        comment="MySQL生成列: is_super_admin=true时为1,否则NULL",
+    )
     dept_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("depts.id", ondelete="SET NULL"),

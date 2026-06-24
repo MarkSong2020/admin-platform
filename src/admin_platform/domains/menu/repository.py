@@ -2,27 +2,28 @@
 
 除标准 CRUD（无 ``find_by_code`` —— 菜单无 code）外，承载：
   * 树查询 —— ``list_descendant_menu_ids``（递归 CTE 含自身，删父防有子 + 移动防环复用）、
-    ``count_children``、``acquire_tree_lock``（advisory lock 串行化树写，镜像 dept、用不同 key）。
+    ``count_children``、``acquire_tree_lock``（事务级行锁串行化树写，镜像 dept、用不同锁名）。
   * 建树数据源 —— ``list_all_active``（超管取全部 active）/ ``list_active_by_ids``（非超管取可见
     id 的 active），供 ``provider.DbMenuProvider`` 组装 ``MenuNode`` 树。
   * RBAC 集成预留（供人值守接线 ``get_user_permissions`` 真实派生 + 后续 getRouters 端点）——
     ``list_menu_ids_for_user`` / ``list_perms_for_user``（JOIN ``user_roles``→``role_menus``，只取
-    ``status=active`` 角色）、``set_role_menus``（全量替换绑定，advisory lock + 先删后插）。
+    ``status=active`` 角色）、``set_role_menus``（全量替换绑定，事务级行锁 + 先删后插）。
 """
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, literal, select, text
+from sqlalchemy import delete, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.db.locks import acquire_transaction_lock
 from admin_platform.domains.menu.models import Menu, RoleMenu
 from admin_platform.domains.menu.schemas import MenuCreate, MenuUpdate
 from admin_platform.domains.role.models import Role, UserRole
 
-# pg_advisory_xact_lock 的稳定 key —— 串行化菜单树写 / role_menus 全量替换（移动防环 + 先删后插）。
-# 与 dept(478221) / role(478231/478232) 取不同值避免跨域互锁。事务级锁，提交/回滚自动释放。
-_MENU_TREE_LOCK_KEY = 478241  # 串行化菜单树写（移动/删除防并发成环）
-_ROLE_MENUS_LOCK_KEY = 478242  # 串行化 role_menus 全量替换
+# app_locks 稳定锁名 —— 串行化菜单树写 / role_menus 全量替换（移动防环 + 先删后插）。
+# 事务级锁，提交/回滚自动释放。
+_MENU_TREE_LOCK_NAME = "menu:tree"
+_ROLE_MENUS_LOCK_NAME = "menu:role-menus"
 _MAX_MENU_DEPTH = 64  # recursive CTE 深度兜底（实际深度 <10）；坏数据成环时防死循环
 
 
@@ -41,14 +42,12 @@ class MenuRepository:
         return int(result.scalar_one())
 
     async def acquire_tree_lock(self) -> None:
-        """事务级 advisory lock，串行化菜单树写（移动/删除防并发成环）。
+        """事务级行锁，串行化菜单树写（移动/删除防并发成环）。
 
         提交/回滚自动释放。配合锁内重新校验，关掉 ``_check_no_cycle`` 的 TOCTOU 窗口
         （两个并发移动 A→B、B→A 各自校验都过、提交后成环）。镜像 dept，用不同 key。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_MENU_TREE_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _MENU_TREE_LOCK_NAME)
 
     async def get(self, item_id: int) -> Menu | None:
         return await self._session.get(Menu, item_id)
@@ -171,12 +170,10 @@ class MenuRepository:
     async def set_role_menus(self, role_id: int, menu_ids: list[int]) -> None:
         """全量替换角色的菜单绑定（去重；空列表 = 解绑所有菜单）。
 
-        先取事务级 advisory lock 串行化「先删后插」（镜像 role 域 set_user_roles 的 F3 修复）：
+        先取事务级行锁串行化「先删后插」（镜像 role 域 set_user_roles 的 F3 修复）：
         并发两请求替换同一角色的绑定时，避免最终落成两请求的并集或撞 ``uq_role_menus``。
         """
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_ROLE_MENUS_LOCK_KEY)
-        )
+        await acquire_transaction_lock(self._session, _ROLE_MENUS_LOCK_NAME)
         await self._session.execute(delete(RoleMenu).where(RoleMenu.role_id == role_id))
         await self._session.flush()
         for menu_id in dict.fromkeys(menu_ids):

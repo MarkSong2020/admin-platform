@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 
 import pytest
@@ -13,10 +17,12 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from admin_platform.audit.models import AuditEventLog
 from admin_platform.cli import CliError, create_super_admin
 from admin_platform.core.security import verify_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth.models import LoginLog
 from admin_platform.domains.user.models import User
 
 pytestmark = pytest.mark.integration
@@ -27,7 +33,10 @@ _STRONG_PW = "bootstrap-strong-" + "z" * 12  # ≥12、无空白、≠username
 
 async def _wipe() -> None:
     async with db_session() as session:
+        # 清 users + 无 FK 的日志表(login_logs/audit_events 不随 users 删 → 跨测试残留致 flaky，codex 审查)
         await session.execute(delete(User))
+        await session.execute(delete(LoginLog))
+        await session.execute(delete(AuditEventLog))
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -59,6 +68,26 @@ async def test_create_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert admin.is_super_admin is True
     assert admin.status == "active"
     assert verify_password(_STRONG_PW, admin.password_hash)  # 口令确实写进去了
+
+
+async def test_create_success_in_standalone_cli_process() -> None:
+    """真实子进程覆盖 CLI 独立导入路径，避免 pytest 已导入 metadata 掩盖问题。"""
+    env = os.environ.copy()
+    env[_ENV] = _STRONG_PW
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, "-m", "admin_platform.cli", "create-super-admin", "--username", "root"],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "created super admin" in result.stdout
+
+    admin = await _super_admin("root")
+    assert admin is not None
+    assert admin.is_super_admin is True
 
 
 async def test_missing_env_raises_and_creates_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,7 +131,7 @@ async def test_rejects_second_admin_even_different_username(
 
 
 async def test_db_rejects_second_super_admin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """partial unique index 兜底：绕过 cli 应用层检查，直接建第二个超管(不同 username)
+    """生成列唯一索引兜底：绕过 cli 应用层检查，直接建第二个超管(不同 username)
     应撞 DB 约束 `uq_users_one_super_admin`（防并发竞态创建多超管，P0.9 review B）。"""
     monkeypatch.setenv(_ENV, _STRONG_PW)
     await create_super_admin("root")

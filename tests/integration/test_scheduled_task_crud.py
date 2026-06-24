@@ -13,7 +13,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
@@ -24,6 +24,7 @@ from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.scheduled_task.api import router as job_router
 from admin_platform.domains.scheduled_task.models import ScheduledTaskLog
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -47,10 +48,7 @@ class _SuperProvider(PermissionProvider):
 
 
 async def _wipe() -> None:
-    async with db_session() as s:
-        await s.execute(
-            text("TRUNCATE TABLE scheduled_task_logs, scheduled_tasks, audit_events CASCADE")
-        )
+    await truncate_tables("scheduled_task_logs", "scheduled_tasks", "audit_events")
 
 
 @pytest_asyncio.fixture(autouse=True)

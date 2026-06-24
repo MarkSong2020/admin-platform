@@ -8,13 +8,26 @@ C5/C6 分层：schemas 不 import models / sqlalchemy（纯 Pydantic DTO，from_
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
-class AuditEventRead(BaseModel):
+class _UtcDatetimeModel(BaseModel):
+    """把 MySQL DATETIME 读回的 naive datetime 统一解释为 UTC。"""
+
+    @field_validator("*", mode="after", check_fields=False)
+    @classmethod
+    def _normalize_datetime(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=UTC)
+            return value.astimezone(UTC)
+        return value
+
+
+class AuditEventRead(_UtcDatetimeModel):
     """审计/操作日志列表项（summary，不含完整 payload）。"""
 
     model_config = ConfigDict(from_attributes=True)
@@ -62,7 +75,7 @@ class AuditEventPage(BaseModel):
     total_pages: int
 
 
-class LoginLogRead(BaseModel):
+class LoginLogRead(_UtcDatetimeModel):
     """登录日志项（RuoYi sys_logininfor 对标）。"""
 
     model_config = ConfigDict(from_attributes=True)
@@ -131,7 +144,7 @@ class ServerDisk(BaseModel):
     percent: float
 
 
-class ServerSys(BaseModel):
+class ServerSys(_UtcDatetimeModel):
     """主机基本信息。"""
 
     hostname: str
@@ -142,7 +155,7 @@ class ServerSys(BaseModel):
     boot_time: datetime
 
 
-class ServerProcess(BaseModel):
+class ServerProcess(_UtcDatetimeModel):
     """当前应用进程指标。"""
 
     pid: int
@@ -153,7 +166,7 @@ class ServerProcess(BaseModel):
     create_time: datetime
 
 
-class ServerMetrics(BaseModel):
+class ServerMetrics(_UtcDatetimeModel):
     """服务监控聚合响应。"""
 
     cpu: ServerCpu
@@ -194,7 +207,7 @@ class CacheRedisInfo(BaseModel):
     total_commands_processed: int | None
 
 
-class CacheMetrics(BaseModel):
+class CacheMetrics(_UtcDatetimeModel):
     """缓存监控聚合响应。Redis 未配置 / 不可达时 ``available=False``（不抛 500）。"""
 
     available: bool
@@ -207,7 +220,7 @@ class CacheMetrics(BaseModel):
 # ---- P4 在线用户（活动 refresh token family 派生，对标 RuoYi 在线用户）-------------
 
 
-class OnlineSession(BaseModel):
+class OnlineSession(_UtcDatetimeModel):
     """一个在线会话 = 一个活动 refresh token family（一次登录）。
 
     设备信息（IP/UA）按 P1.4 决策不落 refresh token，故此处不含——会话级 IP/UA 需查登录日志。

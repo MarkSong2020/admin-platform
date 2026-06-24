@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
 
 from admin_platform.core.config import get_settings
 from admin_platform.core.errors import AppError
@@ -26,6 +26,7 @@ from admin_platform.domains.auth.refresh_service import (
 )
 from admin_platform.domains.auth.repository import RefreshTokenRepository
 from admin_platform.domains.user.models import User
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -36,11 +37,9 @@ _PEPPER = "integration-refresh-pepper-" + "p" * 32
 async def _setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     monkeypatch.setenv("APP_AUTH_REFRESH_TOKEN_PEPPER", _PEPPER)
     get_settings.cache_clear()
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
     yield
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE auth_refresh_tokens, users CASCADE"))
+    await truncate_tables("auth_refresh_tokens", "users")
     await dispose_engine()
     get_settings.cache_clear()
 
@@ -162,10 +161,10 @@ async def test_rotate_rejected_when_family_absolute_exceeded() -> None:
 
 
 async def test_concurrent_rotate_and_revoke_no_token_escapes() -> None:
-    """H1：并发「轮换」与「撤销 family」经 per-user advisory lock 串行化——撤销后无活动 token 逃逸。
+    """H1：并发「轮换」与「撤销 family」经 per-user 事务级行锁串行化——撤销后无活动 token 逃逸。
 
     旧实现（无 user 锁）：rotate 先插新 token Z，revoke 的单语句 UPDATE 快照不含 Z → Z 逃逸为活动
-    （reuse 检测/强制下线/logout 被击穿）。新实现两路经同一 advisory lock 串行：revoke 必能看到 Z
+    （reuse 检测/强制下线/logout 被击穿）。新实现两路经同一事务级行锁串行：revoke 必能看到 Z
     （或 rotate 看到已撤销而拒），最终 family 一定无未撤销 token。
     """
     uid = await _seed_user()

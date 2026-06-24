@@ -23,18 +23,19 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import (
+    Computed,
     ForeignKeyConstraint,
     Table,
     UniqueConstraint,
 )
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import mysql
 
 import admin_platform.domains as _domains_pkg
 from admin_platform.db.base import Base
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DOC_PATH = _REPO_ROOT / "docs" / "architecture" / "DATA_MODEL.md"
-_PG = postgresql.dialect()
+_MYSQL = mysql.dialect()
 
 
 def _discover_models() -> None:
@@ -55,6 +56,8 @@ def _discover_models() -> None:
     # 显式补 import，否则审计表及其索引永远不进 DATA_MODEL.md（PK 审查发现的 dump_schema 范围缺陷，
     # 2026-06-15：审计是 append-only 取证轨，schema 文档须覆盖，与其余 domain 表一视同仁）。
     importlib.import_module("admin_platform.audit.models")
+    # app_locks 是 DB 基础设施表，不属于业务 domains，但也是迁移后的并发控制真相源。
+    importlib.import_module("admin_platform.db.locks")
 
 
 def _table_to_class() -> dict[str, type]:
@@ -63,12 +66,15 @@ def _table_to_class() -> dict[str, type]:
 
 
 def _col_type(column) -> str:
-    """列类型按 PostgreSQL 方言渲染（部署目标），如 ``VARCHAR(64)`` / ``TIMESTAMP WITH TIME ZONE``。"""
-    return column.type.compile(dialect=_PG)
+    """列类型按 MySQL 方言渲染（部署目标），如 ``VARCHAR(64)`` / ``DATETIME``。"""
+    return column.type.compile(dialect=_MYSQL)
 
 
 def _col_default(column) -> str:
     """渲染列默认值：DB 侧 ``server_default`` 优先，其次 Python 侧 ``default``。"""
+    if isinstance(column.server_default, Computed):
+        storage = "STORED" if column.server_default.persisted else "VIRTUAL"
+        return f"`GENERATED ALWAYS AS ({column.server_default.sqltext}) {storage}` (DB)"
     if column.server_default is not None:
         return f"`{column.server_default.arg!s}` (DB)"
     if column.default is not None and not getattr(column.default, "is_callable", False):
@@ -108,7 +114,7 @@ def _render_table(table: Table, cls: type | None) -> str:
     )
     for uq in uniques:
         cols = ", ".join(col.name for col in uq.columns)
-        label = f"`{uq.name}`" if uq.name else "（列级 `unique=True`，DDL 由 PG 自动命名）"
+        label = f"`{uq.name}`" if uq.name else "（列级 `unique=True`，DDL 由数据库自动命名）"
         extras.append(f"- UNIQUE {label}：({cols})")
     fks = sorted(
         (c for c in table.constraints if isinstance(c, ForeignKeyConstraint)),
@@ -127,6 +133,12 @@ def _render_table(table: Table, cls: type | None) -> str:
     ):
         cols = ", ".join(col.name for col in idx.columns)
         uniq = " UNIQUE" if idx.unique else ""
+        postgresql_where = idx.dialect_options["postgresql"].get("where")
+        if postgresql_where is not None:
+            raise RuntimeError(
+                f"{table.name}.{idx.name} uses PostgreSQL partial index "
+                f"WHERE {postgresql_where}; MySQL target requires a generated-column equivalent"
+            )
         extras.append(f"- INDEX{uniq} `{idx.name}`：({cols})")
 
     if extras:
@@ -152,7 +164,7 @@ def _render() -> str:
         ">\n"
         "> - 再生：`make schema-doc`（= `uv run python scripts/dump_schema.py`）\n"
         "> - 校验是否最新：`uv run python scripts/dump_schema.py --check`（差异即非零退出）\n"
-        "> - 类型以 PostgreSQL 方言渲染；models↔迁移↔活库的漂移由 `make check-db` 守门。\n"
+        "> - 类型以 MySQL 方言渲染；models↔迁移↔活库的漂移由 `make check-db` 守门。\n"
         "\n"
     )
 

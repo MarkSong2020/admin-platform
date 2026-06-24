@@ -1,4 +1,4 @@
-"""p4c scheduled tasks —— 定时任务定义 + 执行日志（含多 worker 执行 claim partial unique）
+"""p4c scheduled tasks —— 定时任务定义 + 执行日志（含多 worker 执行 claim 生成列唯一索引）
 
 Revision ID: 0016
 Revises: 0015
@@ -11,7 +11,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "0016"
 down_revision: str | Sequence[str] | None = "0015"
@@ -31,9 +30,11 @@ def upgrade() -> None:
         ),
         sa.Column(
             "params_json",
-            postgresql.JSONB(astext_type=sa.Text()),
-            server_default=sa.text("'{}'::jsonb"),
+            sa.JSON(),
             nullable=False,
+            # DB 端默认空对象(MySQL 8.0.13+ JSON 表达式默认)：保留 PG jsonb '{}' 的 DB 契约，
+            # raw SQL/seed/回放省略该列时仍得 {}，不退化为只靠 ORM default=dict（codex 审查）。
+            server_default=sa.text("(JSON_OBJECT())"),
             comment="处理器参数(JSON)",
         ),
         sa.Column(
@@ -59,7 +60,7 @@ def upgrade() -> None:
         sa.Column(
             "allow_concurrent",
             sa.Boolean(),
-            server_default=sa.text("false"),
+            server_default=sa.text("0"),
             nullable=False,
             comment="是否允许上次未跑完时并发执行",
         ),
@@ -87,18 +88,21 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
         sa.CheckConstraint("status IN ('enabled', 'disabled')", name="ck_scheduled_tasks_status"),
+        sa.CheckConstraint(
+            "allow_concurrent IN (0, 1)", name="ck_scheduled_tasks_allow_concurrent_bool"
+        ),
         sa.CheckConstraint("misfire_grace_seconds >= 0", name="ck_scheduled_tasks_misfire_nonneg"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_scheduled_tasks_name"),
@@ -131,10 +135,20 @@ def upgrade() -> None:
         sa.Column("handler_key", sa.String(length=128), nullable=False, comment="处理器键(快照)"),
         sa.Column(
             "params_json",
-            postgresql.JSONB(astext_type=sa.Text()),
-            server_default=sa.text("'{}'::jsonb"),
+            sa.JSON(),
             nullable=False,
+            server_default=sa.text("(JSON_OBJECT())"),
             comment="执行参数快照(JSON)",
+        ),
+        sa.Column(
+            "schedule_claim_scheduled_at",
+            sa.DateTime(timezone=True),
+            sa.Computed(
+                "CASE WHEN trigger_type = 'schedule' THEN scheduled_at ELSE NULL END",
+                persisted=True,
+            ),
+            nullable=True,
+            comment="MySQL生成列: 自动触发claim计划时间, manual为NULL",
         ),
         sa.Column("status", sa.String(length=16), nullable=False, comment="执行状态"),
         sa.Column(
@@ -158,14 +172,14 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="创建时间(UTC)",
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
             comment="更新时间(UTC, ORM flush 触发)",
         ),
@@ -192,13 +206,12 @@ def upgrade() -> None:
         ["task_id", "started_at"],
         unique=False,
     )
-    # 多 worker 执行 claim（P4 红线）：同一任务同一 cron tick 只能一条自动触发记录。
+    # 多 worker 执行 claim（P4 红线）：MySQL 生成列 + unique 实现条件唯一语义。
     op.create_index(
         "uq_scheduled_task_logs_schedule_claim",
         "scheduled_task_logs",
-        ["task_id", "scheduled_at"],
+        ["task_id", "schedule_claim_scheduled_at"],
         unique=True,
-        postgresql_where=sa.text("trigger_type = 'schedule'"),
     )
 
 
@@ -206,7 +219,6 @@ def downgrade() -> None:
     op.drop_index(
         "uq_scheduled_task_logs_schedule_claim",
         table_name="scheduled_task_logs",
-        postgresql_where=sa.text("trigger_type = 'schedule'"),
     )
     op.drop_index("ix_scheduled_task_logs_task_started", table_name="scheduled_task_logs")
     op.drop_index("ix_scheduled_task_logs_status_created", table_name="scheduled_task_logs")

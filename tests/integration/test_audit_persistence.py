@@ -33,6 +33,7 @@ from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import _request_session_var, db_session
 from admin_platform.domains.role.api import router as role_router
 from admin_platform.domains.role.models import Role
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -73,9 +74,7 @@ class _DenyProvider(PermissionProvider):
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE roles CASCADE"))
-        await session.execute(text("TRUNCATE TABLE audit_events CASCADE"))
+    await truncate_tables("roles", "audit_events")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -173,7 +172,7 @@ async def test_permission_denied_persisted_from_sync_dependency() -> None:
 
 async def test_oversized_user_agent_does_not_lose_audit() -> None:
     # review F3：超长 UA（攻击者可控）会让 VARCHAR(512) insert 抛 StringDataRightTruncation，
-    # 连累整批 add_all 失败 → 审计静默丢失。截断防御：拆查询列截断、payload(JSONB) 留完整原值。
+    # 连累整批 add_all 失败 → 审计静默丢失。截断防御：拆查询列截断、payload(JSON) 留完整原值。
     async with _client(_SuperProvider) as c:
         created = await c.post(
             "/api/v1/roles",
@@ -186,7 +185,7 @@ async def test_oversized_user_agent_does_not_lose_audit() -> None:
     assert len(rows) == 1  # 审计未因超长 UA 丢失
     assert rows[0].user_agent is not None
     assert len(rows[0].user_agent) == 512  # 查询列截断到列宽
-    # 完整原值仍在 payload（无损取证，JSONB 无长度限制）。
+    # 完整原值仍在 payload（无损取证，JSON 无长度限制）。
     assert len(rows[0].payload["request"]["user_agent"]) == 5000
 
 

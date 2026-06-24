@@ -8,7 +8,7 @@
   * **mounted 回归**：file_router 已挂进生产 ``create_app()``（人值守红线 main.py）。
 
 storage root 经 ``APP_FILE_STORAGE_ROOT`` 指向 pytest tmp，隔离不污染 ``var/uploads``。
-跨表 FK（files.uploader_id → users.id RESTRICT）：清表用 ``TRUNCATE files, users CASCADE``。
+跨表 FK（files.uploader_id → users.id RESTRICT）：清表经 MySQL helper 临时关闭外键检查后逐表 TRUNCATE。
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -34,6 +33,7 @@ from admin_platform.db.session import db_session
 from admin_platform.domains.file.api import router as file_router
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -83,8 +83,7 @@ def _build_client(provider: PermissionProvider, *, user_id: str) -> AsyncClient:
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE files, users CASCADE"))
+    await truncate_tables("files", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

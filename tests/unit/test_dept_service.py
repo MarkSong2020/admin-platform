@@ -69,7 +69,7 @@ class _StubRepo:
         return len(self._rows)
 
     async def acquire_tree_lock(self) -> None:
-        """stub no-op（真实是 pg_advisory_xact_lock，单测无 DB）。"""
+        """stub no-op（真实是 app_locks 事务级行锁，单测无 DB）。"""
 
     async def get(self, dept_id: int) -> Dept | None:
         return self._rows.get(dept_id)

@@ -14,8 +14,8 @@
   * **并发防御**：建超管在单事务内，靠 ``uq_users_username`` 让一个创建者胜出；中途失败回滚。
   * **不泄密**：stderr / ``CliError`` / 成功输出都不含密码或 hash；非预期异常只打类型名。
 
-> DB 层硬保证"至多一个超管"：partial unique index ``uq_users_one_super_admin``（迁移 0003，
-> ``WHERE is_super_admin``）—— 并发 bootstrap 第二个超管会撞约束。应用层检查 + DB 约束双保险。
+> DB 层硬保证"至多一个超管"：生成列唯一索引 ``uq_users_one_super_admin``（迁移 0003，
+> ``super_admin_unique_key``）—— 并发 bootstrap 第二个超管会撞约束。应用层检查 + DB 约束双保险。
 > P1 RBAC 落地后超管由「超级管理员角色」接管，该约束再评估去留（roadmap §7 Q6）。
 """
 
@@ -33,6 +33,7 @@ from admin_platform.core.security import hash_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.auth.repository import RefreshTokenRepository
+from admin_platform.domains.dept.models import Dept  # noqa: F401 - 注册 users.dept_id 的目标表
 from admin_platform.domains.user.models import User
 from admin_platform.rbac.seed import SeedResult, seed_rbac
 

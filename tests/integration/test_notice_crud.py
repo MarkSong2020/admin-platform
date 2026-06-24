@@ -12,7 +12,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -21,8 +20,8 @@ from admin_platform.core.errors import register_exception_handlers
 from admin_platform.core.middleware import RequestIDMiddleware
 from admin_platform.core.permissions import get_permission_provider
 from admin_platform.db.engine import dispose_engine
-from admin_platform.db.session import db_session
 from admin_platform.domains.notice.api import router as notice_router
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -61,8 +60,7 @@ class _NoPermProvider(PermissionProvider):
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE notices CASCADE"))
+    await truncate_tables("notices")
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 
 import admin_platform.domains.dict.models  # noqa: F401  —— import 时注册 dict 单默认值约束映射
 from admin_platform.core.config import get_settings
@@ -123,6 +123,48 @@ class _MockOrigWithConstraintInMessage(Exception):
         super().__init__(f'duplicate key value violates unique constraint "{constraint_name}"')
 
 
+class _MockMysqlDuplicateEntry(Exception):
+    """模拟 aiomysql/MySQL 1062 duplicate entry。"""
+
+    def __init__(self, key_name: str) -> None:
+        super().__init__(1062, f"Duplicate entry 'alice' for key 'users.{key_name}'")
+
+
+class _MockMysqlForeignKeyConstraint(Exception):
+    """模拟 aiomysql/MySQL 1451 foreign key constraint fails。"""
+
+    def __init__(self, constraint_name: str) -> None:
+        super().__init__(
+            1451,
+            "Cannot delete or update a parent row: a foreign key constraint fails "
+            f"(`app`.`dict_data`, CONSTRAINT `{constraint_name}` FOREIGN KEY (`dict_type_id`) "
+            "REFERENCES `dict_types` (`id`))",
+        )
+
+
+# 下面三类 orig 的 (类, errno) 取自真库实测(mysql:8.0 + aiomysql)：
+# 1406 超长 → DataError；3819 CHECK → OperationalError；1213 死锁 → OperationalError。
+class _MockMysqlDataTooLong(Exception):
+    """模拟 aiomysql/MySQL 1406 Data too long（DataError.orig）。"""
+
+    def __init__(self) -> None:
+        super().__init__(1406, "Data too long for column 'name' at row 1")
+
+
+class _MockMysqlCheckViolation(Exception):
+    """模拟 aiomysql/MySQL 3819 CHECK 约束违反（OperationalError.orig）。"""
+
+    def __init__(self) -> None:
+        super().__init__(3819, "Check constraint 'ck_scheduled_tasks_status' is violated.")
+
+
+class _MockMysqlDeadlock(Exception):
+    """模拟 aiomysql/MySQL 1213 死锁（OperationalError.orig，非数据非法 → 仍 500）。"""
+
+    def __init__(self) -> None:
+        super().__init__(1213, "Deadlock found when trying to get lock; try restarting transaction")
+
+
 def test_integrity_registered_constraint_returns_typed_409(app: FastAPI) -> None:
     """注册过的约束 → 409 + typed code，响应 body 不暴露 DB 约束名。"""
     register_unique_constraint("uq_alpha_col", "test.ALPHA_DUPLICATE", "Alpha already exists")
@@ -147,7 +189,7 @@ def test_integrity_registered_constraint_returns_typed_409(app: FastAPI) -> None
 
 
 def test_integrity_dict_default_constraint_returns_typed_409(app: FastAPI) -> None:
-    """真实 dict 单默认值 partial unique index 竞态兜底：撞 ``uq_dict_data_one_default_per_type``
+    """真实 dict 单默认值生成列唯一索引竞态兜底：撞 ``uq_dict_data_one_default_per_type``
     → 409 ``dict.DEFAULT_DUPLICATE``（service clear-siblings 之外的 DB 层并发双默认拦截）。
     映射在 ``domains/dict/models.py`` import 时注册（见文件顶部 import），不靠 app 装配顺序。
     """
@@ -212,6 +254,47 @@ def test_integrity_string_fallback_extracts_constraint(app: FastAPI) -> None:
     assert body["detail"] is None
 
 
+def test_integrity_mysql_1062_extracts_key_name(app: FastAPI) -> None:
+    """MySQL 1062 ``for key 'table.uq_xxx'`` → 提取唯一索引名并映射到业务 409。"""
+    register_unique_constraint("uq_gamma_col", "test.GAMMA_DUPLICATE", "Gamma already exists")
+
+    @app.post("/__integrity-mysql-1062")
+    async def handler() -> None:
+        raise IntegrityError(
+            "INSERT INTO ...",
+            {"params": None},
+            orig=_MockMysqlDuplicateEntry("uq_gamma_col"),
+        )
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__integrity-mysql-1062")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["type"] == "test.GAMMA_DUPLICATE"
+    assert "uq_gamma_col" not in str(body)
+
+
+def test_integrity_mysql_fk_extracts_constraint_name(app: FastAPI) -> None:
+    """MySQL 1451 ``CONSTRAINT `fk_xxx``` → 提取 FK 名并映射到业务 409。"""
+
+    @app.post("/__integrity-mysql-fk")
+    async def handler() -> None:
+        raise IntegrityError(
+            "DELETE FROM dict_types ...",
+            {"params": None},
+            orig=_MockMysqlForeignKeyConstraint("fk_dict_data_type_id"),
+        )
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__integrity-mysql-fk")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["type"] == "dict.TYPE_HAS_DATA"
+    assert "fk_dict_data_type_id" not in str(body)
+
+
 def test_integrity_without_constraint_returns_framework_409(app: FastAPI) -> None:
     """orig 无 constraint_name 且 str 不含 constraint 模式 → framework.CONFLICT。"""
 
@@ -243,3 +326,50 @@ def test_register_unique_constraint_conflict_fails_fast() -> None:
     register_unique_constraint("uq_failfast_probe2", "test.A_DUP", "a")
     with pytest.raises(RuntimeError, match="漂移"):
         register_unique_constraint("uq_failfast_probe2", "test.B_DUP", "b")
+
+
+def test_data_error_returns_422_constraint_violation(app: FastAPI) -> None:
+    """1406 超长属 DataError，整类映 422（防 schema 漏配 max_length 时退化成 500）。
+    body 脱敏：不回显被拒值，也不漏 DB 列名。"""
+
+    @app.post("/__data-too-long")
+    async def handler() -> None:
+        raise DataError("INSERT INTO ...", {"params": None}, orig=_MockMysqlDataTooLong())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__data-too-long")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"] == "framework.CONSTRAINT_VIOLATION"
+    assert body["detail"] is None
+    assert "name" not in (body.get("errors") or {})  # 列名不外泄
+
+
+def test_check_violation_operational_error_returns_422(app: FastAPI) -> None:
+    """3819 CHECK 违反归到 OperationalError，从宽类里挑出 → 422。"""
+
+    @app.post("/__check-violation")
+    async def handler() -> None:
+        raise OperationalError("INSERT INTO ...", {"params": None}, orig=_MockMysqlCheckViolation())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__check-violation")
+
+    assert resp.status_code == 422
+    assert resp.json()["type"] == "framework.CONSTRAINT_VIOLATION"
+
+
+def test_non_check_operational_error_stays_500(app: FastAPI) -> None:
+    """OperationalError 宽类里的非 CHECK（死锁 1213）是服务端/瞬态问题 → 保持 500，
+    不能误判成 422 让客户端以为是自己数据非法。"""
+
+    @app.post("/__deadlock")
+    async def handler() -> None:
+        raise OperationalError("UPDATE ...", {"params": None}, orig=_MockMysqlDeadlock())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__deadlock")
+
+    assert resp.status_code == 500
+    assert resp.json()["type"] == "framework.INTERNAL_ERROR"

@@ -10,17 +10,28 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from admin_platform.db.locks import acquire_transaction_lock, app_lock_name
 from admin_platform.domains.auth.models import RefreshToken
 
-# per-user refresh advisory lock 命名空间（与 dept 478221 / role 478231-2 / menu 478241-2 /
-# post 478251 的单 bigint 锁隔离：本锁用 (ns, user_id) 双 int4 形式，不会跨域互锁）。
-# hardening-r1 H1：登录签发、轮换、撤销、强制下线（monitor 复用同 NS）全经此锁串行化同一用户的
-# family 变更，关掉并发轮换插入新 token 逃逸并发撤销的 READ COMMITTED 快照竞态。公开（去下划线）
-# 供 monitor.repository 复用。
-REFRESH_USER_LOCK_NS = 478260
+# per-user refresh 事务锁命名空间。hardening-r1 H1：登录签发、轮换、撤销、强制下线
+# （monitor 复用同命名空间）全经此锁串行化同一用户的 family 变更，关掉并发轮换插入新 token
+# 逃逸并发撤销的 READ COMMITTED 快照竞态。公开（去下划线）供 monitor.repository 复用。
+REFRESH_USER_LOCK_NAMESPACE = "auth:refresh-user"
+# per-user refresh 锁分桶上界（I-2，codex 对抗审查方案 A）：原动态锁名 auth:refresh-user:{user_id}
+# 每个用户产生一行 app_locks + 一个进程缓存条目，user_id 高基数下无界增长（百万用户=百万行）。
+# 按 user_id 取模分桶成有界集合：同一 user_id 必落同一桶 → 自身串行化语义不变（正确性保留）；
+# 不同用户偶发同桶被串行（refresh 临界区短、4096 桶碰撞率低，可接受）。桶行启动期建满后不再
+# 触发「首次创建 + 1213」窗口（顺带收敛 codex 重要项 3）。
+_REFRESH_USER_LOCK_BUCKETS = 4096
+
+
+def refresh_user_lock_name(user_id: int) -> str:
+    """per-user refresh 事务锁名（分桶；供 auth 与 monitor 复用，避免 app_locks 行与进程缓存随
+    user_id 无界增长）。"""
+    return app_lock_name(REFRESH_USER_LOCK_NAMESPACE, user_id % _REFRESH_USER_LOCK_BUCKETS)
 
 
 class RefreshTokenRepository:
@@ -28,14 +39,10 @@ class RefreshTokenRepository:
         self._session = session
 
     async def acquire_user_lock(self, user_id: int) -> None:
-        """per-user 事务级 advisory lock —— 串行化同一用户的全部 family 变更：登录签发（签新 family
+        """per-user 事务级行锁 —— 串行化同一用户的全部 family 变更：登录签发（签新 family
         + 上限检查，Codex 深审 F）、轮换、撤销、强制下线（hardening-r1 H1）。否则并发轮换插入的新
         token 不在并发撤销语句的快照内 → 逃逸 reuse 检测/logout/强制下线。提交/回滚自动释放。"""
-        await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:ns, :uid)").bindparams(
-                ns=REFRESH_USER_LOCK_NS, uid=user_id
-            )
-        )
+        await acquire_transaction_lock(self._session, refresh_user_lock_name(user_id))
 
     async def create(  # noqa: PLR0913 —— refresh token 字段多且全命名 kwargs，数据访问层可放宽
         self,
@@ -92,16 +99,21 @@ class RefreshTokenRepository:
 
     async def list_active_families(self, user_id: int, *, now: datetime) -> list[uuid.UUID]:
         """用户当前活跃 family（未撤销且未过期），按最近活跃→最旧排序（并发上限淘汰最旧用）。"""
-        # 每 family 取最大 issued_at 作活跃度；只算未撤销未过期的 token。
+        # 每 family 取最大 issued_at 作活跃度；MySQL DATETIME 可能无微秒精度，id 作稳定
+        # tiebreaker，避免同秒签发时并发上限误淘汰。
         stmt = (
-            select(RefreshToken.family_id, func.max(RefreshToken.issued_at).label("recent"))
+            select(
+                RefreshToken.family_id,
+                func.max(RefreshToken.issued_at).label("recent"),
+                func.max(RefreshToken.id).label("recent_id"),
+            )
             .where(
                 RefreshToken.user_id == user_id,
                 RefreshToken.revoked_at.is_(None),
                 RefreshToken.expires_at > now,
             )
             .group_by(RefreshToken.family_id)
-            .order_by(func.max(RefreshToken.issued_at).desc())
+            .order_by(func.max(RefreshToken.issued_at).desc(), func.max(RefreshToken.id).desc())
         )
         rows = (await self._session.execute(stmt)).all()
         return [r.family_id for r in rows]

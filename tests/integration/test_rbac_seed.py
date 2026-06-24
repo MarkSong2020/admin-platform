@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
@@ -16,15 +16,13 @@ from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.models import User
 from admin_platform.rbac.seed import MENU_TREE, SeedMenu, seed_rbac
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(
-            text("TRUNCATE TABLE role_menus, user_roles, menus, roles, users CASCADE")
-        )
+    await truncate_tables("role_menus", "user_roles", "menus", "roles", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

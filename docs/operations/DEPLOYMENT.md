@@ -59,7 +59,7 @@ readinessProbe:
 | 项 | env | 注意 |
 |---|---|---|
 | `APP_ENVIRONMENT` | `production` | **门禁总开关**。设 `production` 触发 `core.config` 生产门禁：缺 `auth_enabled` / 空 pepper / `debug=true` / `auth_public_paths` 含命名空间宽前缀（`/api` 等）→ startup fail-fast。**生产镜像 Dockerfile 已默认 `production`**；本地 / CI 不跑镜像（host 直跑 → 默认 `local`）。如用本镜像跑非生产须显式覆盖 `local` |
-| `APP_DATABASE_URL` | `postgresql+asyncpg://USER:PASS@HOST:5432/DB` | **绝不**用默认值 `app:app@localhost`；生产走 secret 注入 |
+| `APP_DATABASE_URL` | `mysql+aiomysql://USER:PASS@HOST:3306/DB` | **绝不**用默认值 `app:app@localhost`；生产走 secret 注入；MySQL 版本需 ≥ 8.0.16，schema 默认 collation 必须是 `utf8mb4_0900_bin`，开启 binlog 时需 `log_bin_trust_function_creators=1` |
 | `APP_REDIS_URL` | `redis://...:6379/0` | idempotency 用；不可达时降级，但金额场景应监控 Redis 健康 |
 | `APP_DEBUG` | `False` | **绝不**在生产 / staging 设 True（会让错误响应填诊断信息）|
 | `APP_LOG_LEVEL` | `INFO` | DEBUG 会量 |
@@ -89,7 +89,7 @@ readinessProbe:
 
 | 项 | env | 默认 | 注意 |
 |---|---|---|---|
-| 启用调度器 | `APP_SCHEDULER_ENABLED` | `False` | **生产显式开 `true`** 才跑 APScheduler；默认 False（CRUD / 手动触发不依赖调度器）。多 worker / 多 pod 安全靠 **PG advisory leader election + DB execution claim** 双层防重复执行，无需限制副本数 |
+| 启用调度器 | `APP_SCHEDULER_ENABLED` | `False` | **生产显式开 `true`** 才跑 APScheduler；默认 False（CRUD / 手动触发不依赖调度器）。多 worker / 多 pod 安全靠 **MySQL GET_LOCK leader election + DB execution claim** 双层防重复执行；无需限制副本数 |
 
 ### 基础设施超时
 
@@ -97,7 +97,7 @@ readinessProbe:
 |---|---|---|---|
 | Redis socket 超时 | `APP_REDIS_SOCKET_TIMEOUT_SECONDS` | `2.0` | idempotency / 缓存监控 / 在线用户派生用；不可达时降级，超时过大会拖慢请求 |
 
-> ⚠️ **数据库迁移 gated**：当前 Alembic head 是 **0020**；其中 `0013–0020`（P3 字典·参数·通知 / P4c 定时任务 / hardening 修复 / P5 文件管理 / 日志分页索引）**仅在本地 dev + CI 临时容器跑过，生产 / 共享库迁移尚未执行**，需单独授权后再 `make migrate`。生产首跑前必读 [RUNBOOK.md](./RUNBOOK.md) 的「迁移 0017 / 0020」节（0020 走 `CREATE INDEX CONCURRENTLY` 免锁、0017 回填的 TTL 参数与中断恢复步骤）。
+> ⚠️ **数据库迁移 gated**：本地 MySQL 迁移链已可执行到当前 head；生产 / 共享库迁移仍需单独授权。PostgreSQL 历史生产首跑说明见 [RUNBOOK.md](./RUNBOOK.md) 的「迁移 0017 / 0020」节。
 
 ## 资源 sizing 建议
 
@@ -105,7 +105,7 @@ readinessProbe:
 |---|---|---|
 | Pod memory | 256 MiB | Python + uvicorn 单进程；大约 ~150 MiB 占用 |
 | Pod CPU | 200m request / 1000m limit | uvicorn **单 worker per pod**（扩容靠 pod 数，见下） |
-| DB pool | `APP_DB_POOL_SIZE=5` + `APP_DB_MAX_OVERFLOW=10` | 总 15 连接 per pod，**必须**做容量评估（见下） |
+| DB pool | `APP_DB_POOL_SIZE=5` + `APP_DB_MAX_OVERFLOW=10` | 总 15 连接 per pod，**必须**做容量评估（见下）；MySQL `app_locks` 首次创建动态锁行会短暂借用第二连接，启用 scheduler 时 leader 还会长持 1 条连接 |
 | Redis pool | 默认 50（`Redis.from_url` 默认） | idempotency 流量大时调 |
 
 ### DB 连接容量评估（必读）
@@ -116,21 +116,22 @@ readinessProbe:
 总连接占用 ≈ (DB_POOL_SIZE + DB_MAX_OVERFLOW) × Pod 数 × worker 数
 ```
 
-**RDS / PG 侧硬上限**（必须不超过）：
+**MySQL 侧硬上限**（必须不超过）：
 
-| Postgres 实例 | `max_connections` 缺省 | 留给本服务（建议 ≤ 60%） |
-|---|---|---|
-| `db.t4g.medium` | 195 | ≤ 117 |
-| `db.m6i.large` | 437 | ≤ 262 |
-| `db.m6i.xlarge` | 874 | ≤ 524 |
-| 自建 PG 16 默认 | 100 | ≤ 60 |
+以目标实例实际 `max_connections` 为准，给本服务预留建议不超过总连接数的 60%，其余留给迁移、
+运维、只读查询和应急操作。容量验算口径：
+
+```text
+服务连接预算 = floor(max_connections × 0.6)
+Pod 数 × worker 数 × (DB_POOL_SIZE + DB_MAX_OVERFLOW) <= 服务连接预算
+```
 
 **示例**：默认 `5 + 10 = 15` 连接/pod。HPA 弹到 **10 pod** → 150 连接 → 在 `db.t4g.medium` 上**已逼近上限**且没给其他服务（migrations / Datadog agent / admin tools）留空间。
 
 **对策**（任选）：
 
 1. **调小单 pod pool**：`APP_DB_POOL_SIZE=2` + `APP_DB_MAX_OVERFLOW=4`（10 pod = 60 连接），适合"短查询 + 多请求"型负载
-2. **共享 PgBouncer**：在 K8s 集群里跑 PgBouncer sidecar / DaemonSet，service 连 PgBouncer，PgBouncer 连 RDS。一次性把 1000+ service 连接压成 30+ 后端连接。强烈推荐 RDS 实例小于 m6i.xlarge 时上 PgBouncer。
+2. **MySQL 连接代理**：优先用云厂商托管连接代理（如 RDS Proxy / 数据库代理）或 ProxySQL / MySQL Router，service 连代理，代理连 RDS。目标是把 1000+ service 连接压成可控后端连接数；不要沿用 PostgreSQL 专用的 PgBouncer。
 3. **升 RDS 实例**：成本最高，反应模式
 
 **监控**：CloudWatch / RDS Performance Insights 上看 `DatabaseConnections` 长时间 > 80% `max_connections` 必须告警。

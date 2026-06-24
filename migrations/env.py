@@ -3,7 +3,7 @@
 # layout is part of the file's contract (the generator inserts side-effect
 # imports there). isort's grouping rules conflict with this layout once two
 # or more domains are registered. File-level isort skip is the cleanest
-# fix; ``# ruff: noqa: I001`` would otherwise trip RUF100 (unused-noqa)
+# fix; a file-level Ruff noqa would otherwise trip RUF100 (unused-noqa)
 # when only one domain is patched in.
 """Alembic async migration environment.
 
@@ -26,6 +26,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from admin_platform.core.config import get_settings
 from admin_platform.db.base import Base
+from admin_platform.db.locks import AppLock  # noqa: F401
+from admin_platform.db.mysql_capabilities import (
+    assert_app_locks_table_healthy,
+    assert_mysql_database_capabilities,
+)
 
 # --- Register models here for autogenerate ----------------------------------
 # Import every module that defines ORM models so Base.metadata is populated.
@@ -77,6 +82,7 @@ def run_migrations_offline() -> None:
 
 
 def _do_run_migrations(connection: Connection) -> None:
+    assert_mysql_database_capabilities(connection)
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -84,6 +90,11 @@ def _do_run_migrations(connection: Connection) -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+    if connection.dialect.name == "mysql":
+        connection.commit()
+    # 迁移后独立确认 app_locks 真实引擎/collation（0021 幂等 ALTER 之外的纵深兜底，
+    # codex 对抗审查 BLOCKING）：非 InnoDB / 非 bin collation 即 fail-fast。
+    assert_app_locks_table_healthy(connection)
 
 
 async def run_migrations_online() -> None:

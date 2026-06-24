@@ -6,10 +6,10 @@
   * **权限矩阵 5 端点 403**：非超管、无权限 → list/query/add/edit/remove 全 403（默认 deny）。
   * **超管短路放行**：超管 stub → list 200。
   * **绑定（真 DB）**：``set_user_posts`` / ``list_posts_for_user`` 绑定正确；空列表解绑；去重。
-  * **并发 last-writer-wins**：两请求并发替换同一 user 的岗位 → advisory lock 串行化后恰好一个
+  * **并发 last-writer-wins**：两请求并发替换同一 user 的岗位 → 事务级行锁串行化后恰好一个
     岗位（非并集），不撞 ``uq_user_posts``（镜像 role 域 F3 测试）。
 
-跨表 FK：清表用 ``TRUNCATE ... CASCADE``（一并清子表绑定）。
+跨表 FK：清表经 MySQL helper 临时关闭外键检查后逐表 TRUNCATE（一并清子表绑定）。
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -39,6 +38,7 @@ from admin_platform.domains.post.repository import PostRepository
 from admin_platform.domains.post.schemas import PostCreate
 from admin_platform.domains.user.models import User
 from admin_platform.excel import ExcelExporter, ExcelImporter
+from tests.integration.db_cleanup import truncate_tables
 
 _XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -96,8 +96,7 @@ def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncC
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE user_posts, posts, users CASCADE"))
+    await truncate_tables("user_posts", "posts", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -283,7 +282,7 @@ async def test_set_and_list_user_posts(client: AsyncClient) -> None:
     assert posts == []
 
 
-# ---- 绑定全量替换并发 last-writer-wins（advisory lock 串行化，镜像 role F3）---
+# ---- 绑定全量替换并发 last-writer-wins（事务级行锁串行化，镜像 role F3）---
 
 
 async def test_delete_post_cascades_user_posts(client: AsyncClient) -> None:
@@ -300,7 +299,7 @@ async def test_delete_post_cascades_user_posts(client: AsyncClient) -> None:
 
 
 async def test_set_user_posts_concurrent_last_writer_wins(client: AsyncClient) -> None:
-    # 两请求并发把同一 user 的岗位分别替换为 [p1] / [p2]：advisory lock 串行化后最终恰好
+    # 两请求并发把同一 user 的岗位分别替换为 [p1] / [p2]：事务级行锁串行化后最终恰好
     # 一个岗位（last-writer-wins），而非并集 [p1, p2]，也不撞 uq_user_posts。
     uid = await _seed_user(username="u-concurrent")
     p1 = await _seed_post(code="cc1")

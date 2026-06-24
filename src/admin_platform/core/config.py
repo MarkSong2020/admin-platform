@@ -23,13 +23,8 @@ Environment = Literal["local", "dev", "staging", "production"]
 # 允许的 URL scheme。``database_url`` / ``redis_url`` 类型保持 ``str`` 而不是
 # 换成 Pydantic 的 URL 类型，这样下游消费方（``create_async_engine`` /
 # ``Redis.from_url``）熟悉的 str 入参契约不变；validator 提供 typo 早失败
-# （比如 ``reds://`` 或 ``postgresql+wrong://``），不必把类型拆开。
-_ALLOWED_DB_SCHEMES = (
-    "postgresql://",
-    "postgresql+asyncpg://",
-    "postgresql+psycopg://",
-    "postgresql+psycopg2://",
-)
+# （比如 ``reds://`` 或 ``mysql+wrong://``），不必把类型拆开。
+_ALLOWED_DB_SCHEMES = ("mysql+aiomysql://",)
 _ALLOWED_REDIS_SCHEMES = (
     "redis://",
     "rediss://",  # TLS — Redis 6+
@@ -89,7 +84,7 @@ class Settings(BaseSettings):
     cors_allow_credentials: bool = True
 
     # 数据库 —— 默认指向本地 compose db；生产必须通过 env 注入。
-    database_url: str = "postgresql+asyncpg://app:app@localhost:5432/app"
+    database_url: str = "mysql+aiomysql://app:app@localhost:3306/app"
     db_echo: bool = False
     # Pool 大小有边界，避免类似 ``APP_DB_POOL_SIZE=-1`` /
     # ``APP_DB_MAX_OVERFLOW=10000`` 这种 typo 在构造时被抓到，
@@ -190,10 +185,10 @@ class Settings(BaseSettings):
     audit_persistence_enabled: bool = True
 
     # P4c 定时任务调度器。默认 **False**：本地/CI/单测不起调度器（CRUD + 手动触发不依赖它）。
-    # 生产由部署显式开。多 worker 安全：仅抢到 PG advisory leader lock 的 worker 起 APScheduler；
-    # 任务级 DB execution claim（partial unique）兜 failover 双触发。
+    # 生产由部署显式开。多 worker 安全：仅抢到 MySQL GET_LOCK leader lock 的 worker 起 APScheduler；
+    # 任务级 DB execution claim（生成列唯一索引）兜 failover 双触发。
     scheduler_enabled: bool = False
-    # leader 选举 advisory lock key（与 seed 478261 / 各域 478221-478260 隔离，单 bigint）。
+    # leader 选举 GET_LOCK 名称后缀；最终锁名由 scheduler 组合为 admin-platform:scheduler:{key}。
     scheduler_leader_lock_key: int = 478270
     # 周期：非 leader 重试夺锁 + leader 重载任务（reconcile DB↔scheduler）的间隔秒。bounded 1..3600
     # （L：APP_SCHEDULER_POLL_SECONDS=0/负 → leader 每个事件循环 tick 全量 reconcile 打 DB，构造时即拒）。
@@ -231,8 +226,7 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def _validate_database_url_scheme(cls, value: str) -> str:
-        # 让 scheme typo（漏写 ``ql`` 的 ``postgres://``、或
-        # ``postgresql+asynpcg``）在 Settings 构造时就暴露，不要拖到
+        # 让 scheme typo（如 ``mysql://``、``mysql+asynmy``）在 Settings 构造时就暴露，不要拖到
         # ``create_async_engine`` 在第一次 DB 调用时吐晦涩的 dialect-load 错。
         if not value.startswith(_ALLOWED_DB_SCHEMES):
             allowed = ", ".join(_ALLOWED_DB_SCHEMES)

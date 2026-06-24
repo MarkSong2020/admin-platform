@@ -9,7 +9,7 @@
   * **权限派生（真 DB）**：``list_perms_for_user`` / ``list_menu_ids_for_user`` 经 role_menus 正确，
     供人值守把 ``get_user_permissions`` 改真实派生。
 
-自引用 / 跨表 FK：清表用 ``TRUNCATE ... CASCADE``（一并清子表绑定）。
+自引用 / 跨表 FK：清表经 MySQL helper 临时关闭外键检查后逐表 TRUNCATE（一并清子表绑定）。
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -37,6 +36,7 @@ from admin_platform.domains.menu.repository import MenuRepository
 from admin_platform.domains.role.models import Role
 from admin_platform.domains.role.repository import RoleRepository
 from admin_platform.domains.user.models import User
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -84,10 +84,7 @@ def _build_client(provider: PermissionProvider, *, user_id: str = "1") -> AsyncC
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(
-            text("TRUNCATE TABLE role_menus, menus, user_roles, role_depts, roles, users CASCADE")
-        )
+    await truncate_tables("role_menus", "menus", "user_roles", "role_depts", "roles", "users")
 
 
 @pytest_asyncio.fixture(autouse=True)

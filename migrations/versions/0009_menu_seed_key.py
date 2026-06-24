@@ -20,8 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # menus.seed_key（§13.1）：版本化 seed manifest 的稳定键。非空 = rbac seed 内置菜单
-    # （幂等 upsert 锚点 + 系统管理标记）；NULL = 用户自建菜单（seed 不碰）。partial unique
-    # 仅约束非空值，保证内置菜单 seed_key 唯一。
+    # （幂等 upsert 锚点 + 系统管理标记）；NULL = 用户自建菜单（seed 不碰）。MySQL unique
+    # 允许多个 NULL，天然仅约束非空 seed_key。
     op.add_column(
         "menus",
         sa.Column(
@@ -36,7 +36,6 @@ def upgrade() -> None:
         "menus",
         ["seed_key"],
         unique=True,
-        postgresql_where=sa.text("seed_key IS NOT NULL"),
     )
 
 

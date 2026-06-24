@@ -1,7 +1,7 @@
 """调度器 + 执行 claim 集成测试（P4c 多 worker 红线核心）—— 需 DB。
 
-覆盖：① leader election 单赢家 + failover 接管（PG advisory lock）；② **执行 claim 并发去重**
-（两 worker 同 tick 触发同任务 → partial unique 只放一条，红线正确性层）；③ allow_concurrent=False
+覆盖：① leader election 单赢家 + failover 接管（MySQL GET_LOCK 迁移在阶段 3 落地）；② **执行 claim 并发去重**
+（两 worker 同 tick 触发同任务 → 生成列唯一索引只放一条，红线正确性层）；③ allow_concurrent=False
 上次未跑完 → skipped；④ reconcile 只装载 enabled 任务；⑤ _fire 产 schedule 执行日志。
 """
 
@@ -15,10 +15,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from admin_platform.core.config import get_settings
-from admin_platform.db.engine import dispose_engine
+from admin_platform.db.engine import dispose_engine, get_engine
 from admin_platform.db.session import db_session
 from admin_platform.domains.scheduled_task.executor import ExecutionOutcome, TaskExecutor
 from admin_platform.domains.scheduled_task.models import ScheduledTask, ScheduledTaskLog
@@ -28,6 +28,7 @@ from admin_platform.domains.scheduled_task.registry import (
     JobHandlerRegistry,
 )
 from admin_platform.domains.scheduled_task.scheduler import SchedulerController
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -41,8 +42,7 @@ def _settings():
 
 
 async def _wipe() -> None:
-    async with db_session() as s:
-        await s.execute(text("TRUNCATE TABLE scheduled_task_logs, scheduled_tasks CASCADE"))
+    await truncate_tables("scheduled_task_logs", "scheduled_tasks")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -118,7 +118,7 @@ async def test_leader_failover() -> None:
 
 
 async def test_schedule_claim_dedup_concurrent() -> None:
-    """两 worker 同 tick 触发同任务 → partial unique 只放一条（防 failover 双执行）。"""
+    """两 worker 同 tick 触发同任务 → 生成列唯一索引只放一条（防 failover 双执行）。"""
     task_id = await _seed_task()
     ex = TaskExecutor(JOB_REGISTRY)
     results = await asyncio.gather(
@@ -286,13 +286,19 @@ async def test_executor_handler_offline_records_failure() -> None:
 
 
 async def test_verify_leadership_demotes_on_dead_connection() -> None:
-    """H6：leader 专用连接被杀（PG idle-in-tx timeout/网络断）→ _verify_leadership 自降级回夺锁态，
+    """H6：leader 专用连接被杀（MySQL/网络断）→ _verify_leadership 自降级回夺锁态，
     避免老 leader 仍 is_leader=True 与新 leader 双触发。"""
     ctl = SchedulerController(_settings(), JOB_REGISTRY)
     await ctl.start()
     try:
         assert ctl.is_leader and ctl._leader_conn is not None
-        await ctl._leader_conn.close()  # 模拟连接被杀（会话级 advisory lock 随之释放）
+        leader_conn_id = (
+            await ctl._leader_conn.execute(text("SELECT CONNECTION_ID()"))
+        ).scalar_one()
+        await ctl._leader_conn.commit()
+        async with get_engine().connect() as killer:
+            await killer.execute(text(f"KILL CONNECTION {int(leader_conn_id)}"))
+            await killer.commit()
         assert await ctl._verify_leadership() is False
         assert ctl.is_leader is False  # 自降级
         assert ctl._scheduler is None  # 停止调度
@@ -365,7 +371,7 @@ async def test_stale_running_not_counted_executes() -> None:
 async def test_schedule_log_requires_scheduled_at() -> None:
     """L：DB CHECK 拒绝 schedule + scheduled_at=NULL 的日志（堵死绕过 claim 红线的旁路）。"""
     task_id = await _seed_task()
-    with pytest.raises(IntegrityError):
+    with pytest.raises((IntegrityError, OperationalError)):
         async with db_session() as s:
             s.add(
                 ScheduledTaskLog(

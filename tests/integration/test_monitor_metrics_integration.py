@@ -7,10 +7,13 @@ service→collector 端到端。缓存 available=True 分支需本地 Redis（CI
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from admin_platform.authz.scope import DataScope, ScopeType
 from admin_platform.core.auth import CurrentUser, require_current_user
@@ -75,10 +78,23 @@ async def test_cache_metrics_unavailable_without_redis() -> None:
         assert resp.json()["available"] is False
 
 
+@pytest.mark.redis_integration
 async def test_cache_metrics_real_redis() -> None:
     """真 Redis：available=True + 真实 INFO 字段。覆盖 deps 的 redis-present 分支 + 真采集。"""
     app = _app(with_redis=True)
     try:
+        try:
+            await app.state.redis.ping()
+        except (RedisError, OSError) as exc:
+            strict = os.environ.get("STRICT_REDIS_INTEGRATION", "").lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            msg = f"Redis unavailable at {get_settings().redis_url}: {exc}"
+            if strict:
+                pytest.fail(msg + " — STRICT_REDIS_INTEGRATION=1 is set.")
+            pytest.skip(msg)
         async with _client(app) as c:
             resp = await c.get("/api/v1/monitor/cache")
             assert resp.status_code == 200, resp.text

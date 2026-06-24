@@ -1,7 +1,7 @@
 """定时任务数据访问 —— scheduled_tasks + scheduled_task_logs（SQLAlchemy 2.x async）。
 
 返回 ORM 行 / None / 计数，不抛业务异常（业务判定在 service）。执行 claim 的唯一约束冲突
-（partial unique）以 ``IntegrityError`` 上抛，由 executor 判为「已被其他 worker 抢占 → 跳过」。
+（生成列唯一索引）以 ``IntegrityError`` 上抛，由 executor 判为「已被其他 worker 抢占 → 跳过」。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class ScheduledTaskRepository:
 
     async def get_for_update(self, task_id: int) -> ScheduledTask | None:
         """``SELECT ... FOR UPDATE`` 锁任务行——执行 claim 用，串行化同一任务的并发触发
-        （manual 触发无 partial unique 兜底，靠此行锁消除 count_running↔INSERT 的 TOCTOU）。"""
+        （manual 触发无生成列唯一索引兜底，靠此行锁消除 count_running↔INSERT 的 TOCTOU）。"""
         stmt = select(ScheduledTask).where(ScheduledTask.id == task_id).with_for_update()
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
@@ -82,7 +82,7 @@ class ScheduledTaskRepository:
     # ---- 执行日志 ----
 
     async def create_log(self, log: ScheduledTaskLog) -> ScheduledTaskLog:
-        """新建执行日志。schedule claim 撞 partial unique → IntegrityError（executor 判跳过）。"""
+        """新建执行日志。schedule claim 撞生成列唯一索引 → IntegrityError（executor 判跳过）。"""
         self._session.add(log)
         await self._session.flush()
         return log

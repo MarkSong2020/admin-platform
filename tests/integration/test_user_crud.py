@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from admin_platform.authz.providers import PermissionProvider
 from admin_platform.authz.scope import DataScope, ScopeType
@@ -29,6 +28,7 @@ from admin_platform.domains.dept.models import Dept
 from admin_platform.domains.user.api import router as user_router
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
+from tests.integration.db_cleanup import truncate_tables
 
 pytestmark = pytest.mark.integration
 
@@ -37,8 +37,7 @@ _PASSWORD = "correct-horse-battery-staple"
 
 
 async def _wipe() -> None:
-    async with db_session() as session:
-        await session.execute(text("TRUNCATE TABLE users, depts CASCADE"))
+    await truncate_tables("users", "depts")
 
 
 @pytest_asyncio.fixture(autouse=True)

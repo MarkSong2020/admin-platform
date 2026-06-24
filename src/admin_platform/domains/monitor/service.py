@@ -127,7 +127,7 @@ class MonitorService:
             raise AppError(
                 code=_ONLINE_NOT_FOUND, title="Online session not found", status_code=404
             )
-        # H1：先取该用户 per-user advisory lock（同 refresh NS）再撤销，串行化与并发轮换——否则正在
+        # H1：先取该用户 per-user 事务级行锁（同 refresh 命名空间）再撤销，串行化与并发轮换——否则正在
         # 轮换的客户端新插的 token 不在本次撤销语句快照内 → 逃逸强制下线。
         await self._repo.acquire_user_lock(row.user_id)
         await self._repo.revoke_online_session(session_id, reason=_FORCED_LOGOUT_REASON, now=now)

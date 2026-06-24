@@ -18,7 +18,7 @@
 | 审计 | 操作日志 + 登录日志持久化（成功 in-tx 原子 / 失败缓冲）+ 中间件捕获 IP/UA |
 | 运营配置 | 字典（类型+数据，FK RESTRICT）+ 参数（热更新读穿）+ 通知公告 |
 | 监控 | 服务监控（psutil CPU/内存/磁盘）+ 缓存监控（Redis INFO 降级）+ 在线用户（强制下线）|
-| 定时任务 | APScheduler + PG leader election + DB execution claim（多 worker 安全）+ handler 白名单（防 RCE）|
+| 定时任务 | APScheduler + DB leader election + DB execution claim（多 worker 安全；MySQL GET_LOCK 迁移在阶段 3 落地）+ handler 白名单（防 RCE）|
 | 文件 | 对标 sys_oss：存储抽象 + 扩展名白名单 + 魔数校验 + 流式上传下载 + 软删 |
 | Excel | 通用导入导出机制（formula injection 防御 + 全量错误报告）|
 | 工程基线 | RFC9457 错误响应 + X-Request-ID/traceparent + Idempotency-Key + 三轨健康检查 + OpenAPI 契约守门 |
@@ -30,7 +30,8 @@
 ```bash
 make init                       # uv sync --all-extras --dev
 uv run pre-commit install       # 必须：装 git hook（漏装首次 commit 必被拦）
-make compose-up && make migrate # 起 PostgreSQL + 应用 Alembic 迁移
+make compose-up                 # 起 MySQL
+make migrate                    # 本地 MySQL 执行 Alembic 迁移（生产/共享库仍需单独授权）
 make dev                        # http://127.0.0.1:8000/healthz
 make check                      # 全量质量门：lint + type + test + 分层契约 + schema 漂移
 ```
@@ -64,9 +65,9 @@ make new-module name=product with-model=1     # 含 ORM model
 
 ## 🏗️ 技术栈
 
-Python 3.14（uv 管理）・ FastAPI ・ SQLAlchemy 2.x async + asyncpg ・ Alembic ・ Redis（idempotency + cache）・ Argon2 + PyJWT ・ Ruff（format+lint）・ Pyright ・ Pytest ・ import-linter（分层契约）。
+Python 3.14（uv 管理）・ FastAPI ・ SQLAlchemy 2.x async + aiomysql ・ Alembic ・ Redis（idempotency + cache）・ Argon2 + PyJWT ・ Ruff（format+lint）・ Pyright ・ Pytest ・ import-linter（分层契约）。
 
-测试：`make check`（fast lane：unit + api，DB-free）/ `make test-integration`（需 docker compose 起 DB+Redis）/ `make coverage`（门槛 85%）。
+测试：`make check`（fast lane：unit + api，DB-free）/ `make test-integration`（MySQL 集成链路）/ `make coverage`（门槛 85%）。
 
 ## 🤝 贡献与许可
 
