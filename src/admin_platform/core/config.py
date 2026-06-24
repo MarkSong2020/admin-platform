@@ -24,7 +24,7 @@ Environment = Literal["local", "dev", "staging", "production"]
 # 换成 Pydantic 的 URL 类型，这样下游消费方（``create_async_engine`` /
 # ``Redis.from_url``）熟悉的 str 入参契约不变；validator 提供 typo 早失败
 # （比如 ``reds://`` 或 ``mysql+wrong://``），不必把类型拆开。
-_ALLOWED_DB_SCHEMES = ("mysql+asyncmy://",)
+_ALLOWED_DB_SCHEMES = ("mysql+aiomysql://",)
 _ALLOWED_REDIS_SCHEMES = (
     "redis://",
     "rediss://",  # TLS — Redis 6+
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     cors_allow_credentials: bool = True
 
     # 数据库 —— 默认指向本地 compose db；生产必须通过 env 注入。
-    database_url: str = "mysql+asyncmy://app:app@localhost:3306/app"
+    database_url: str = "mysql+aiomysql://app:app@localhost:3306/app"
     db_echo: bool = False
     # Pool 大小有边界，避免类似 ``APP_DB_POOL_SIZE=-1`` /
     # ``APP_DB_MAX_OVERFLOW=10000`` 这种 typo 在构造时被抓到，

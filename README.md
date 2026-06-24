@@ -65,7 +65,7 @@ make new-module name=product with-model=1     # 含 ORM model
 
 ## 🏗️ 技术栈
 
-Python 3.14（uv 管理）・ FastAPI ・ SQLAlchemy 2.x async + asyncmy ・ Alembic ・ Redis（idempotency + cache）・ Argon2 + PyJWT ・ Ruff（format+lint）・ Pyright ・ Pytest ・ import-linter（分层契约）。
+Python 3.14（uv 管理）・ FastAPI ・ SQLAlchemy 2.x async + aiomysql ・ Alembic ・ Redis（idempotency + cache）・ Argon2 + PyJWT ・ Ruff（format+lint）・ Pyright ・ Pytest ・ import-linter（分层契约）。
 
 测试：`make check`（fast lane：unit + api，DB-free）/ `make test-integration`（MySQL 集成链路）/ `make coverage`（门槛 85%）。
 

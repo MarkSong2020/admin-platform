@@ -45,10 +45,15 @@
 - **风险点**：`compare_server_default=True`（已开）跨大版本可能 false-positive 漂移
 - **守门**：`alembic check` 必跑
 
-### `asyncmy`
+### `aiomysql` / `PyMySQL`
 
-- 稳定，跟着 SQLAlchemy 升即可
-- **典型踩坑**：MySQL 认证插件（`caching_sha2_password` 需要 `cryptography`）、SSL 配置 schema 变化、连接断开后的 pool 回收
+- aiomysql 是异步 wrapper，底层是 PyMySQL（纯 Python）；二者跟着 SQLAlchemy 升即可
+- **PyMySQL 上界封顶 `<1.2`（务必保留）**：PyMySQL 1.2.0 把 `Connection.ping` 默认 `reconnect`
+  从 `True` 改成 `False`，触发 SQLAlchemy `_send_false_to_ping` 判错 → `pool_pre_ping` 调
+  `ping()` 时撞 aiomysql 异步适配器 `ping(self, reconnect)`（无默认）报 `TypeError`。放开上界前必须先
+  确认 SQLAlchemy 已修该适配器签名，且本地真库 `make test-integration` 全绿。
+- **典型踩坑**：MySQL 认证插件（`caching_sha2_password` 需要 `cryptography`，已在依赖内）、SSL 配置
+  schema 变化、连接断开后的 pool 回收（`pool_pre_ping` 依赖 driver `ping` 行为，见上）
 
 ### `redis-py`
 

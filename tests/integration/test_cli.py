@@ -17,10 +17,12 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from admin_platform.audit.models import AuditEventLog
 from admin_platform.cli import CliError, create_super_admin
 from admin_platform.core.security import verify_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth.models import LoginLog
 from admin_platform.domains.user.models import User
 
 pytestmark = pytest.mark.integration
@@ -31,7 +33,10 @@ _STRONG_PW = "bootstrap-strong-" + "z" * 12  # ≥12、无空白、≠username
 
 async def _wipe() -> None:
     async with db_session() as session:
+        # 清 users + 无 FK 的日志表(login_logs/audit_events 不随 users 删 → 跨测试残留致 flaky，codex 审查)
         await session.execute(delete(User))
+        await session.execute(delete(LoginLog))
+        await session.execute(delete(AuditEventLog))
 
 
 @pytest_asyncio.fixture(autouse=True)

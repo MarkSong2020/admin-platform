@@ -6,8 +6,8 @@ import pytest
 
 from tests.integration.db_cleanup import assert_destructive_test_database_allowed
 
-_LOCAL_URL = "mysql+asyncmy://app:app@127.0.0.1:3306/app"
-_NONLOCAL_URL = "mysql+asyncmy://app:app@db.example.com:3306/app"
+_LOCAL_URL = "mysql+aiomysql://app:app@127.0.0.1:3306/app"
+_NONLOCAL_URL = "mysql+aiomysql://app:app@db.example.com:3306/app"
 
 
 def test_destructive_guard_requires_explicit_allow_env(

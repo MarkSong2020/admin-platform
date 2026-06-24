@@ -266,7 +266,7 @@
 |---|---|---|---|---|---|
 | `name` | VARCHAR(128) | NOT NULL | — | 任务名称(唯一) |  |
 | `handler_key` | VARCHAR(128) | NOT NULL | — | 处理器键(命中代码侧registry,非任意调用目标) |  |
-| `params_json` | JSON | NOT NULL | — | 处理器参数(JSON) |  |
+| `params_json` | JSON | NOT NULL | `(JSON_OBJECT())` (DB) | 处理器参数(JSON) |  |
 | `cron_expression` | VARCHAR(128) | NOT NULL | — | cron表达式(5字段标准crontab,经校验) |  |
 | `cron_timezone` | VARCHAR(64) | NOT NULL | `'Asia/Shanghai'` (DB) | cron解释时区(库时间存UTC) |  |
 | `status` | VARCHAR(16) | NOT NULL | `'disabled'` (DB) | 状态(enabled/disabled) |  |
@@ -364,7 +364,7 @@
 | `scheduled_at` | DATETIME | NULL | — | 计划触发时刻(UTC,自动触发用于claim去重) |  |
 | `schedule_claim_scheduled_at` | DATETIME | NULL | `GENERATED ALWAYS AS (CASE WHEN trigger_type = 'schedule' THEN scheduled_at ELSE NULL END) STORED` (DB) | MySQL生成列: 自动触发claim计划时间, manual为NULL |  |
 | `handler_key` | VARCHAR(128) | NOT NULL | — | 处理器键(快照) |  |
-| `params_json` | JSON | NOT NULL | — | 执行参数快照(JSON) |  |
+| `params_json` | JSON | NOT NULL | `(JSON_OBJECT())` (DB) | 执行参数快照(JSON) |  |
 | `status` | VARCHAR(16) | NOT NULL | — | 执行状态 |  |
 | `started_at` | DATETIME | NULL | — | 开始执行时刻(UTC) |  |
 | `finished_at` | DATETIME | NULL | — | 结束时刻(UTC) |  |

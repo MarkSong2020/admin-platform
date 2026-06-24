@@ -19,7 +19,7 @@ def test_defaults() -> None:
     assert settings.debug is False
     assert settings.log_level == "INFO"
     assert settings.request_id_header == "X-Request-ID"
-    assert settings.database_url == "mysql+asyncmy://app:app@localhost:3306/app"
+    assert settings.database_url == "mysql+aiomysql://app:app@localhost:3306/app"
     assert settings.cors_allow_origins == []
     assert settings.cors_allow_credentials is True
 
@@ -112,11 +112,11 @@ def test_log_level_rejects_typos(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_database_url_scheme_typo_is_rejected() -> None:
     """``database_url`` validator catches dialect typos at construction time, not at first query."""
     with pytest.raises(ValidationError, match="database_url"):
-        Settings(database_url="mysql://localhost/x")  # missing asyncmy driver
+        Settings(database_url="mysql://localhost/x")  # missing aiomysql driver
 
 
-def test_database_url_asyncmy_dialect_is_allowed() -> None:
-    assert Settings(database_url="mysql+asyncmy://u:p@h:3306/d").database_url
+def test_database_url_aiomysql_dialect_is_allowed() -> None:
+    assert Settings(database_url="mysql+aiomysql://u:p@h:3306/d").database_url
 
 
 def test_database_url_postgresql_dialect_is_rejected() -> None:

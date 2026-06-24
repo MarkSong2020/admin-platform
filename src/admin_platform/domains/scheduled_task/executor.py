@@ -86,7 +86,7 @@ def _is_claim_taken(exc: IntegrityError) -> bool:
 
 
 def _as_utc_aware(value: datetime) -> datetime:
-    """MySQL DATETIME 经 asyncmy 读回为 naive；本仓约定其语义是 UTC。"""
+    """MySQL DATETIME 经 aiomysql 读回为 naive；本仓约定其语义是 UTC。"""
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)

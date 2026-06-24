@@ -45,7 +45,7 @@ fi
 
 echo "Running phase 0 PoC against 127.0.0.1:${host_port}" >&2
 MYSQL_POC_ALLOW_SCHEMA_RESET=1 \
-MYSQL_POC_DATABASE_URL="mysql+asyncmy://root:app@127.0.0.1:${host_port}/mysql_phase0" \
-uv run --with asyncmy --with cryptography python scripts/mysql_phase0_poc.py \
+MYSQL_POC_DATABASE_URL="mysql+aiomysql://root:app@127.0.0.1:${host_port}/mysql_phase0" \
+uv run --with aiomysql --with "pymysql<1.2" --with cryptography python scripts/mysql_phase0_poc.py \
   --workers "${workers}" \
   --rounds "${rounds}"

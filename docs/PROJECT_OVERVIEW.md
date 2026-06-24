@@ -36,7 +36,7 @@
 - **方向变更（2026-06-05）**：原 SaaS 多租户定位已废弃，回归单租户对标 RuoYi 本体。多租户机制（`TenantMixin` / `tenant_filter` / `tenants` 表）已拆除，背景见 [`architecture/MULTI_TENANCY.md`](./architecture/MULTI_TENANCY.md) 废弃说明
 - **测试**：`make check` ✓（fast lane：unit + api，ruff + pyright + pytest，不含 integration）/ `make test-integration` MySQL 集成链路 / `make coverage` 门槛 85%（v0.0.1 起已接入 CI fast lane 强制）
 - **Python**：3.14（`.python-version` 锁定，`requires-python = ">=3.14"`），uv 包管理
-- **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ asyncmy + argon2-cffi（密码哈希）+ PyJWT
+- **核心栈**：FastAPI + SQLAlchemy 2.x async + Alembic + Redis（idempotency in-flight lock + cache-replay）+ aiomysql + argon2-cffi（密码哈希）+ PyJWT
 - **脚手架 lineage**：generator、`.github/workflows/ci.yml`、`tech-debt/KNOWN_DEVIATIONS.md` 继承自模板 v0.5.3。示例域 `domains/todo`/`domains/tag` 已删除（admin 平台不需要，建 domain 用 `make new-module`）。模板演进史 → [../CHANGELOG.md](../CHANGELOG.md)
 
 ## 已落地的契约（对应 ADR 0001 章节）

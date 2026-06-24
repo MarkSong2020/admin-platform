@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 
 import admin_platform.domains.dict.models  # noqa: F401  —— import 时注册 dict 单默认值约束映射
 from admin_platform.core.config import get_settings
@@ -124,14 +124,14 @@ class _MockOrigWithConstraintInMessage(Exception):
 
 
 class _MockMysqlDuplicateEntry(Exception):
-    """模拟 asyncmy/MySQL 1062 duplicate entry。"""
+    """模拟 aiomysql/MySQL 1062 duplicate entry。"""
 
     def __init__(self, key_name: str) -> None:
         super().__init__(1062, f"Duplicate entry 'alice' for key 'users.{key_name}'")
 
 
 class _MockMysqlForeignKeyConstraint(Exception):
-    """模拟 asyncmy/MySQL 1451 foreign key constraint fails。"""
+    """模拟 aiomysql/MySQL 1451 foreign key constraint fails。"""
 
     def __init__(self, constraint_name: str) -> None:
         super().__init__(
@@ -140,6 +140,29 @@ class _MockMysqlForeignKeyConstraint(Exception):
             f"(`app`.`dict_data`, CONSTRAINT `{constraint_name}` FOREIGN KEY (`dict_type_id`) "
             "REFERENCES `dict_types` (`id`))",
         )
+
+
+# 下面三类 orig 的 (类, errno) 取自真库实测(mysql:8.0 + aiomysql)：
+# 1406 超长 → DataError；3819 CHECK → OperationalError；1213 死锁 → OperationalError。
+class _MockMysqlDataTooLong(Exception):
+    """模拟 aiomysql/MySQL 1406 Data too long（DataError.orig）。"""
+
+    def __init__(self) -> None:
+        super().__init__(1406, "Data too long for column 'name' at row 1")
+
+
+class _MockMysqlCheckViolation(Exception):
+    """模拟 aiomysql/MySQL 3819 CHECK 约束违反（OperationalError.orig）。"""
+
+    def __init__(self) -> None:
+        super().__init__(3819, "Check constraint 'ck_scheduled_tasks_status' is violated.")
+
+
+class _MockMysqlDeadlock(Exception):
+    """模拟 aiomysql/MySQL 1213 死锁（OperationalError.orig，非数据非法 → 仍 500）。"""
+
+    def __init__(self) -> None:
+        super().__init__(1213, "Deadlock found when trying to get lock; try restarting transaction")
 
 
 def test_integrity_registered_constraint_returns_typed_409(app: FastAPI) -> None:
@@ -303,3 +326,50 @@ def test_register_unique_constraint_conflict_fails_fast() -> None:
     register_unique_constraint("uq_failfast_probe2", "test.A_DUP", "a")
     with pytest.raises(RuntimeError, match="漂移"):
         register_unique_constraint("uq_failfast_probe2", "test.B_DUP", "b")
+
+
+def test_data_error_returns_422_constraint_violation(app: FastAPI) -> None:
+    """1406 超长属 DataError，整类映 422（防 schema 漏配 max_length 时退化成 500）。
+    body 脱敏：不回显被拒值，也不漏 DB 列名。"""
+
+    @app.post("/__data-too-long")
+    async def handler() -> None:
+        raise DataError("INSERT INTO ...", {"params": None}, orig=_MockMysqlDataTooLong())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__data-too-long")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"] == "framework.CONSTRAINT_VIOLATION"
+    assert body["detail"] is None
+    assert "name" not in (body.get("errors") or {})  # 列名不外泄
+
+
+def test_check_violation_operational_error_returns_422(app: FastAPI) -> None:
+    """3819 CHECK 违反归到 OperationalError，从宽类里挑出 → 422。"""
+
+    @app.post("/__check-violation")
+    async def handler() -> None:
+        raise OperationalError("INSERT INTO ...", {"params": None}, orig=_MockMysqlCheckViolation())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__check-violation")
+
+    assert resp.status_code == 422
+    assert resp.json()["type"] == "framework.CONSTRAINT_VIOLATION"
+
+
+def test_non_check_operational_error_stays_500(app: FastAPI) -> None:
+    """OperationalError 宽类里的非 CHECK（死锁 1213）是服务端/瞬态问题 → 保持 500，
+    不能误判成 422 让客户端以为是自己数据非法。"""
+
+    @app.post("/__deadlock")
+    async def handler() -> None:
+        raise OperationalError("UPDATE ...", {"params": None}, orig=_MockMysqlDeadlock())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__deadlock")
+
+    assert resp.status_code == 500
+    assert resp.json()["type"] == "framework.INTERNAL_ERROR"

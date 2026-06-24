@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from admin_platform.core.config import get_settings
@@ -142,6 +142,9 @@ _UNIQUE_CONSTRAINT_CODES: dict[str, tuple[str, str]] = {}
 # ``CONSTRAINT `fk_xxx``` 文本中带约束名，统一归一后走同一注册表。
 _CONSTRAINT_RE = re.compile(r'constraint "([^"]+)"')
 _MYSQL_DUPLICATE_ENTRY = 1062
+# MySQL 8.0.16+ CHECK 约束违反：driver 抛 errno 3819，SQLAlchemy 归到 OperationalError
+# （非 IntegrityError，真库实测）。是「数据非法」类，需单独从宽类 OperationalError 里挑出映 422。
+_MYSQL_CHECK_VIOLATION = 3819
 _MYSQL_KEY_RE = re.compile(r"for key ['`\"](?P<key>[^'`\"]+)['`\"]", re.IGNORECASE)
 _MYSQL_CONSTRAINT_RE = re.compile(r"CONSTRAINT [`'\"](?P<constraint>[^`'\"]+)[`'\"]")
 
@@ -379,8 +382,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             ),
         )
 
-    @app.exception_handler(Exception)
-    async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    def _internal_error_response(request: Request, exc: Exception) -> JSONResponse:
         logger.exception(
             "unhandled exception",
             extra={
@@ -404,3 +406,50 @@ def register_exception_handlers(app: FastAPI) -> None:
                 errors=errors,
             ),
         )
+
+    def _constraint_violation_response(
+        request: Request, exc: DBAPIError, kind: str
+    ) -> JSONResponse:
+        # DB 层约束(长度超限/CHECK/数值域)拦下的非法输入：翻成结构化 422，而非退化成 500。
+        # 这是 Pydantic 请求体边界校验之外的最后一层防御(防 schema 漏配 max_length / 取值范围，
+        # 或 raw/内部写路径绕过 schema)。body 不回显被拒值，也不暴露 DB schema 名(列名/约束名)
+        # ——只进 log，对齐 IntegrityError handler 的脱敏口径。
+        logger.warning(
+            "db constraint violation mapped to 422",
+            extra={
+                "request_id": _request_id(request),
+                "kind": kind,
+                "errno": _dbapi_error_code(exc.orig),
+                "method": request.method,
+                "path": request.url.path,
+            },
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            content=_payload(
+                code="framework.CONSTRAINT_VIOLATION",
+                title="Data constraint violation",
+                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+                detail=None,
+                request_id=_request_id(request),
+                trace_id=_trace_id(request),
+                errors=None,
+            ),
+        )
+
+    @app.exception_handler(DataError)
+    async def _data_error(request: Request, exc: DataError) -> JSONResponse:
+        # DataError 整类属输入问题(1406 超长 / 1264 越界 / 1366 非法值)——恒为调用方数据非法，映 422。
+        return _constraint_violation_response(request, exc, "data")
+
+    @app.exception_handler(OperationalError)
+    async def _operational_error(request: Request, exc: OperationalError) -> JSONResponse:
+        # OperationalError 是宽类(连接断 / 死锁 / 锁等待超时 / CHECK 违反)。只有 CHECK(3819)是
+        # 调用方数据非法 → 422；其余(连接/死锁等)是服务端/瞬态问题，保持 500 语义不误导客户端。
+        if _dbapi_error_code(exc.orig) == _MYSQL_CHECK_VIOLATION:
+            return _constraint_violation_response(request, exc, "check")
+        return _internal_error_response(request, exc)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+        return _internal_error_response(request, exc)

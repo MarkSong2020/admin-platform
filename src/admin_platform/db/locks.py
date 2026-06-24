@@ -168,8 +168,9 @@ def _ensure_guard(name: str) -> asyncio.Lock:
 
 
 async def _insert_ignore_app_lock(conn: Any, name: str) -> None:
-    # asyncmy 会把 INSERT IGNORE 的 duplicate warning 打到 stderr；sql_notes=0 只包住
-    # 占位写入，随后立即恢复，避免污染业务查询的 warning 行为。
+    # INSERT IGNORE 命中重复会产生 MySQL NOTE 级 warning。sql_notes=0 在占位写入期间抑制其
+    # 记录，随后立即恢复——驱动无关的轻量卫生措施（aiomysql/PyMySQL 默认不外显该 warning，真库实测
+    # stderr 为空；asyncmy 评估期则会刷到 stderr）。保留这层抑制，避免驱动/代理/审计侧记录无谓噪声。
     await conn.execute(text("SET sql_notes = 0"))
     try:
         await conn.execute(

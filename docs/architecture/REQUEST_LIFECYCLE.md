@@ -151,7 +151,7 @@ inbound request
 | `redis_url` | `redis://localhost:6379/0` | Redis 连接（lazy pool） |
 | `request_id_header` | `X-Request-ID` | header 名（不建议改） |
 | `service_id` | `service_name` | ADR §3 / §5 / §8 / §10 服务前缀（同源 OpenAPI tag / Datadog service / Prometheus label / JWT aud）|
-| `database_url` | `mysql+asyncmy://app:app@localhost:3306/app` | DB |
+| `database_url` | `mysql+aiomysql://app:app@localhost:3306/app` | DB |
 
 ## 启动行为（lifespan）
 

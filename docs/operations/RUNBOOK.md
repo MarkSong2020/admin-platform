@@ -139,55 +139,66 @@ fresh clone / 全新 PostgreSQL 历史基线 DB 无此问题。
 
 **修复**：恢复 `addLevelName` 调用 + 跑 `tests/unit/test_logging.py` 守门。
 
-## 迁移 0017 / 0020：PostgreSQL 历史生产大表执行（锁 / 回填 / CONCURRENTLY 中断恢复）
+## 迁移 0017 / 0020：生产 / 共享大表首跑（锁 / 回填 / 在线 DDL）
 
-> `0013–0020` 是 PostgreSQL 历史迁移说明；MySQL 迁移后的当前迁移链不再按本节执行 PostgreSQL 专用 DDL。
-> 生产 / 共享库**首跑前**按本节评估——这两条是迁移链里唯二碰大表 / 长锁的。
+> `0013–0021` 已是 MySQL 迁移链。生产 / 共享库**首跑前**按本节评估——这两条是迁移链里唯二
+> 碰大表 / 长锁的。⚠️ 本仓 `0013–0021` 仅本地 dev + CI 临时容器跑过，**生产 / 共享库迁移待单独授权**。
 
 ### 0020 — audit_events / login_logs 分页复合索引
 
-**风险**：两张 append-only 日志热表，行数随运行无限增长。普通 `CREATE INDEX` 持 `SHARE` 锁
-会**阻塞表写入**（= 阻塞审计与登录日志落库），大表上可能锁住数分钟。
+**风险**：两张 append-only 日志热表，行数随运行无限增长。建二级索引若退化成持表锁的 `COPY`
+算法，会**阻塞表写入**（= 阻塞审计与登录日志落库），大表上可能锁住数分钟。
 
-**已做的缓解**：迁移用 `CREATE INDEX CONCURRENTLY`（`autocommit_block` 跳出迁移链事务，
-见 `migrations/versions/0020_log_pagination_indexes.py`），建索引期间**不阻塞读写**。代价：
-① 比普通建索引慢 ~2–3×；② 不能在事务内，故 0020 的版本号提交与建索引分两段
-（`alembic upgrade 0019:0020 --sql` 可见两条 `CREATE INDEX CONCURRENTLY` 落在 `COMMIT` 之外）。
+**已做的缓解**：MySQL 8.0 InnoDB 加二级索引默认走 **Online DDL**（`ALGORITHM=INPLACE, LOCK=NONE`），
+建索引期间**允许并发读写**（仅起止两个极短瞬间拿元数据锁）。Alembic `op.create_index` 发出的
+`CREATE INDEX` 即按此在线执行（见 `migrations/versions/0020_log_pagination_indexes.py`，additive、
+不改表不动数据）。与 PostgreSQL 不同，MySQL 无需 `CONCURRENTLY`，也无需跳出事务。
 
-**执行前检查**：
-```bash
-# 1. 看两表体量，估建索引时长（CONCURRENTLY ≈ 全表扫两遍）
-psql "$APP_DATABASE_URL" -c "SELECT relname, n_live_tup, pg_size_pretty(pg_total_relation_size(oid)) FROM pg_class WHERE relname IN ('audit_events','login_logs');"
-# 2. 确认无长事务（CONCURRENTLY 要等所有并发旧事务结束才完成）
-psql "$APP_DATABASE_URL" -c "SELECT pid, state, now()-xact_start AS age, left(query,60) FROM pg_stat_activity WHERE state <> 'idle' ORDER BY age DESC LIMIT 5;"
-```
-
-**PostgreSQL 历史执行**：`make migrate`（= `alembic upgrade head`）。建议先 `alembic upgrade 0019:0020 --sql`
-导出 SQL 交 DBA 审。建索引期间另开连接监控：
+**执行前检查**（用你的 MySQL 客户端连上目标库后执行——注意 `mysql` CLI 不接受 `$APP_DATABASE_URL`
+的 SQLAlchemy URL 形式 `mysql+aiomysql://user:pass@host:port/db`，需手动拆成
+`mysql -h<host> -P<port> -u<user> -p <db>`）：
 ```sql
-SELECT now()-query_start AS dur, query FROM pg_stat_activity WHERE query LIKE 'CREATE INDEX CONCURRENTLY%';
+-- 1. 看两表体量，估建索引时长与额外磁盘（INPLACE 建索引需临时排序 + rebuild 空间）
+SELECT table_name, table_rows, ROUND((data_length+index_length)/1024/1024) AS total_mb
+FROM information_schema.tables
+WHERE table_schema = DATABASE() AND table_name IN ('audit_events','login_logs');
+-- 2. 确认无长事务 / 长查询（Online DDL 起止拿元数据锁，会被未结束的旧事务卡住，连带阻塞后续 DML）
+SELECT id, time, state, LEFT(info,60) FROM information_schema.processlist
+WHERE command <> 'Sleep' ORDER BY time DESC LIMIT 5;
 ```
 
-**中断恢复（CONCURRENTLY 特有坑）**：CONCURRENTLY 建索引中途失败 / 被 kill，会留下一个
-**INVALID 索引**——不被查询使用、占空间，且让重跑迁移报 "already exists"。
+**执行**：`make migrate`（= `alembic upgrade head`）。建议先 `alembic upgrade 0019:0020 --sql`
+导出 SQL 交 DBA 审。想在大表上**显式拒绝退化成锁表**，可让 DBA 改用
+`ALTER TABLE ... ADD INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`——MySQL 若无法在线完成会直接报错，
+而非静默持锁。建索引期间另开连接监控进度：
 ```sql
--- 1. 查 INVALID 索引
-SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
-WHERE NOT i.indisvalid AND c.relname IN ('ix_audit_events_status_time','ix_login_logs_status_time');
--- 2. 删掉（DROP 也并发，免锁），再重跑迁移
-DROP INDEX CONCURRENTLY IF EXISTS ix_audit_events_status_time;
-DROP INDEX CONCURRENTLY IF EXISTS ix_login_logs_status_time;
+SELECT stage.event_name, ROUND(work_completed/NULLIF(work_estimated,0)*100,1) AS pct
+FROM performance_schema.events_stages_current stage
+JOIN performance_schema.threads thr USING (thread_id)
+WHERE thr.processlist_info LIKE 'ALTER TABLE%' OR thr.processlist_info LIKE 'CREATE INDEX%';
 ```
-> 版本号提交在建索引**之后**，正常不会出现 "version=0020 但索引 INVALID"。若真出现（手工中断时机刁钻），
-> 删 INVALID 索引后 `alembic downgrade 0019 && alembic upgrade 0020` 重做，或按迁移文件定义手工
-> `CREATE INDEX CONCURRENTLY` 补建。
+
+**中断恢复（MySQL 与 PG 的关键差异）**：MySQL 8.0 是原子 DDL——单条 `CREATE INDEX` 要么建成要么完全
+回滚，**不会**像 PostgreSQL 那样留下 INVALID 索引。但 0020 发**两条** `create_index`，而 DDL 在 MySQL
+里**各自隐式提交**：若第一条成功、第二条失败，第一个索引已落地而 alembic 版本号尚未 stamp，重跑
+迁移会在第一条上撞 `Duplicate key name`。恢复：
+```sql
+-- 1. 看哪几个索引已建（对照迁移定义的两个名字）
+SHOW INDEX FROM audit_events;   -- 找 ix_audit_events_status_time
+SHOW INDEX FROM login_logs;     -- 找 ix_login_logs_status_time
+-- 2. 把已建的删掉（DROP INDEX 同为 online、免锁），再重跑迁移
+DROP INDEX ix_audit_events_status_time ON audit_events;
+DROP INDEX ix_login_logs_status_time ON login_logs;
+```
+> 删掉已建索引后 `make migrate` 重跑即可；或 `alembic downgrade 0019 && alembic upgrade 0020` 重做
+> （downgrade 假定两个索引都存在，故需先把状态对齐到「两个都在」或「两个都不在」再执行）。
 
 ### 0017 — refresh token family_absolute_at 回填 + NOT NULL
 
-**风险**：`auth_refresh_tokens` 上 `add column(nullable) → UPDATE 回填 → ALTER SET NOT NULL`。
+**风险**：`auth_refresh_tokens` 上 `add column(nullable) → UPDATE 回填 → ALTER MODIFY NOT NULL`。
 该表有界（活跃 refresh token，`cleanup_expired_refresh_tokens` 定期清），体量远小于日志表，但仍注意：
-① 回填是一条带 `GROUP BY` 自连接的全表 `UPDATE`；② `ALTER ... SET NOT NULL` 会扫全表并持
-`ACCESS EXCLUSIVE` 锁（PG 12+ 更快但仍扫）。
+① 回填是一条带 `GROUP BY` 自连接的全表 `UPDATE`；② 改 `NOT NULL`（`op.alter_column`）在 MySQL 8.0
+走 `ALTER TABLE ... MODIFY`，回填后无 NULL 时可 `ALGORITHM=INPLACE`，但起止仍持元数据锁、会被长事务卡住。
 
 **关键参数（必读）**：回填用 `absolute_ttl` 默认 **30 天**（`auth_refresh_absolute_ttl_seconds=2592000`）。
 **若该部署历史上把此配置改成非 30 天**，生产首跑必须显式传历史值，否则旧 family 绝对上限被错填：
@@ -196,11 +207,12 @@ alembic -x refresh_absolute_ttl_seconds=<历史秒数> upgrade 0017
 ```
 迁移刻意不读运行时 config——当前 TTL ≠ 历史签发时 TTL（详见迁移文件注释）。
 
-**执行前检查**：
-```bash
-psql "$APP_DATABASE_URL" -c "SELECT count(*), count(DISTINCT family_id) FROM auth_refresh_tokens;"
+**执行前检查**（用你的 MySQL 客户端连上目标库执行；连接参数取自 `$APP_DATABASE_URL`，
+`mysql` CLI 不接受其 SQLAlchemy URL 形式，需拆成 `-h/-P/-u/-p` flags）：
+```sql
+SELECT count(*), count(DISTINCT family_id) FROM auth_refresh_tokens;
 ```
-PostgreSQL 历史库体量小（典型 < 数十万行）→ 直接 `make migrate`；若异常大，先评估 `UPDATE` 时长再排窗口。
+该表体量通常小（典型 < 数十万行）→ 直接 `make migrate`；若异常大，先评估 `UPDATE` 时长再排窗口。
 
 ## 其它
 

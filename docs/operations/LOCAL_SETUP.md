@@ -53,8 +53,8 @@ unique / CHECK 语义）；`compose.yaml` 已配置新建 volume 的默认值。
 
 ```bash
 MYSQL_HOST_PORT=13306 make compose-up
-APP_DATABASE_URL=mysql+asyncmy://app:app@127.0.0.1:13306/app make migrate
-APP_DATABASE_URL=mysql+asyncmy://app:app@127.0.0.1:13306/app APP_TEST_DB_ALLOW_DESTRUCTIVE=1 make test-integration
+APP_DATABASE_URL=mysql+aiomysql://app:app@127.0.0.1:13306/app make migrate
+APP_DATABASE_URL=mysql+aiomysql://app:app@127.0.0.1:13306/app APP_TEST_DB_ALLOW_DESTRUCTIVE=1 make test-integration
 ```
 
 **`make test-integration` 覆盖**（示例域 todo/tag 已删，跑 `pytest -m integration --collect-only` 自查最新数字）：

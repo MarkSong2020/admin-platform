@@ -56,7 +56,11 @@ class ScheduledTask(Base, IdMixin, TimestampMixin):
         String(128), comment="处理器键(命中代码侧registry,非任意调用目标)"
     )
     params_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict, comment="处理器参数(JSON)"
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("(JSON_OBJECT())"),
+        comment="处理器参数(JSON)",
     )
     cron_expression: Mapped[str] = mapped_column(
         String(128), comment="cron表达式(5字段标准crontab,经校验)"
@@ -141,7 +145,11 @@ class ScheduledTaskLog(Base, IdMixin, TimestampMixin):
     )
     handler_key: Mapped[str] = mapped_column(String(128), comment="处理器键(快照)")
     params_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict, comment="执行参数快照(JSON)"
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("(JSON_OBJECT())"),
+        comment="执行参数快照(JSON)",
     )
     status: Mapped[str] = mapped_column(String(16), comment="执行状态")
     started_at: Mapped[datetime | None] = mapped_column(

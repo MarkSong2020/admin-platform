@@ -12,10 +12,12 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 
+from admin_platform.audit.models import AuditEventLog
 from admin_platform.core.config import get_settings
 from admin_platform.core.security import decode_token, hash_password
 from admin_platform.db.engine import dispose_engine
 from admin_platform.db.session import db_session
+from admin_platform.domains.auth.models import LoginLog
 from admin_platform.domains.user.models import User
 from admin_platform.main import create_app
 
@@ -27,7 +29,10 @@ _PASSWORD = "correct-horse-battery-staple"
 
 async def _wipe() -> None:
     async with db_session() as session:
+        # 清 users + 无 FK 的日志表(login_logs/audit_events 不随 users 删 → 跨测试残留致 flaky，codex 审查)
         await session.execute(delete(User))
+        await session.execute(delete(LoginLog))
+        await session.execute(delete(AuditEventLog))
 
 
 @pytest_asyncio.fixture(autouse=True)

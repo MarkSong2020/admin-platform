@@ -701,8 +701,8 @@ async def _verify_claim_dedup(engine: AsyncEngine, *, workers: int, rounds: int)
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     if args.database_url is None:
         raise SystemExit("必须通过 --database-url 或 MYSQL_POC_DATABASE_URL 提供 MySQL PoC DSN")
-    if not args.database_url.startswith("mysql+asyncmy://"):
-        raise SystemExit("阶段 0 PoC 必须使用 mysql+asyncmy:// URL，确保验证目标驱动路径")
+    if not args.database_url.startswith("mysql+aiomysql://"):
+        raise SystemExit("阶段 0 PoC 必须使用 mysql+aiomysql:// URL，确保验证目标驱动路径")
     if os.environ.get("MYSQL_POC_ALLOW_SCHEMA_RESET") != "1":
         raise SystemExit("拒绝执行 DDL：请确认这是隔离 PoC 库后设置 MYSQL_POC_ALLOW_SCHEMA_RESET=1")
 

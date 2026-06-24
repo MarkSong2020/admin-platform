@@ -64,7 +64,7 @@ metadata:
   namespace: ${SERVICE_NAME}
 type: Opaque
 stringData:
-  APP_DATABASE_URL: "mysql+asyncmy://USER:PASS@HOST:3306/DB"
+  APP_DATABASE_URL: "mysql+aiomysql://USER:PASS@HOST:3306/DB"
   APP_REDIS_URL: "redis://HOST:6379/0"
 
 ---
@@ -136,7 +136,7 @@ spec:
           resources:
             requests:
               # Single-worker async uvicorn — CPU is bursty around request
-              # serialisation. Memory floor for SQLAlchemy + asyncmy pools.
+              # serialisation. Memory floor for SQLAlchemy + aiomysql pools.
               cpu: "200m"
               memory: "256Mi"
             limits:

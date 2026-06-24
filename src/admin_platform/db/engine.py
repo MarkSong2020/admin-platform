@@ -19,7 +19,7 @@ from admin_platform.core.config import get_settings
 @lru_cache(maxsize=1)
 def get_engine() -> AsyncEngine:
     settings = get_settings()
-    is_mysql = settings.database_url.startswith("mysql+asyncmy://")
+    is_mysql = settings.database_url.startswith("mysql+aiomysql://")
     engine_kwargs: dict[str, Any] = {
         "echo": settings.db_echo,
         "pool_size": settings.db_pool_size,

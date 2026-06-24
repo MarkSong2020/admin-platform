@@ -32,6 +32,9 @@ def upgrade() -> None:
             "params_json",
             sa.JSON(),
             nullable=False,
+            # DB 端默认空对象(MySQL 8.0.13+ JSON 表达式默认)：保留 PG jsonb '{}' 的 DB 契约，
+            # raw SQL/seed/回放省略该列时仍得 {}，不退化为只靠 ORM default=dict（codex 审查）。
+            server_default=sa.text("(JSON_OBJECT())"),
             comment="处理器参数(JSON)",
         ),
         sa.Column(
@@ -134,6 +137,7 @@ def upgrade() -> None:
             "params_json",
             sa.JSON(),
             nullable=False,
+            server_default=sa.text("(JSON_OBJECT())"),
             comment="执行参数快照(JSON)",
         ),
         sa.Column(
