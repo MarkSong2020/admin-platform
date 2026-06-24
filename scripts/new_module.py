@@ -527,6 +527,7 @@ TEMPLATE_MODELS = dedent('''\
 
     from __future__ import annotations
 
+    from sqlalchemy import String
     from sqlalchemy.orm import Mapped, mapped_column
 
     from {service}.db.base import Base, IdMixin, TimestampMixin
@@ -549,7 +550,8 @@ TEMPLATE_MODELS = dedent('''\
 
         # IdMixin 提供 id（BIGINT 主键）、TimestampMixin 提供 created_at/updated_at（均带 comment）。
         # 业务列必带中文 comment（机检门禁 tests/unit/test_column_comments.py）。
-        name: Mapped[str] = mapped_column(comment="名称")
+        # String 必带长度：MySQL VARCHAR 强制要长度（PG 允许无长度），无长度会在 schema 编译期报错。
+        name: Mapped[str] = mapped_column(String(128), comment="名称")
 ''')
 
 
