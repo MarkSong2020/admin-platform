@@ -144,6 +144,21 @@ fresh clone / 全新 PostgreSQL 历史基线 DB 无此问题。
 > `0013–0021` 已是 MySQL 迁移链。生产 / 共享库**首跑前**按本节评估——这两条是迁移链里唯二
 > 碰大表 / 长锁的。⚠️ 本仓 `0013–0021` 仅本地 dev + CI 临时容器跑过，**生产 / 共享库迁移待单独授权**。
 
+### 首跑前：核对既有表存储引擎
+
+迁移前置 `assert_mysql_database_capabilities` 会校验 `@@default_storage_engine = InnoDB`，但它只
+**管控新建表继承的默认引擎**——若目标库是既有 / 共享库，且历史上曾在非 InnoDB 默认引擎下建过业务表
+（后来才把默认值改回 InnoDB），preflight 会放行，但那些既有表仍是 MyISAM，FK / CHECK / `FOR UPDATE`
+行锁静默失效。共享 / 既有库首跑前用只读 SQL 审计一次（无非 InnoDB 行才算干净）：
+```sql
+SELECT TABLE_NAME, ENGINE
+FROM information_schema.TABLES
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_TYPE = 'BASE TABLE'
+  AND ENGINE <> 'InnoDB';
+```
+有命中则先 `ALTER TABLE <name> ENGINE=InnoDB` 转换（评估锁 / 时长，同下方 0020 在线 DDL 注意事项）。
+
 ### 0020 — audit_events / login_logs 分页复合索引
 
 **风险**：两张 append-only 日志热表，行数随运行无限增长。建二级索引若退化成持表锁的 `COPY`

@@ -145,6 +145,12 @@ _MYSQL_DUPLICATE_ENTRY = 1062
 # MySQL 8.0.16+ CHECK 约束违反：driver 抛 errno 3819，SQLAlchemy 归到 OperationalError
 # （非 IntegrityError，真库实测）。是「数据非法」类，需单独从宽类 OperationalError 里挑出映 422。
 _MYSQL_CHECK_VIOLATION = 3819
+# depts/menus 的 self-parent 防护 trigger（0004/0006）用 SIGNAL SQLSTATE '45000' 抛 errno 1644，
+# MESSAGE_TEXT = 约束名。真库实测 orig.args=(1644, 'ck_depts_not_self_parent')，SQLAlchemy 归到
+# OperationalError。这是 DB 兜底的「数据非法」（service 已预检，仅 raw/内部写路径触达），与 CHECK(3819)
+# 同类 → 422。SIGNAL 是通用机制，只认这两个已知 self-parent 信号，其它 1644 保持 500 不误判。
+_MYSQL_SIGNAL_EXCEPTION = 1644
+_MYSQL_SELF_PARENT_SIGNALS = frozenset({"ck_depts_not_self_parent", "ck_menus_not_self_parent"})
 _MYSQL_KEY_RE = re.compile(r"for key ['`\"](?P<key>[^'`\"]+)['`\"]", re.IGNORECASE)
 _MYSQL_CONSTRAINT_RE = re.compile(r"CONSTRAINT [`'\"](?P<constraint>[^`'\"]+)[`'\"]")
 
@@ -210,6 +216,15 @@ def _dbapi_error_code(orig: object) -> int | None:
     args = getattr(orig, "args", ())
     if args and isinstance(args[0], int):
         return int(args[0])
+    return None
+
+
+def _dbapi_signal_message(orig: object) -> str | None:
+    """取 SIGNAL trigger 的 MESSAGE_TEXT（aiomysql/MySQL orig.args=(errno, message)，真库实测）。"""
+    # 跳过 args[0]（errno）取后续首个字符串作 MESSAGE_TEXT，避免硬编码下标长度。
+    for value in getattr(orig, "args", ())[1:]:
+        if isinstance(value, str):
+            return value
     return None
 
 
@@ -444,10 +459,17 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(OperationalError)
     async def _operational_error(request: Request, exc: OperationalError) -> JSONResponse:
-        # OperationalError 是宽类(连接断 / 死锁 / 锁等待超时 / CHECK 违反)。只有 CHECK(3819)是
-        # 调用方数据非法 → 422；其余(连接/死锁等)是服务端/瞬态问题，保持 500 语义不误导客户端。
-        if _dbapi_error_code(exc.orig) == _MYSQL_CHECK_VIOLATION:
+        # OperationalError 是宽类(连接断 / 死锁 / 锁等待超时 / CHECK 违反 / self-parent SIGNAL)。
+        # 「数据非法」类挑出映 422：CHECK(3819)，以及 depts/menus self-parent trigger 的 SIGNAL(1644，
+        # 仅认已知约束名)。其余(连接/死锁/未知 SIGNAL 等)是服务端/瞬态问题，保持 500 不误导客户端。
+        errno = _dbapi_error_code(exc.orig)
+        if errno == _MYSQL_CHECK_VIOLATION:
             return _constraint_violation_response(request, exc, "check")
+        if (
+            errno == _MYSQL_SIGNAL_EXCEPTION
+            and _dbapi_signal_message(exc.orig) in _MYSQL_SELF_PARENT_SIGNALS
+        ):
+            return _constraint_violation_response(request, exc, "self_parent")
         return _internal_error_response(request, exc)
 
     @app.exception_handler(Exception)

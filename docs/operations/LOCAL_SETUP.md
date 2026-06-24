@@ -41,8 +41,9 @@ make compose-down      # 停 Docker
 ```
 
 MySQL schema 必须使用 `utf8mb4_0900_bin` 默认 collation（保留 PostgreSQL 的大小写敏感
-unique / CHECK 语义）；`compose.yaml` 已配置新建 volume 的默认值。若旧本地 volume 是迁移前
-创建的，`make migrate` 会在 Alembic 入口报错；确认是 disposable dev 库后再执行
+unique / CHECK 语义），且默认存储引擎须为 `InnoDB`（业务表不显式声明引擎、继承默认值，非 InnoDB
+下 FK/CHECK/`FOR UPDATE` 行锁会静默失效）；`compose.yaml` 已配置新建 volume 的默认值。若旧本地
+volume 是迁移前创建的，`make migrate` 会在 Alembic 入口报错；确认是 disposable dev 库后再执行
 `docker compose down -v` 重建。
 
 迁移链还会创建 `depts` / `menus` 的 self-parent 防护 trigger。若 MySQL 开启 binary logging，
