@@ -165,6 +165,23 @@ class _MockMysqlDeadlock(Exception):
         super().__init__(1213, "Deadlock found when trying to get lock; try restarting transaction")
 
 
+class _MockMysqlSelfParentSignal(Exception):
+    """模拟 depts self-parent trigger 的 SIGNAL（errno 1644 + 约束名 MESSAGE_TEXT）。
+
+    真库实测（mysql:8.0 + aiomysql）：orig.args == (1644, 'ck_depts_not_self_parent')。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(1644, "ck_depts_not_self_parent")
+
+
+class _MockMysqlGenericSignal(Exception):
+    """模拟未知来源的 SIGNAL（errno 1644 但非已知 self-parent 约束名）→ 须保持 500。"""
+
+    def __init__(self) -> None:
+        super().__init__(1644, "some_unrelated_user_signal")
+
+
 def test_integrity_registered_constraint_returns_typed_409(app: FastAPI) -> None:
     """注册过的约束 → 409 + typed code，响应 body 不暴露 DB 约束名。"""
     register_unique_constraint("uq_alpha_col", "test.ALPHA_DUPLICATE", "Alpha already exists")
@@ -370,6 +387,38 @@ def test_non_check_operational_error_stays_500(app: FastAPI) -> None:
 
     with TestClient(app, raise_server_exceptions=False) as c:
         resp = c.post("/__deadlock")
+
+    assert resp.status_code == 500
+    assert resp.json()["type"] == "framework.INTERNAL_ERROR"
+
+
+def test_self_parent_signal_returns_422_constraint_violation(app: FastAPI) -> None:
+    """depts/menus self-parent trigger 的 SIGNAL(errno 1644)是 DB 兜底的数据非法，
+    与 CHECK 同类挑出 → 422，不让 raw/内部写路径退化成 500。"""
+
+    @app.post("/__self-parent")
+    async def handler() -> None:
+        raise OperationalError(
+            "INSERT INTO ...", {"params": None}, orig=_MockMysqlSelfParentSignal()
+        )
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__self-parent")
+
+    assert resp.status_code == 422
+    assert resp.json()["type"] == "framework.CONSTRAINT_VIOLATION"
+
+
+def test_unknown_signal_operational_error_stays_500(app: FastAPI) -> None:
+    """errno 1644 但非已知 self-parent 约束名（其它来源 SIGNAL）→ 保持 500，
+    防把任意 SIGNAL 误判成 422 客户端数据非法。"""
+
+    @app.post("/__unknown-signal")
+    async def handler() -> None:
+        raise OperationalError("INSERT INTO ...", {"params": None}, orig=_MockMysqlGenericSignal())
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/__unknown-signal")
 
     assert resp.status_code == 500
     assert resp.json()["type"] == "framework.INTERNAL_ERROR"

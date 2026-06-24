@@ -59,7 +59,7 @@ readinessProbe:
 | 项 | env | 注意 |
 |---|---|---|
 | `APP_ENVIRONMENT` | `production` | **门禁总开关**。设 `production` 触发 `core.config` 生产门禁：缺 `auth_enabled` / 空 pepper / `debug=true` / `auth_public_paths` 含命名空间宽前缀（`/api` 等）→ startup fail-fast。**生产镜像 Dockerfile 已默认 `production`**；本地 / CI 不跑镜像（host 直跑 → 默认 `local`）。如用本镜像跑非生产须显式覆盖 `local` |
-| `APP_DATABASE_URL` | `mysql+aiomysql://USER:PASS@HOST:3306/DB` | **绝不**用默认值 `app:app@localhost`；生产走 secret 注入；MySQL 版本需 ≥ 8.0.16，schema 默认 collation 必须是 `utf8mb4_0900_bin`，开启 binlog 时需 `log_bin_trust_function_creators=1` |
+| `APP_DATABASE_URL` | `mysql+aiomysql://USER:PASS@HOST:3306/DB` | **绝不**用默认值 `app:app@localhost`；生产走 secret 注入；MySQL 版本需 ≥ 8.0.16，schema 默认 collation 必须是 `utf8mb4_0900_bin`，默认存储引擎必须是 `InnoDB`，开启 binlog 时需 `log_bin_trust_function_creators=1`（这几条由迁移前置 `assert_mysql_database_capabilities` fail-fast 校验） |
 | `APP_REDIS_URL` | `redis://...:6379/0` | idempotency 用；不可达时降级，但金额场景应监控 Redis 健康 |
 | `APP_DEBUG` | `False` | **绝不**在生产 / staging 设 True（会让错误响应填诊断信息）|
 | `APP_LOG_LEVEL` | `INFO` | DEBUG 会量 |

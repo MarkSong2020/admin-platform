@@ -1,9 +1,11 @@
 """MySQL 迁移前能力校验。
 
-PostgreSQL → MySQL 迁移依赖三条实例/库级前提：
+PostgreSQL → MySQL 迁移依赖四条实例/库级前提：
 1. MySQL >= 8.0.16，否则 CHECK 约束会被静默忽略；
 2. schema 默认 collation 为 ``utf8mb4_0900_bin``，否则 unique/check 比较会变成大小写不敏感。
-3. 开启 binary logging 时需 ``log_bin_trust_function_creators=1``，否则迁移用户无法创建 trigger。
+3. 默认存储引擎为 ``InnoDB``，否则业务表（不显式声明 engine，继承 ``@@default_storage_engine``）
+   会建成 MyISAM 等非事务引擎，FK / CHECK / ``SELECT ... FOR UPDATE`` 行锁静默失效。
+4. 开启 binary logging 时需 ``log_bin_trust_function_creators=1``，否则迁移用户无法创建 trigger。
 """
 
 from __future__ import annotations
@@ -12,6 +14,10 @@ from sqlalchemy.engine import Connection
 
 MIN_MYSQL_CHECK_VERSION = (8, 0, 16)
 REQUIRED_MYSQL_COLLATION = "utf8mb4_0900_bin"
+# 业务表不显式声明 engine，建表时继承 ``@@default_storage_engine``。app_locks 在 0021 显式
+# ENGINE=InnoDB 受保护，但 users/depts/menus/refresh/scheduled_task_logs 等全靠默认引擎——非
+# InnoDB 时 FK/CHECK/行锁语义退化，RBAC 外键、调度 claim 互斥、refresh 事务锁均不可靠（codex 高审）。
+REQUIRED_MYSQL_ENGINE = "InnoDB"
 _MYSQL_VERSION_COMPONENTS = 3
 # app_locks.name 列最小宽度（须与 db.locks._LOCK_NAME_MAX_LENGTH 一致；utf8mb4 下单列索引
 # ≤767B/4≈191）。健康校验据此拒绝列宽不足的既存表，防长锁名插入失败。
@@ -34,10 +40,11 @@ def validate_mysql_capability_values(
     version: str,
     collation: str | None,
     *,
+    default_storage_engine: str = REQUIRED_MYSQL_ENGINE,
     log_bin_enabled: bool = False,
     trust_function_creators: bool = True,
 ) -> None:
-    """校验 MySQL 版本、schema 默认 collation 与 trigger 创建前提。"""
+    """校验 MySQL 版本、schema 默认 collation、默认存储引擎与 trigger 创建前提。"""
     parsed_version = parse_mysql_version(version)
     if parsed_version < MIN_MYSQL_CHECK_VERSION:
         minimum = ".".join(str(part) for part in MIN_MYSQL_CHECK_VERSION)
@@ -50,6 +57,12 @@ def validate_mysql_capability_values(
             "MySQL database 默认 collation 必须是 "
             f"{REQUIRED_MYSQL_COLLATION}，当前 {collation!r}。否则 unique/check 会退化为"
             "大小写不敏感语义，无法等价 PostgreSQL。"
+        )
+    if default_storage_engine.upper() != REQUIRED_MYSQL_ENGINE.upper():
+        raise RuntimeError(
+            f"MySQL 默认存储引擎必须是 {REQUIRED_MYSQL_ENGINE}，当前 {default_storage_engine!r}。"
+            "业务表不显式声明 engine、继承默认值，非 InnoDB（如 MyISAM）下 FK/CHECK/"
+            "SELECT ... FOR UPDATE 行锁静默失效，RBAC 外键、调度 claim 互斥、refresh 事务锁均不可靠。"
         )
     if log_bin_enabled and not trust_function_creators:
         raise RuntimeError(
@@ -139,7 +152,7 @@ def assert_app_locks_table_healthy(connection: Connection) -> None:
 
 
 def assert_mysql_database_capabilities(connection: Connection) -> None:
-    """迁移前校验 MySQL 版本与 schema collation；非 MySQL 方言跳过。"""
+    """迁移前校验 MySQL 版本、schema collation 与默认存储引擎；非 MySQL 方言跳过。"""
     if connection.dialect.name != "mysql":
         return
     version = str(connection.exec_driver_sql("SELECT VERSION()").scalar_one())
@@ -150,6 +163,9 @@ def assert_mysql_database_capabilities(connection: Connection) -> None:
         WHERE SCHEMA_NAME = DATABASE()
         """
     ).scalar_one_or_none()
+    default_storage_engine = str(
+        connection.exec_driver_sql("SELECT @@default_storage_engine").scalar_one()
+    )
     log_bin_enabled = bool(int(connection.exec_driver_sql("SELECT @@log_bin").scalar_one()))
     trust_function_creators = bool(
         int(connection.exec_driver_sql("SELECT @@log_bin_trust_function_creators").scalar_one())
@@ -157,6 +173,7 @@ def assert_mysql_database_capabilities(connection: Connection) -> None:
     validate_mysql_capability_values(
         version,
         str(collation) if collation is not None else None,
+        default_storage_engine=default_storage_engine,
         log_bin_enabled=log_bin_enabled,
         trust_function_creators=trust_function_creators,
     )
